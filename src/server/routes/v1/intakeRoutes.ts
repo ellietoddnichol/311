@@ -1,8 +1,47 @@
 import { Router } from 'express';
+import { runIntakePipeline } from '../../services/parseRouterService.ts';
+// Keep old extraction for backward-compat (legacy path still available)
 import { extractIntakeFromGemini } from '../../services/geminiIntakeExtraction.ts';
 
 export const intakeRouter = Router();
 
+// New pipeline endpoint - handles all file types with full pipeline
+intakeRouter.post('/parse', async (req, res) => {
+  try {
+    const fileName = String(req.body?.fileName || '').trim();
+    const mimeType = String(req.body?.mimeType || 'application/octet-stream').trim();
+    const dataBase64 = req.body?.dataBase64 ? String(req.body.dataBase64) : undefined;
+    const extractedText = req.body?.extractedText ? String(req.body.extractedText) : undefined;
+    const catalogItems = Array.isArray(req.body?.catalogItems) ? req.body.catalogItems : [];
+    const generateProposalAssist = Boolean(req.body?.generateProposalAssist);
+    const useWebEnrichment = Boolean(req.body?.useWebEnrichment);
+
+    if (!fileName) {
+      return res.status(400).json({ error: 'fileName is required.' });
+    }
+
+    if (!dataBase64 && !extractedText) {
+      return res.status(400).json({ error: 'Either dataBase64 or extractedText is required.' });
+    }
+
+    const result = await runIntakePipeline({
+      fileName,
+      mimeType,
+      dataBase64,
+      extractedText,
+      catalogItems,
+      generateProposalAssist,
+      useWebEnrichment,
+    });
+
+    return res.json({ data: result });
+  } catch (error: any) {
+    console.error('[IntakeRoutes] /parse error:', error);
+    return res.status(500).json({ error: error.message || 'Intake pipeline failed.' });
+  }
+});
+
+// Legacy endpoint - maintained for backward compatibility
 intakeRouter.post('/extract', async (req, res) => {
   try {
     const fileName = String(req.body?.fileName || '').trim();
