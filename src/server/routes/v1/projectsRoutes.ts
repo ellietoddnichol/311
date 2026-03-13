@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { archiveProject, createProject, getProject, listProjects, updateProject } from '../../repos/projectsRepo.ts';
+import { archiveProject, createProject, deleteProject, getProject, listProjects, updateProject } from '../../repos/projectsRepo.ts';
 import { createProjectFile, deleteProjectFile, getProjectFile, listProjectFiles } from '../../repos/projectFilesRepo.ts';
 
 export const projectsRouter = Router();
@@ -31,13 +31,22 @@ projectsRouter.put('/:projectId', (req, res) => {
   return res.json({ data: project });
 });
 
-projectsRouter.delete('/:projectId', (req, res) => {
+projectsRouter.post('/:projectId/archive', (req, res) => {
   const archived = archiveProject(req.params.projectId);
   if (!archived) {
     return res.status(404).json({ error: 'Project not found' });
   }
 
   return res.json({ data: { archived: true } });
+});
+
+projectsRouter.delete('/:projectId', (req, res) => {
+  const deleted = deleteProject(req.params.projectId);
+  if (!deleted) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+
+  return res.json({ data: { deleted: true } });
 });
 
 projectsRouter.get('/:projectId/files', (req, res) => {

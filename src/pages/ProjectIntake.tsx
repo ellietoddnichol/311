@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileUp, FolderInput, PlusCircle, Save, Search, Upload, WandSparkles } from 'lucide-react';
 import { api } from '../services/api';
 import { PricingMode, ProjectJobConditions, ProjectRecord, RoomRecord, TakeoffLineRecord } from '../shared/types/estimator';
+import { IntakeParseResponse } from '../shared/types/intake';
 import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../shared/utils/jobConditions';
 import { CatalogItem } from '../types';
 
@@ -27,6 +28,9 @@ interface LineSuggestion {
   laborIncluded: boolean | null;
   materialIncluded: boolean | null;
   matched: boolean;
+  confidence: number;
+  matchStatus: 'matched' | 'needs_review' | 'unmatched' | 'ignored';
+  matchExplanation: string;
 }
 
 type SourceKind =
@@ -205,6 +209,44 @@ function mergeSourceNote(currentNotes: string | null | undefined, sourceLabel: s
   if (!existing) return sourceNote;
   if (existing.includes(sourceNote)) return existing;
   return `${sourceNote}; ${existing}`;
+}
+
+function derivePricingModeFromIntake(result: IntakeParseResponse, fallback: PricingMode | undefined): PricingMode | undefined {
+  const laborBasis = result.project.pricingMode !== 'unspecified' ? result.project.pricingMode : result.assumptions.laborBasis;
+  if (laborBasis === 'material_only') return 'material_only';
+  if (laborBasis === 'install_only') return 'labor_only';
+  if (laborBasis === 'labor_and_material') return 'labor_and_material';
+  return fallback;
+}
+
+function deriveJobConditionUpdatesFromIntake(result: IntakeParseResponse): Partial<ProjectJobConditions> {
+  const text = [
+    ...result.assumptions.projectConditions,
+    ...result.assumptions.specialNotes,
+    result.project.scopeSummary,
+  ].join(' ').toLowerCase();
+  const updates: Partial<ProjectJobConditions> = {};
+
+  if (result.assumptions.deliveryIncluded === true || /delivery/.test(text)) {
+    updates.deliveryRequired = true;
+    updates.deliveryPricingMode = 'included';
+  }
+  if (result.assumptions.union === true || /\bunion\b/.test(text)) {
+    updates.unionWage = true;
+    updates.laborRateBasis = 'union';
+  }
+  if (result.assumptions.prevailingWage === true || /prevailing wage/.test(text)) {
+    updates.prevailingWage = true;
+    updates.laborRateBasis = 'prevailing';
+  }
+  if (/after[- ]hours|night work|off[- ]hours/.test(text)) updates.afterHoursWork = true;
+  if (/phased|multi[- ]phase/.test(text)) updates.phasedWork = true;
+  if (/occupied/.test(text)) updates.occupiedBuilding = true;
+  if (/restricted access|limited access|secure area/.test(text)) updates.restrictedAccess = true;
+  if (/remote|travel/.test(text)) updates.remoteTravel = true;
+  if (/schedule compression|fast[- ]track|accelerated/.test(text)) updates.scheduleCompression = true;
+
+  return updates;
 }
 
 function normalizeHeader(value: string): string {
@@ -880,6 +922,8 @@ export function ProjectIntake() {
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [uploadedText, setUploadedText] = useState('');
   const [intakeWarnings, setIntakeWarnings] = useState<string[]>([]);
+  const [intakeServerResult, setIntakeServerResult] = useState<IntakeParseResponse | null>(null);
+  const [proposalDraftPreview, setProposalDraftPreview] = useState({ intro: '', terms: '', exclusions: '', clarifications: '' });
 
   const [createConfirmedOnly, setCreateConfirmedOnly] = useState(true);
   const [catalogPickerLineId, setCatalogPickerLineId] = useState<string | null>(null);
@@ -923,12 +967,12 @@ export function ProjectIntake() {
   );
 
   const matchedSuggestions = useMemo(
-    () => lineSuggestions.filter((line) => line.matched),
+    () => lineSuggestions.filter((line) => line.matchStatus === 'matched'),
     [lineSuggestions]
   );
 
   const unmatchedSuggestions = useMemo(
-    () => lineSuggestions.filter((line) => !line.matched),
+    () => lineSuggestions.filter((line) => line.matchStatus !== 'matched'),
     [lineSuggestions]
   );
 
@@ -976,10 +1020,80 @@ export function ProjectIntake() {
   }
 
   function hasUsableTakeoffSource(): boolean {
-    return !!takeoffFileText.trim() || !!takeoffImportText.trim() || !!sourceProjectId || takeoffStructuredLines.length > 0;
+    return !!takeoffFileText.trim() || !!takeoffImportText.trim() || !!sourceProjectId || takeoffStructuredLines.length > 0 || !!intakeServerResult;
+  }
+
+  function applyIntakeParseResult(result: IntakeParseResponse, sourceLabel: string) {
+    setIntakeServerResult(result);
+    setIntakeWarnings(result.diagnostics.warnings || []);
+    setProposalDraftPreview({
+      intro: result.proposalDraft.intro || '',
+      terms: result.proposalDraft.terms || '',
+      exclusions: (result.proposalDraft.exclusions || []).join('\n'),
+      clarifications: (result.proposalDraft.clarifications || []).join('\n'),
+    });
+
+    setProjectDraft((prev) => ({
+      ...prev,
+      projectName: prev.projectName || result.project.projectName || prev.projectName,
+      projectNumber: prev.projectNumber || result.project.projectNumber || prev.projectNumber,
+      clientName: prev.clientName || result.project.client || result.project.gc || prev.clientName,
+      address: prev.address || result.project.address || prev.address,
+      bidDate: prev.bidDate || normalizeDateString(result.project.bidDate) || prev.bidDate,
+      pricingMode: derivePricingModeFromIntake(result, prev.pricingMode),
+      specialNotes: prev.specialNotes || [...result.assumptions.specialNotes, ...result.assumptions.projectConditions].join(' | ') || prev.specialNotes,
+      jobConditions: normalizeProjectJobConditions({
+        ...(prev.jobConditions || createDefaultProjectJobConditions()),
+        ...deriveJobConditionUpdatesFromIntake(result),
+      }),
+      notes: mergeSourceNote(prev.notes, sourceLabel),
+    }));
+
+    const roomNames = Array.from(new Set([
+      ...result.rooms.map((room) => normalizeRoomName(room.name)),
+      ...result.parsedLines.map((line) => normalizeRoomName(line.roomArea || 'General')),
+    ].filter(Boolean)));
+
+    setRoomSuggestions((roomNames.length > 0 ? roomNames : ['General']).map((roomName) => ({
+      id: makeId('room-suggest'),
+      include: true,
+      roomName,
+    })));
+
+    setLineSuggestions(result.parsedLines.map((line) => {
+      const matchedCatalog = line.matchedCatalogItemId ? catalog.find((item) => item.id === line.matchedCatalogItemId) : null;
+      return {
+        id: makeId('line-suggest'),
+        include: line.matchStatus !== 'ignored',
+        roomName: normalizeRoomName(line.roomArea || 'General'),
+        rawText: line.description || line.itemName,
+        itemName: line.itemName,
+        description: matchedCatalog?.description || line.description || line.itemName,
+        qty: line.quantity,
+        unit: line.unit || matchedCatalog?.uom || 'EA',
+        category: line.category || matchedCatalog?.category || null,
+        sourceReference: line.sourceReference || sourceLabel,
+        sku: line.matchedSku || matchedCatalog?.sku || null,
+        catalogItemId: line.matchedCatalogItemId || null,
+        materialCost: matchedCatalog?.baseMaterialCost || 0,
+        laborMinutes: matchedCatalog?.baseLaborMinutes || 0,
+        notes: [line.notes, line.webEnrichment?.summary].filter(Boolean).join(' | '),
+        laborIncluded: null,
+        materialIncluded: null,
+        matched: line.matchStatus === 'matched',
+        confidence: line.confidence,
+        matchStatus: line.matchStatus,
+        matchExplanation: line.matchReason,
+      } as LineSuggestion;
+    }));
   }
 
   async function loadTakeoffSource() {
+    if (intakeServerResult?.parsedLines?.length) {
+      applyIntakeParseResult(intakeServerResult, takeoffFileName || 'uploaded takeoff');
+      return;
+    }
+
     const combinedText = [takeoffFileText, takeoffImportText].filter(Boolean).join('\n');
     const hasStructuredSource = takeoffStructuredLines.length > 0;
     const hasTextSource = combinedText.trim().length > 0;
@@ -1036,7 +1150,10 @@ export function ProjectIntake() {
           notes: `Imported from optional project source ${line.id}`,
           laborIncluded: null,
           materialIncluded: null,
-          matched: !!match
+          matched: !!match,
+          confidence: match ? 0.92 : 0.35,
+          matchStatus: match ? 'matched' : 'unmatched',
+          matchExplanation: match ? 'Imported from existing project/catalog context.' : 'No reliable catalog match from project source.',
         };
       });
     }
@@ -1104,6 +1221,9 @@ export function ProjectIntake() {
           laborIncluded: line.laborIncluded,
           materialIncluded: line.materialIncluded,
           matched: !!match,
+          confidence: match ? 0.82 : 0.4,
+          matchStatus: match ? 'matched' : 'unmatched',
+          matchExplanation: match ? 'Deterministic spreadsheet match.' : 'Spreadsheet row needs catalog review.',
         } as LineSuggestion;
       });
     }
@@ -1168,6 +1288,9 @@ export function ProjectIntake() {
         laborIncluded: line.laborIncluded,
         materialIncluded: line.materialIncluded,
         matched: !!match,
+        confidence: match ? 0.74 : 0.32,
+        matchStatus: match ? 'matched' : 'unmatched',
+        matchExplanation: match ? 'Deterministic text match.' : 'Needs catalog review.',
       } as LineSuggestion;
     });
     setLineSuggestions(dedupeSuggestions([...importedFromProject, ...importedFromStructured, ...importedFromText]));
@@ -1177,6 +1300,7 @@ export function ProjectIntake() {
     setTakeoffUploadedFile(file);
     setTakeoffFileName(file.name);
     setIntakeWarnings([]);
+    setIntakeServerResult(null);
     setTakeoffUploadState('processing');
     setTakeoffUploadMessage('Reading uploaded takeoff file...');
     const fileName = file.name.toLowerCase();
@@ -1238,43 +1362,9 @@ export function ProjectIntake() {
                 notes: row.notes,
               })),
             });
-
-            const quality = evaluateGeminiQuality(gemini);
-            if (quality.warnings.length > 0) {
-              setIntakeWarnings((prev) => Array.from(new Set([...prev, ...quality.warnings])));
-            }
-
             if (takeoffFileName !== file.name) return;
-
-            if (gemini.projectName && !structuredResult.dominantProjectName) {
-              setTakeoffStructuredProjectName(gemini.projectName);
-            }
-
-            if (quality.usableLineCount > 0 && gemini.parsedLines.length === structuredResult.rows.length) {
-              const rowAlignmentSafe = structuredResult.rows.every((row, index) => {
-                const enriched = gemini.parsedLines[index];
-                if (!enriched) return false;
-                return areSpreadsheetRowsAligned(row, enriched);
-              });
-
-              if (rowAlignmentSafe) {
-                setTakeoffStructuredLines((prev) => prev.map((row, index) => {
-                  const enriched = gemini.parsedLines[index];
-                  if (!enriched) return row;
-                  return {
-                    ...row,
-                    category: row.category || enriched.category || '',
-                    notes: mergeSpreadsheetNotes(row.notes, enriched.notes),
-                  };
-                }));
-                setTakeoffUploadMessage(`Parsed ${structuredResult.rows.length} structured takeoff lines from ${file.name}. AI enrichment applied.`);
-              } else {
-                setIntakeWarnings((prev) => Array.from(new Set([
-                  ...prev,
-                  'Gemini spreadsheet enrichment was skipped because row alignment was not reliable.',
-                ])));
-              }
-            }
+            applyIntakeParseResult(gemini, file.name);
+            setTakeoffUploadMessage(`Parsed ${gemini.parsedLines.length} takeoff lines from ${file.name}. ${gemini.strategy.summary}`);
           } catch (error) {
             setIntakeWarnings((prev) => Array.from(new Set([...prev, buildGeminiFallbackWarning(error, 'spreadsheet')])));
           }
@@ -1316,31 +1406,10 @@ export function ProjectIntake() {
               dataBase64: sourceType === 'pdf' ? await toBase64Payload(file) : undefined,
               extractedText: sourceType === 'document' ? extracted : undefined,
             });
-
-            const quality = evaluateGeminiQuality(gemini);
-            if (quality.warnings.length > 0) {
-              setIntakeWarnings((prev) => Array.from(new Set([...prev, ...quality.warnings])));
-            }
-
             if (takeoffFileName !== file.name) return;
-
-            const parsedRows = geminiLinesToParsedRows(gemini.parsedLines, file.name);
-            if (parsedRows.length > 0) {
-              setTakeoffStructuredLines(parsedRows);
-              setTakeoffStructuredProjectName(gemini.projectName || '');
-              setTakeoffStructuredKind(fileKind === 'pdf-document' ? 'pdf-document' : 'text-document');
-              setTakeoffHasRoomColumn(gemini.rooms.length > 0 || parsedRows.some((row) => !!row.roomName));
-              setProjectDraft((prev) => ({
-                ...prev,
-                projectName: prev.projectName || gemini.projectName || prev.projectName,
-                projectNumber: prev.projectNumber || gemini.projectNumber || prev.projectNumber,
-                clientName: prev.clientName || gemini.client || prev.clientName,
-                address: prev.address || gemini.address || prev.address,
-                bidDate: prev.bidDate || normalizeDateString(gemini.bidDate) || prev.bidDate,
-              }));
-              setTakeoffFileText('');
-              setTakeoffUploadMessage(`Parsed ${parsedRows.length} takeoff lines from ${file.name}. AI extraction applied.`);
-            }
+            applyIntakeParseResult(gemini, file.name);
+            setTakeoffFileText('');
+            setTakeoffUploadMessage(`Parsed ${gemini.parsedLines.length} takeoff lines from ${file.name}. ${gemini.strategy.summary}`);
           } catch (error) {
             setIntakeWarnings((prev) => Array.from(new Set([...prev, buildGeminiFallbackWarning(error, 'document')])));
           }
@@ -1361,6 +1430,7 @@ export function ProjectIntake() {
     setUploadedDocumentFile(file);
     setUploadedFileName(file.name);
     setIntakeWarnings([]);
+    setIntakeServerResult(null);
 
     const lower = file.name.toLowerCase();
     const mime = (file.type || '').toLowerCase();
@@ -1400,67 +1470,8 @@ export function ProjectIntake() {
         dataBase64: sourceType === 'pdf' ? await toBase64Payload(file) : undefined,
         extractedText: sourceType === 'document' ? text : undefined,
       });
-
-      const quality = evaluateGeminiQuality(gemini);
-      setIntakeWarnings(quality.warnings);
-
-      if (quality.hasMetadata) {
-        setProjectDraft((prev) => ({
-          ...prev,
-          projectName: gemini.projectName || prev.projectName,
-          projectNumber: gemini.projectNumber || prev.projectNumber,
-          clientName: gemini.client || prev.clientName,
-          address: gemini.address || prev.address,
-          bidDate: normalizeDateString(gemini.bidDate) || prev.bidDate,
-          notes: mergeSourceNote(prev.notes, file.name),
-        }));
-      }
-
-      if (gemini.parsedLines.length > 0) {
-        const parsedRows = geminiLinesToParsedRows(gemini.parsedLines, file.name);
-        const geminiRoomSet = new Set<string>(gemini.rooms.map((room) => normalizeRoomName(room)).filter(Boolean));
-        parsedRows.forEach((row) => {
-          if (row.roomName) geminiRoomSet.add(normalizeRoomName(row.roomName));
-        });
-
-        const rooms = Array.from(geminiRoomSet);
-        setRoomSuggestions(
-          (rooms.length > 0 ? rooms : ['General']).map((roomName) => ({
-            id: makeId('room-suggest'),
-            include: true,
-            roomName: normalizeRoomName(roomName)
-          }))
-        );
-
-        const parsed = parsedRows.map((line) => {
-          const roomFromLine = line.roomName || 'General';
-          const match = suggestCatalogMatch({ itemName: line.itemName, category: line.category, description: line.description, rawText: line.description }, catalog);
-
-          return {
-            id: makeId('line-suggest'),
-            include: true,
-            roomName: roomFromLine,
-            rawText: line.description,
-            itemName: line.itemName,
-            description: match?.description || line.description,
-            qty: line.qty,
-            unit: line.unit || match?.uom || 'EA',
-            category: line.category || match?.category || null,
-            sourceReference: file.name,
-            sku: match?.sku || null,
-            catalogItemId: match?.id || null,
-            materialCost: match?.baseMaterialCost || 0,
-            laborMinutes: match?.baseLaborMinutes || 0,
-            notes: line.notes || `Parsed from ${file.name}`,
-            laborIncluded: line.laborIncluded,
-            materialIncluded: line.materialIncluded,
-            matched: !!match
-          } as LineSuggestion;
-        });
-
-        setLineSuggestions(dedupeSuggestions(parsed));
-        return;
-      }
+      applyIntakeParseResult(gemini, file.name);
+      return;
     } catch (_error) {
       // Fall through to raw-line preservation parser.
       setIntakeWarnings(['Gemini extraction failed. Preserving raw lines for manual review.']);
@@ -1509,7 +1520,10 @@ export function ProjectIntake() {
         notes: line.notes || `Parsed from ${file.name}`,
         laborIncluded: null,
         materialIncluded: null,
-        matched: !!match
+        matched: !!match,
+        confidence: match ? 0.72 : 0.28,
+        matchStatus: match ? 'matched' : 'unmatched',
+        matchExplanation: match ? 'Deterministic document fallback match.' : 'Fallback parse needs catalog review.',
       } as LineSuggestion;
     });
 
@@ -1534,6 +1548,9 @@ export function ProjectIntake() {
           notes: `${line.notes}; matched to catalog ${item.sku}`,
           laborIncluded: line.laborIncluded,
           materialIncluded: line.materialIncluded,
+          confidence: Math.max(line.confidence, 0.96),
+          matchStatus: 'matched',
+          matchExplanation: 'Manually confirmed against catalog.',
         };
       })
     );
@@ -1582,7 +1599,7 @@ export function ProjectIntake() {
   function ignoreLine(lineId: string) {
     setLineSuggestions((prev) =>
       prev.map((line) =>
-        line.id === lineId ? { ...line, include: false, notes: `${line.notes}; ignored` } : line
+        line.id === lineId ? { ...line, include: false, matchStatus: 'ignored', notes: `${line.notes}; ignored` } : line
       )
     );
   }
@@ -1590,7 +1607,7 @@ export function ProjectIntake() {
   function reincludeLine(lineId: string) {
     setLineSuggestions((prev) =>
       prev.map((line) =>
-        line.id === lineId ? { ...line, include: true } : line
+        line.id === lineId ? { ...line, include: true, matchStatus: line.catalogItemId ? 'matched' : 'unmatched' } : line
       )
     );
   }
@@ -1651,6 +1668,9 @@ export function ProjectIntake() {
         laborIncluded: null,
         materialIncluded: null,
         matched: !!match,
+        confidence: match ? 0.86 : 0.3,
+        matchStatus: match ? 'matched' : 'unmatched',
+        matchExplanation: match ? 'Template seed matched to catalog.' : 'Template seed needs a catalog match.',
       } as LineSuggestion;
     });
     setLineSuggestions(dedupeSuggestions(starter));
@@ -1687,6 +1707,10 @@ export function ProjectIntake() {
     }
 
     if (mode === 'document') {
+      if (intakeServerResult?.parsedLines?.length) {
+        return true;
+      }
+
       if (!uploadedText.trim()) {
         alert('Upload a source file first.');
         return false;
@@ -1904,6 +1928,13 @@ export function ProjectIntake() {
                       </ul>
                     </div>
                   )}
+                  {intakeServerResult && (
+                    <div className="mt-3 rounded border border-blue-200 bg-blue-50 p-2 space-y-1">
+                      <p className="text-xs font-semibold text-blue-800">AI Parse Strategy</p>
+                      <p className="text-xs text-blue-900">{intakeServerResult.strategy.summary}</p>
+                      <p className="text-[11px] text-blue-800">Model: {intakeServerResult.strategy.primaryModel}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1961,6 +1992,12 @@ export function ProjectIntake() {
                   </ul>
                 </div>
               )}
+              {intakeServerResult && (
+                <div className="rounded border border-blue-200 bg-blue-50 p-2">
+                  <p className="text-xs font-semibold text-blue-800">AI Parse Strategy</p>
+                  <p className="text-xs text-blue-900">{intakeServerResult.strategy.summary}</p>
+                </div>
+              )}
             </>
           )}
 
@@ -2007,6 +2044,35 @@ export function ProjectIntake() {
 
       {step === 3 && (
         <section className="space-y-5">
+          {intakeServerResult && (
+            <div className="ui-surface p-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">{intakeServerResult.strategy.selectedStrategy}</span>
+                <span className="text-xs text-slate-500">{intakeServerResult.strategy.summary}</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-slate-600">
+                <div><span className="font-semibold text-slate-800">Matched</span><div>{intakeServerResult.review.matchedItems}</div></div>
+                <div><span className="font-semibold text-slate-800">Needs Review</span><div>{intakeServerResult.review.needsMatchItems}</div></div>
+                <div><span className="font-semibold text-slate-800">Rooms</span><div>{intakeServerResult.review.roomCount}</div></div>
+                <div><span className="font-semibold text-slate-800">Models</span><div>{[intakeServerResult.strategy.primaryModel, ...intakeServerResult.strategy.supportingModels].filter(Boolean).join(', ')}</div></div>
+              </div>
+              {(intakeServerResult.diagnostics.warnings.length > 0 || intakeServerResult.diagnostics.webLookups.length > 0) && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  {intakeServerResult.diagnostics.warnings.length > 0 && (
+                    <ul className="space-y-1 text-xs text-slate-600">
+                      {intakeServerResult.diagnostics.warnings.map((warning, index) => (
+                        <li key={`${warning}-${index}`}>- {warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {intakeServerResult.diagnostics.webLookups.length > 0 && (
+                    <p className="text-xs text-slate-600">Web enrichment was used selectively for ambiguous line items.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="ui-surface p-5 space-y-3">
             <h2 className="text-sm font-semibold text-slate-800">Project Details</h2>
             <p className="text-xs text-slate-500">Confirm the core details before creating the project.</p>
@@ -2028,6 +2094,29 @@ export function ProjectIntake() {
           </div>
 
           <div className="ui-surface p-5 space-y-4">
+            {(proposalDraftPreview.intro || proposalDraftPreview.terms || proposalDraftPreview.exclusions || proposalDraftPreview.clarifications) && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">AI Proposal Assist</p>
+                  <h3 className="text-sm font-semibold text-slate-900 mt-1">Draft proposal language from the parsed scope.</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="text-xs text-slate-600">Intro
+                    <textarea rows={4} className="ui-textarea mt-1" value={proposalDraftPreview.intro} onChange={(e) => setProposalDraftPreview((prev) => ({ ...prev, intro: e.target.value }))} />
+                  </label>
+                  <label className="text-xs text-slate-600">Terms
+                    <textarea rows={4} className="ui-textarea mt-1" value={proposalDraftPreview.terms} onChange={(e) => setProposalDraftPreview((prev) => ({ ...prev, terms: e.target.value }))} />
+                  </label>
+                  <label className="text-xs text-slate-600">Exclusions
+                    <textarea rows={4} className="ui-textarea mt-1" value={proposalDraftPreview.exclusions} onChange={(e) => setProposalDraftPreview((prev) => ({ ...prev, exclusions: e.target.value }))} />
+                  </label>
+                  <label className="text-xs text-slate-600">Clarifications
+                    <textarea rows={4} className="ui-textarea mt-1" value={proposalDraftPreview.clarifications} onChange={(e) => setProposalDraftPreview((prev) => ({ ...prev, clarifications: e.target.value }))} />
+                  </label>
+                </div>
+              </div>
+            )}
+
             <div>
               <h2 className="text-sm font-semibold text-slate-800">Project Setup Questions</h2>
               <p className="text-xs text-slate-500 mt-1">Review the job-wide add-ins, labor basis, and access conditions before creating the project.</p>
@@ -2197,6 +2286,8 @@ export function ProjectIntake() {
                           <div className="flex flex-wrap items-center gap-2 text-[11px]">
                             <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">Matched</span>
                             <span className="text-slate-500">{line.catalogItemId ? `Catalog ID ${line.catalogItemId}` : 'No catalog ID stored'}</span>
+                            <span className="text-slate-500">Confidence {Math.round(line.confidence * 100)}%</span>
+                            {line.matchExplanation ? <span className="text-slate-500">{line.matchExplanation}</span> : null}
                           </div>
                         </div>
                       </div>
@@ -2238,6 +2329,10 @@ export function ProjectIntake() {
                           <label className="text-[11px] text-slate-600 md:col-span-2">Notes
                             <input className="ui-input mt-1 h-8" value={line.notes || ''} onChange={(e) => patchLineSuggestion(line.id, { notes: e.target.value })} />
                           </label>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                          <span>Confidence {Math.round(line.confidence * 100)}%</span>
+                          {line.matchExplanation ? <span>{line.matchExplanation}</span> : null}
                         </div>
                         {!line.include && <p className="text-amber-700 font-semibold">Ignored</p>}
                       </div>

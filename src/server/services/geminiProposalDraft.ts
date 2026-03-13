@@ -1,6 +1,8 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { ProjectRecord, SettingsRecord, TakeoffLineRecord } from '../../shared/types/estimator.ts';
 import { DEFAULT_PROPOSAL_CLARIFICATIONS, DEFAULT_PROPOSAL_EXCLUSIONS, DEFAULT_PROPOSAL_INTRO, DEFAULT_PROPOSAL_TERMS } from '../../shared/utils/proposalDefaults.ts';
+import { IntakeAssumptions, IntakeParsedLine, IntakeProject, IntakeProposalDraft } from '../../shared/types/intake.ts';
+import { createGeminiClient, getGeminiApiKey, getGeminiRoutingConfig } from './geminiModelRouter.ts';
 
 interface ProposalDraftInput {
   mode?: 'scope_summary' | 'proposal_text' | 'terms_and_conditions';
@@ -60,7 +62,7 @@ function summarizeLines(lines: TakeoffLineRecord[]): Array<Record<string, unknow
 }
 
 export async function generateProposalDraftFromGemini(input: ProposalDraftInput): Promise<Partial<SettingsRecord>> {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+  const apiKey = getGeminiApiKey();
   if (!apiKey) {
     throw new Error('Gemini proposal drafting is not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY.');
   }
@@ -69,7 +71,8 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
     throw new Error('project is required.');
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = createGeminiClient();
+  const routing = getGeminiRoutingConfig();
   const mode = input.mode || 'proposal_text';
   const lines = Array.isArray(input.lines) ? input.lines : [];
   const assumptions = Array.isArray(input.summary?.conditionAssumptions) ? input.summary?.conditionAssumptions : [];
@@ -107,9 +110,10 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
   ].join('\n');
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: routing.draft.model,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: {
+      temperature: routing.draft.temperature,
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -149,5 +153,82 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
     proposalTerms: limitToTwoSentences(parsed.proposalTerms) || DEFAULT_PROPOSAL_TERMS,
     proposalExclusions: limitToTwoSentences(parsed.proposalExclusions) || DEFAULT_PROPOSAL_EXCLUSIONS,
     proposalClarifications: limitToTwoSentences(parsed.proposalClarifications) || DEFAULT_PROPOSAL_CLARIFICATIONS,
+  };
+}
+
+function defaultIntakeProposalDraft(): IntakeProposalDraft {
+  return {
+    intro: DEFAULT_PROPOSAL_INTRO,
+    terms: DEFAULT_PROPOSAL_TERMS,
+    exclusions: DEFAULT_PROPOSAL_EXCLUSIONS.split(/(?<=[.!?])\s+/).filter(Boolean),
+    clarifications: DEFAULT_PROPOSAL_CLARIFICATIONS.split(/(?<=[.!?])\s+/).filter(Boolean),
+  };
+}
+
+function summarizeIntakeLines(lines: IntakeParsedLine[]): Array<Record<string, unknown>> {
+  return lines.slice(0, 50).map((line) => ({
+    roomArea: line.roomArea,
+    category: line.category,
+    itemCode: line.itemCode,
+    itemName: line.itemName,
+    description: line.description,
+    quantity: line.quantity,
+    unit: line.unit,
+    matchStatus: line.matchStatus,
+  }));
+}
+
+export async function generateProposalDraftFromIntake(input: {
+  project: IntakeProject;
+  assumptions: IntakeAssumptions;
+  parsedLines: IntakeParsedLine[];
+}): Promise<IntakeProposalDraft> {
+  const routing = getGeminiRoutingConfig();
+  if (!routing.enableProposalDraft || !getGeminiApiKey()) {
+    return defaultIntakeProposalDraft();
+  }
+
+  const ai = createGeminiClient();
+  const response = await ai.models.generateContent({
+    model: routing.draft.model,
+    contents: [{ role: 'user', parts: [{ text: [
+      'Draft proposal-support text from accepted or reviewable construction intake scope.',
+      'Return strict JSON only.',
+      'Keep the intro and terms concise. Exclusions and clarifications should be practical short list items.',
+      `Project: ${JSON.stringify(input.project)}`,
+      `Assumptions: ${JSON.stringify(input.assumptions)}`,
+      `Scope Snapshot: ${JSON.stringify(summarizeIntakeLines(input.parsedLines))}`,
+    ].join('\n') }] }],
+    config: {
+      temperature: routing.draft.temperature,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          intro: { type: Type.STRING },
+          terms: { type: Type.STRING },
+          exclusions: { type: Type.ARRAY, items: { type: Type.STRING } },
+          clarifications: { type: Type.ARRAY, items: { type: Type.STRING } },
+        },
+      },
+    },
+  });
+
+  let parsed: any = {};
+  try {
+    parsed = JSON.parse(response.text || '{}');
+  } catch (_error) {
+    parsed = {};
+  }
+
+  return {
+    intro: limitToTwoSentences(parsed.intro) || DEFAULT_PROPOSAL_INTRO,
+    terms: limitToTwoSentences(parsed.terms) || DEFAULT_PROPOSAL_TERMS,
+    exclusions: Array.isArray(parsed.exclusions) && parsed.exclusions.length > 0
+      ? parsed.exclusions.map((value: unknown) => asText(value)).filter(Boolean)
+      : defaultIntakeProposalDraft().exclusions,
+    clarifications: Array.isArray(parsed.clarifications) && parsed.clarifications.length > 0
+      ? parsed.clarifications.map((value: unknown) => asText(value)).filter(Boolean)
+      : defaultIntakeProposalDraft().clarifications,
   };
 }

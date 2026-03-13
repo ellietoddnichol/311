@@ -1,5 +1,5 @@
 import React from 'react';
-import { Cloud, FileDown, FileText, Save, Send } from 'lucide-react';
+import { Archive, Cloud, FileDown, FileText, Save, Send, Trash2 } from 'lucide-react';
 import { ProjectRecord } from '../../shared/types/estimator';
 import { formatCurrencySafe } from '../../utils/numberFormat';
 
@@ -12,6 +12,8 @@ interface Props {
   onPreviewProposal: () => void;
   onExport: () => void;
   onSubmitBid: () => Promise<void> | void;
+  onArchiveProject: () => Promise<void> | void;
+  onDeleteProject: () => Promise<void> | void;
   statusActionLabel: string;
 }
 
@@ -24,6 +26,8 @@ export function TopProjectHeader({
   onPreviewProposal,
   onExport,
   onSubmitBid,
+  onArchiveProject,
+  onDeleteProject,
   statusActionLabel,
 }: Props) {
   const syncLabel = syncState === 'syncing' ? 'Syncing...' : syncState === 'ok' ? 'Synced' : syncState === 'error' ? 'Sync Error' : 'Not Synced';
@@ -62,6 +66,12 @@ export function TopProjectHeader({
           </button>
           <button onClick={onExport} className="h-7 px-2 rounded-md border border-slate-300 text-slate-700 text-[11px] font-medium hover:bg-white flex items-center gap-1">
             <FileDown className="w-3.5 h-3.5" /> Export
+          </button>
+          <button onClick={() => onArchiveProject()} className="h-7 px-2 rounded-md border border-amber-300 text-amber-800 text-[11px] font-medium hover:bg-white flex items-center gap-1">
+            <Archive className="w-3.5 h-3.5" /> Archive
+          </button>
+          <button onClick={() => onDeleteProject()} className="h-7 px-2 rounded-md border border-red-300 text-red-800 text-[11px] font-medium hover:bg-white flex items-center gap-1">
+            <Trash2 className="w-3.5 h-3.5" /> Delete
           </button>
         </div>
         <button onClick={() => onSave()} className="md:hidden h-7 px-2 rounded-md border border-slate-300 text-slate-700 text-[11px] font-medium hover:bg-slate-50 flex items-center gap-1">

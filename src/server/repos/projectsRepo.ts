@@ -195,3 +195,8 @@ export function archiveProject(projectId: string): boolean {
   `).run(new Date().toISOString(), projectId);
   return result.changes > 0;
 }
+
+export function deleteProject(projectId: string): boolean {
+  const result = estimatorDb.prepare('DELETE FROM projects_v1 WHERE id = ?').run(projectId);
+  return result.changes > 0;
+}

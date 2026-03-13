@@ -319,6 +319,40 @@ export function ProjectWorkspace() {
     }
   }
 
+  async function archiveCurrentProject() {
+    if (!project) return;
+    if (project.status === 'Archived') {
+      window.alert('This project is already archived.');
+      return;
+    }
+
+    const confirmed = window.confirm(`Archive project "${project.projectName}"?`);
+    if (!confirmed) return;
+
+    try {
+      await api.archiveV1Project(project.id);
+      setProject({ ...project, status: 'Archived', updatedAt: new Date().toISOString() });
+      setLastSavedAt(new Date().toISOString());
+    } catch (error) {
+      console.error('Failed to archive project', error);
+      window.alert('Unable to archive project right now.');
+    }
+  }
+
+  async function deleteCurrentProject() {
+    if (!project) return;
+    const confirmed = window.confirm(`Permanently delete project "${project.projectName}"? This also deletes its rooms, takeoff lines, and files.`);
+    if (!confirmed) return;
+
+    try {
+      await api.deleteV1Project(project.id);
+      navigate('/projects');
+    } catch (error) {
+      console.error('Failed to delete project', error);
+      window.alert('Unable to delete project right now.');
+    }
+  }
+
   async function saveProposalWording() {
     if (!settings) return;
     const saved = await api.updateV1Settings(settings);
@@ -622,6 +656,8 @@ export function ProjectWorkspace() {
         onPreviewProposal={previewProposal}
         onExport={exportProposal}
         onSubmitBid={submitBid}
+        onArchiveProject={archiveCurrentProject}
+        onDeleteProject={deleteCurrentProject}
         statusActionLabel={statusActionLabel}
       />
 

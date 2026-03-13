@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowUpDown, Archive, Filter, Plus, Search } from 'lucide-react';
+import { ArrowUpDown, Archive, Filter, Plus, Search, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { api } from '../services/api';
 import { ProjectRecord } from '../shared/types/estimator';
@@ -46,6 +46,41 @@ export function Projects() {
     if (sort !== 'newest') next.set('sort', sort);
     setSearchParams(next, { replace: true });
   }, [search, status, sort, setSearchParams]);
+
+  async function handleArchiveProject(project: ProjectRecord) {
+    if (project.status === 'Archived') {
+      window.alert('This project is already archived.');
+      return;
+    }
+
+    const confirmed = window.confirm(`Archive project "${project.projectName}"?`);
+    if (!confirmed) return;
+
+    try {
+      await api.archiveV1Project(project.id);
+      setProjects((prev) => prev.map((entry) => (
+        entry.id === project.id
+          ? { ...entry, status: 'Archived', updatedAt: new Date().toISOString() }
+          : entry
+      )));
+    } catch (error) {
+      console.error('Failed to archive project', error);
+      window.alert(error instanceof Error ? error.message : 'Unable to archive project right now.');
+    }
+  }
+
+  async function handleDeleteProject(project: ProjectRecord) {
+    const confirmed = window.confirm(`Permanently delete project "${project.projectName}"? This also deletes its rooms, takeoff lines, and files.`);
+    if (!confirmed) return;
+
+    try {
+      await api.deleteV1Project(project.id);
+      setProjects((prev) => prev.filter((entry) => entry.id !== project.id));
+    } catch (error) {
+      console.error('Failed to delete project', error);
+      window.alert(error instanceof Error ? error.message : 'Unable to delete project right now.');
+    }
+  }
 
   const filtered = useMemo(() => {
     const bySearch = projects.filter((project) => {
@@ -192,12 +227,32 @@ export function Projects() {
                       : 'N/A'}
                   </td>
                   <td className="px-5 py-4 text-right">
-                    <button
-                      onClick={() => navigate(`/project/${project.id}`)}
-                      className="ui-btn-secondary h-8 px-3 text-xs"
-                    >
-                      Open
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      {project.status !== 'Archived' ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleArchiveProject(project)}
+                          className="inline-flex h-8 items-center gap-1 rounded-md border border-red-200 px-3 text-xs font-medium text-red-700 hover:bg-red-50"
+                        >
+                          <Archive className="h-3.5 w-3.5" />
+                          Archive
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteProject(project)}
+                        className="inline-flex h-8 items-center gap-1 rounded-md border border-red-300 px-3 text-xs font-medium text-red-800 hover:bg-red-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => navigate(`/project/${project.id}`)}
+                        className="ui-btn-secondary h-8 px-3 text-xs"
+                      >
+                        Open
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
