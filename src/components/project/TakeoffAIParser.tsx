@@ -50,11 +50,11 @@ export function TakeoffAIParser({ project, catalog, onImport, onClose }: Props) 
       reader.readAsDataURL(file);
       const base64 = await base64Promise;
 
-      const items = await gemini.parseTakeoffDocument(base64, file.type);
+      const items = await gemini.parseTakeoffDocument(base64, file.type, file.name);
       setResults(items);
     } catch (err) {
       console.error("AI Parsing failed", err);
-      setError("Failed to parse document. Please try again with a clearer file.");
+      setError(err instanceof Error ? err.message : "Failed to parse document. Please try again with a clearer file.");
     } finally {
       setParsing(false);
     }

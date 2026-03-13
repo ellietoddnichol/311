@@ -29,6 +29,18 @@ function asText(value: unknown): string {
   return String(value ?? '').trim();
 }
 
+function limitToTwoSentences(value: unknown): string {
+  const normalized = asText(value).replace(/\s+/g, ' ');
+  if (!normalized) return '';
+
+  const sentences = normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
+  return sentences
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(' ');
+}
+
 function summarizeLines(lines: TakeoffLineRecord[]): Array<Record<string, unknown>> {
   return lines
     .slice()
@@ -67,6 +79,8 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
     'Draft concise, professional proposal language from the estimate data provided.',
     'Use the estimate data as source material. Do not invent scope that is not supported by the input.',
     'Keep the language client-facing and commercially usable.',
+    'Each populated proposal field must be no more than two sentences, and one sentence is preferred whenever possible.',
+    'Do not use bullet points, numbering, headings, or line breaks in any generated field.',
     mode === 'scope_summary'
       ? 'Focus on drafting a clean scope summary for the proposal intro field. Leave other fields blank unless a change is strongly warranted.'
       : mode === 'terms_and_conditions'
@@ -118,22 +132,22 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
 
   if (mode === 'scope_summary') {
     return {
-      proposalIntro: asText(parsed.proposalIntro) || DEFAULT_PROPOSAL_INTRO,
+      proposalIntro: limitToTwoSentences(parsed.proposalIntro) || DEFAULT_PROPOSAL_INTRO,
     };
   }
 
   if (mode === 'terms_and_conditions') {
     return {
-      proposalTerms: asText(parsed.proposalTerms) || DEFAULT_PROPOSAL_TERMS,
-      proposalExclusions: asText(parsed.proposalExclusions) || DEFAULT_PROPOSAL_EXCLUSIONS,
-      proposalClarifications: asText(parsed.proposalClarifications) || DEFAULT_PROPOSAL_CLARIFICATIONS,
+      proposalTerms: limitToTwoSentences(parsed.proposalTerms) || DEFAULT_PROPOSAL_TERMS,
+      proposalExclusions: limitToTwoSentences(parsed.proposalExclusions) || DEFAULT_PROPOSAL_EXCLUSIONS,
+      proposalClarifications: limitToTwoSentences(parsed.proposalClarifications) || DEFAULT_PROPOSAL_CLARIFICATIONS,
     };
   }
 
   return {
-    proposalIntro: asText(parsed.proposalIntro) || DEFAULT_PROPOSAL_INTRO,
-    proposalTerms: asText(parsed.proposalTerms) || DEFAULT_PROPOSAL_TERMS,
-    proposalExclusions: asText(parsed.proposalExclusions) || DEFAULT_PROPOSAL_EXCLUSIONS,
-    proposalClarifications: asText(parsed.proposalClarifications) || DEFAULT_PROPOSAL_CLARIFICATIONS,
+    proposalIntro: limitToTwoSentences(parsed.proposalIntro) || DEFAULT_PROPOSAL_INTRO,
+    proposalTerms: limitToTwoSentences(parsed.proposalTerms) || DEFAULT_PROPOSAL_TERMS,
+    proposalExclusions: limitToTwoSentences(parsed.proposalExclusions) || DEFAULT_PROPOSAL_EXCLUSIONS,
+    proposalClarifications: limitToTwoSentences(parsed.proposalClarifications) || DEFAULT_PROPOSAL_CLARIFICATIONS,
   };
 }

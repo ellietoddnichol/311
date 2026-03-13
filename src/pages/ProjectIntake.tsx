@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileUp, FolderInput, PlusCircle, Save, Search, Upload, WandSparkles } from 'lucide-react';
 import { api } from '../services/api';
-import { PricingMode, ProjectRecord, RoomRecord, TakeoffLineRecord } from '../shared/types/estimator';
+import { PricingMode, ProjectJobConditions, ProjectRecord, RoomRecord, TakeoffLineRecord } from '../shared/types/estimator';
+import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../shared/utils/jobConditions';
 import { CatalogItem } from '../types';
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
@@ -109,6 +110,8 @@ interface GeminiIntakeResult {
 interface GeminiQuality {
   uncertain: boolean;
   warnings: string[];
+  usableLineCount: number;
+  hasMetadata: boolean;
 }
 
 interface NewCatalogDraft {
@@ -239,6 +242,34 @@ function detectSpreadsheetColumns(headers: string[]): InferredColumnMap {
     notes: findColumnIndex(normalized, ['notes', 'remarks', 'comment']),
     room: findColumnIndex(normalized, ['room', 'area', 'location', 'zone']),
   };
+}
+
+function countMappedColumns(mapping: InferredColumnMap): number {
+  return Object.values(mapping).filter((value) => value !== null).length;
+}
+
+function detectSpreadsheetHeaderRow(rows: string[][]): number {
+  const searchRows = rows.slice(0, Math.min(rows.length, 12));
+  let bestIndex = 0;
+  let bestScore = -1;
+
+  searchRows.forEach((row, index) => {
+    const nonEmptyCount = row.filter(Boolean).length;
+    if (nonEmptyCount === 0) return;
+
+    const mapping = detectSpreadsheetColumns(row);
+    const mappedCount = countMappedColumns(mapping);
+    const normalizedCells = row.map((cell) => normalizeHeader(cell)).filter(Boolean);
+    const keywordHits = normalizedCells.filter((cell) => /project|client|address|date|category|item|description|qty|quantity|unit|room|area|notes|scope|sku|code/.test(cell)).length;
+    const score = mappedCount * 10 + keywordHits * 3 + Math.min(nonEmptyCount, 8);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+
+  return bestIndex;
 }
 
 function parseNumber(value: unknown, fallback = 1): number {
@@ -377,10 +408,14 @@ function parseStructuredSpreadsheetRows(rows: Array<Array<string | number | bool
 
   if (nonEmptyRows.length < 2) return null;
 
-  const headers = nonEmptyRows[0];
+  const headerRowIndex = detectSpreadsheetHeaderRow(nonEmptyRows);
+  const workingRows = nonEmptyRows.slice(headerRowIndex);
+  if (workingRows.length < 2) return null;
+
+  const headers = workingRows[0];
   const mapping = detectSpreadsheetColumns(headers);
 
-  const sourceKind = inferSpreadsheetSourceKind(nonEmptyRows, mapping);
+  const sourceKind = inferSpreadsheetSourceKind(workingRows, mapping);
 
   const looksStructured =
     sourceKind === 'spreadsheet-matrix' ||
@@ -390,7 +425,7 @@ function parseStructuredSpreadsheetRows(rows: Array<Array<string | number | bool
   if (!looksStructured) return null;
 
   if (sourceKind === 'spreadsheet-matrix') {
-    const matrixRows = parseMatrixSpreadsheetRows(nonEmptyRows, mapping, sourceReference);
+    const matrixRows = parseMatrixSpreadsheetRows(workingRows, mapping, sourceReference);
     if (!matrixRows.length) return null;
     return {
       rows: matrixRows,
@@ -405,7 +440,7 @@ function parseStructuredSpreadsheetRows(rows: Array<Array<string | number | bool
   }
 
   if (sourceKind === 'spreadsheet-mixed') {
-    const mixedRows = parseMixedSpreadsheetRows(nonEmptyRows, sourceReference);
+    const mixedRows = parseMixedSpreadsheetRows(workingRows, sourceReference);
     if (!mixedRows.length) return null;
     return {
       rows: mixedRows,
@@ -421,8 +456,8 @@ function parseStructuredSpreadsheetRows(rows: Array<Array<string | number | bool
 
   const parsedRows: ParsedImportLine[] = [];
 
-  for (let i = 1; i < nonEmptyRows.length; i += 1) {
-    const row = nonEmptyRows[i];
+  for (let i = 1; i < workingRows.length; i += 1) {
+    const row = workingRows[i];
 
     const projectName = mapping.project !== null ? String(row[mapping.project] || '').trim() : '';
     const projectNumber = mapping.projectNumber !== null ? String(row[mapping.projectNumber] || '').trim() : '';
@@ -589,6 +624,19 @@ function parseAdaptiveTextDocument(text: string, sourceReference: string): { met
 function evaluateGeminiQuality(result: GeminiIntakeResult): GeminiQuality {
   const warnings = [...(result.warnings || [])];
   const parsedLines = Array.isArray(result.parsedLines) ? result.parsedLines : [];
+  const usableLineCount = parsedLines.filter((line) => {
+    const hasName = String(line.itemName || '').trim().length > 0;
+    const hasDescription = String(line.description || '').trim().length > 0;
+    const hasQty = Number.isFinite(Number(line.quantity)) && Number(line.quantity) > 0;
+    return (hasName || hasDescription) && hasQty;
+  }).length;
+  const hasMetadata = [
+    result.projectName,
+    result.projectNumber,
+    result.client,
+    result.address,
+    result.bidDate,
+  ].some((value) => String(value || '').trim().length > 0) || (Array.isArray(result.rooms) && result.rooms.length > 0);
 
   if (parsedLines.length === 0) {
     warnings.push('Gemini returned no structured lines.');
@@ -606,8 +654,10 @@ function evaluateGeminiQuality(result: GeminiIntakeResult): GeminiQuality {
   }
 
   return {
-    uncertain: warnings.length > 0,
+    uncertain: usableLineCount === 0 && !hasMetadata,
     warnings,
+    usableLineCount,
+    hasMetadata,
   };
 }
 
@@ -847,6 +897,7 @@ export function ProjectIntake() {
     projectSize: 'Medium',
     pricingMode: 'labor_and_material',
     selectedScopeCategories: [],
+    jobConditions: createDefaultProjectJobConditions(),
     bidDate: '',
     dueDate: '',
     notes: '',
@@ -890,6 +941,39 @@ export function ProjectIntake() {
       item.category.toLowerCase().includes(q)
     );
   }, [catalog, catalogSearch]);
+
+  const scopeCategoryOptions = useMemo(
+    () => Array.from(new Set(catalog.map((item) => item.category).filter(Boolean))).sort(),
+    [catalog]
+  );
+
+  const jobConditions = useMemo(
+    () => normalizeProjectJobConditions(projectDraft.jobConditions),
+    [projectDraft.jobConditions]
+  );
+
+  function patchJobConditions(updates: Partial<ProjectJobConditions>) {
+    setProjectDraft((prev) => ({
+      ...prev,
+      jobConditions: normalizeProjectJobConditions({
+        ...(prev.jobConditions || createDefaultProjectJobConditions()),
+        ...updates,
+      }),
+    }));
+  }
+
+  function toggleScopeCategory(category: string) {
+    setProjectDraft((prev) => {
+      const current = prev.selectedScopeCategories || [];
+      const next = current.includes(category)
+        ? current.filter((entry) => entry !== category)
+        : [...current, category].sort();
+      return {
+        ...prev,
+        selectedScopeCategories: next,
+      };
+    });
+  }
 
   function hasUsableTakeoffSource(): boolean {
     return !!takeoffFileText.trim() || !!takeoffImportText.trim() || !!sourceProjectId || takeoffStructuredLines.length > 0;
@@ -1109,8 +1193,8 @@ export function ProjectIntake() {
       workbook.SheetNames.forEach((sheetName) => {
         const sheet = workbook.Sheets[sheetName];
         const rows = xlsx.utils.sheet_to_json<Array<string | number | boolean | null | undefined>>(sheet, { header: 1, defval: '' });
-        const parsed = parseStructuredSpreadsheetRows(rows, file.name);
-        if (!structuredResult && parsed) {
+        const parsed = parseStructuredSpreadsheetRows(rows, `${file.name}:${sheetName}`);
+        if (parsed && (!structuredResult || parsed.rows.length > structuredResult.rows.length)) {
           structuredResult = parsed;
         }
 
@@ -1166,7 +1250,7 @@ export function ProjectIntake() {
               setTakeoffStructuredProjectName(gemini.projectName);
             }
 
-            if (!quality.uncertain && gemini.parsedLines.length === structuredResult.rows.length) {
+            if (quality.usableLineCount > 0 && gemini.parsedLines.length === structuredResult.rows.length) {
               const rowAlignmentSafe = structuredResult.rows.every((row, index) => {
                 const enriched = gemini.parsedLines[index];
                 if (!enriched) return false;
@@ -1241,7 +1325,7 @@ export function ProjectIntake() {
             if (takeoffFileName !== file.name) return;
 
             const parsedRows = geminiLinesToParsedRows(gemini.parsedLines, file.name);
-            if (!quality.uncertain && parsedRows.length > 0) {
+            if (parsedRows.length > 0) {
               setTakeoffStructuredLines(parsedRows);
               setTakeoffStructuredProjectName(gemini.projectName || '');
               setTakeoffStructuredKind(fileKind === 'pdf-document' ? 'pdf-document' : 'text-document');
@@ -1320,7 +1404,7 @@ export function ProjectIntake() {
       const quality = evaluateGeminiQuality(gemini);
       setIntakeWarnings(quality.warnings);
 
-      if (!quality.uncertain && gemini.parsedLines.length > 0) {
+      if (quality.hasMetadata) {
         setProjectDraft((prev) => ({
           ...prev,
           projectName: gemini.projectName || prev.projectName,
@@ -1330,7 +1414,9 @@ export function ProjectIntake() {
           bidDate: normalizeDateString(gemini.bidDate) || prev.bidDate,
           notes: mergeSourceNote(prev.notes, file.name),
         }));
+      }
 
+      if (gemini.parsedLines.length > 0) {
         const parsedRows = geminiLinesToParsedRows(gemini.parsedLines, file.name);
         const geminiRoomSet = new Set<string>(gemini.rooms.map((room) => normalizeRoomName(room)).filter(Boolean));
         parsedRows.forEach((row) => {
@@ -1639,6 +1725,7 @@ export function ProjectIntake() {
         projectSize: projectDraft.projectSize || null,
         pricingMode: (projectDraft.pricingMode as PricingMode) || 'labor_and_material',
         selectedScopeCategories: projectDraft.selectedScopeCategories || [],
+        jobConditions,
         notes: projectDraft.notes || null,
         specialNotes: projectDraft.specialNotes || null
       });
@@ -1937,6 +2024,119 @@ export function ProjectIntake() {
               </label>
               <label className="text-xs text-slate-600">Special Notes<input className="ui-input mt-1" value={projectDraft.specialNotes || ''} onChange={(e) => setProjectDraft({ ...projectDraft, specialNotes: e.target.value })} /></label>
               <label className="text-xs text-slate-600 md:col-span-2">Notes<input className="ui-input mt-1" value={projectDraft.notes || ''} onChange={(e) => setProjectDraft({ ...projectDraft, notes: e.target.value })} /></label>
+            </div>
+          </div>
+
+          <div className="ui-surface p-5 space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">Project Setup Questions</h2>
+              <p className="text-xs text-slate-500 mt-1">Review the job-wide add-ins, labor basis, and access conditions before creating the project.</p>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[11px] font-medium text-slate-700">Included Catalog Categories</p>
+              <div className="flex flex-wrap gap-2">
+                {scopeCategoryOptions.map((category) => {
+                  const active = (projectDraft.selectedScopeCategories || []).includes(category);
+                  return (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => toggleScopeCategory(category)}
+                      className={`px-2.5 py-1.5 rounded-full border text-[11px] font-medium transition-colors ${active ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      {category}
+                    </button>
+                  );
+                })}
+              </div>
+              {scopeCategoryOptions.length === 0 ? <p className="text-xs text-slate-500">Catalog categories will appear here after catalog sync.</p> : null}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label className="text-[11px] font-medium text-slate-700">Location / Region<input className="ui-input mt-1 h-9" value={jobConditions.locationLabel} onChange={(e) => patchJobConditions({ locationLabel: e.target.value })} /></label>
+              <label className="text-[11px] font-medium text-slate-700">Location Tax Override %<input type="number" className="ui-input mt-1 h-9" value={jobConditions.locationTaxPercent ?? ''} onChange={(e) => patchJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) || 0 })} /></label>
+              <label className="text-[11px] font-medium text-slate-700">Labor Basis
+                <select className="ui-input mt-1 h-9" value={jobConditions.laborRateBasis} onChange={(e) => patchJobConditions({ laborRateBasis: e.target.value as ProjectJobConditions['laborRateBasis'] })}>
+                  <option value="standard">Standard</option>
+                  <option value="union">Union</option>
+                  <option value="prevailing">Prevailing Wage</option>
+                </select>
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.laborRateMultiplier} onChange={(e) => patchJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })} /></label>
+              <label className="text-[11px] font-medium text-slate-700">Floors<input type="number" min={1} className="ui-input mt-1 h-9" value={jobConditions.floors} onChange={(e) => patchJobConditions({ floors: Number(e.target.value) || 1 })} /></label>
+              <label className="text-[11px] font-medium text-slate-700">Floor Labor Add / Floor<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.floorMultiplierPerFloor} onChange={(e) => patchJobConditions({ floorMultiplierPerFloor: Number(e.target.value) || 0 })} /></label>
+              <label className="text-[11px] font-medium text-slate-700">Delivery Difficulty
+                <select className="ui-input mt-1 h-9" value={jobConditions.deliveryDifficulty} onChange={(e) => patchJobConditions({ deliveryDifficulty: e.target.value as ProjectJobConditions['deliveryDifficulty'] })}>
+                  <option value="standard">Standard</option>
+                  <option value="constrained">Constrained</option>
+                  <option value="difficult">Difficult</option>
+                </select>
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">Mobilization Complexity
+                <select className="ui-input mt-1 h-9" value={jobConditions.mobilizationComplexity} onChange={(e) => patchJobConditions({ mobilizationComplexity: e.target.value as ProjectJobConditions['mobilizationComplexity'] })}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">Project Adder %<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.estimateAdderPercent} onChange={(e) => patchJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} /></label>
+              <label className="text-[11px] font-medium text-slate-700">Project Adder $<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.estimateAdderAmount} onChange={(e) => patchJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} /></label>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 grid grid-cols-1 md:grid-cols-[1fr_180px_180px] gap-3 items-end">
+              <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.deliveryRequired} onChange={(e) => patchJobConditions({ deliveryRequired: e.target.checked })} />Delivery is included in this job</label>
+              <label className="text-[11px] font-medium text-slate-700">Delivery Pricing Mode
+                <select className="ui-input mt-1 h-9" value={jobConditions.deliveryPricingMode} onChange={(e) => patchJobConditions({ deliveryPricingMode: e.target.value as ProjectJobConditions['deliveryPricingMode'] })}>
+                  <option value="included">Included / No Charge</option>
+                  <option value="flat">Flat Amount</option>
+                  <option value="percent">Percent of Base</option>
+                </select>
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">Delivery Value<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.deliveryValue} onChange={(e) => patchJobConditions({ deliveryValue: Number(e.target.value) || 0 })} /></label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.unionWage} onChange={(e) => patchJobConditions({ unionWage: e.target.checked })} />Union Wage</label>
+                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.unionWageMultiplier} onChange={(e) => patchJobConditions({ unionWageMultiplier: Number(e.target.value) || 0 })} /></label>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.prevailingWage} onChange={(e) => patchJobConditions({ prevailingWage: e.target.checked })} />Prevailing Wage</label>
+                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.prevailingWageMultiplier} onChange={(e) => patchJobConditions({ prevailingWageMultiplier: Number(e.target.value) || 0 })} /></label>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.smallJobFactor} onChange={(e) => patchJobConditions({ smallJobFactor: e.target.checked })} />Small Job Factor</label>
+                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.smallJobMultiplier} onChange={(e) => patchJobConditions({ smallJobMultiplier: Number(e.target.value) || 0 })} /></label>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.elevatorAvailable} onChange={(e) => patchJobConditions({ elevatorAvailable: e.target.checked })} />Elevator Available</label>
+                <p className="text-[11px] text-slate-500">If unchecked on multi-floor work, labor increases automatically.</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.occupiedBuilding} onChange={(e) => patchJobConditions({ occupiedBuilding: e.target.checked })} />Occupied Building</label>
+                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.occupiedBuildingMultiplier} onChange={(e) => patchJobConditions({ occupiedBuildingMultiplier: Number(e.target.value) || 0 })} /></label>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.restrictedAccess} onChange={(e) => patchJobConditions({ restrictedAccess: e.target.checked })} />Restricted Access</label>
+                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.restrictedAccessMultiplier} onChange={(e) => patchJobConditions({ restrictedAccessMultiplier: Number(e.target.value) || 0 })} /></label>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.remoteTravel} onChange={(e) => patchJobConditions({ remoteTravel: e.target.checked })} />Remote / Travel Job</label>
+                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.remoteTravelMultiplier} onChange={(e) => patchJobConditions({ remoteTravelMultiplier: Number(e.target.value) || 0 })} /></label>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.afterHoursWork} onChange={(e) => patchJobConditions({ afterHoursWork: e.target.checked })} />After-hours Work</label>
+                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.afterHoursMultiplier} onChange={(e) => patchJobConditions({ afterHoursMultiplier: Number(e.target.value) || 0 })} /></label>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.phasedWork} onChange={(e) => patchJobConditions({ phasedWork: e.target.checked })} />Phased Work</label>
+                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.phasedWorkMultiplier} onChange={(e) => patchJobConditions({ phasedWorkMultiplier: Number(e.target.value) || 0 })} /></label>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.scheduleCompression} onChange={(e) => patchJobConditions({ scheduleCompression: e.target.checked })} />Schedule Compression</label>
+                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.scheduleCompressionMultiplier} onChange={(e) => patchJobConditions({ scheduleCompressionMultiplier: Number(e.target.value) || 0 })} /></label>
+              </div>
             </div>
           </div>
 
