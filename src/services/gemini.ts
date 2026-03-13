@@ -1,4 +1,6 @@
 
+import type { IntakeResult } from '../shared/types/intake';
+
 export interface ParsedTakeoffItem {
   description: string;
   qty: number;
@@ -68,5 +70,42 @@ export const gemini = {
           }))
           .filter((line) => line.description)
       : [];
+  },
+
+  async parseDocument(options: {
+    fileBase64: string;
+    mimeType: string;
+    fileName: string;
+    catalogItems?: Array<{ id: string; sku: string; description: string; category: string; uom: string; baseMaterialCost: number; baseLaborMinutes: number; tags?: string[] }>;
+    generateProposalAssist?: boolean;
+    useWebEnrichment?: boolean;
+  }): Promise<IntakeResult> {
+    const res = await fetch('/api/v1/intake/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: options.fileName,
+        mimeType: options.mimeType || 'application/octet-stream',
+        dataBase64: options.fileBase64,
+        catalogItems: options.catalogItems || [],
+        generateProposalAssist: options.generateProposalAssist || false,
+        useWebEnrichment: options.useWebEnrichment || false,
+      }),
+    });
+
+    if (!res.ok) {
+      let message = `Request failed with status ${res.status}`;
+      try {
+        const payload = await res.json();
+        message = payload.error || payload.message || message;
+      } catch {
+        // ignore
+      }
+      throw new Error(message);
+    }
+
+    const payload = await res.json() as { data?: IntakeResult };
+    if (!payload.data) throw new Error('No data returned from intake pipeline.');
+    return payload.data;
   }
 };
