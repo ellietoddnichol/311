@@ -36,6 +36,25 @@ function isClientFacingLabel(label: string): boolean {
   return !blockedPattern.test(normalized);
 }
 
+function splitIntoLines(value: string | null | undefined): string[] {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function toSentenceCase(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+function trimScopeHighlight(value: string): string {
+  const trimmed = value.trim().replace(/\s+/g, ' ');
+  if (trimmed.length <= 56) return trimmed;
+  return `${trimmed.slice(0, 53).trim()}...`;
+}
+
 export function ProposalPreview({ project, settings, website, lines, summary }: Props) {
   if (!summary) return <div className="text-sm text-slate-500">No estimate data yet.</div>;
 
@@ -48,6 +67,9 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
     ? new Date(project.proposalDate).toLocaleDateString()
     : new Date().toLocaleDateString();
   const conditionLines = buildProjectConditionSummaryLines(project.jobConditions);
+  const termLines = splitIntoLines(settings?.proposalTerms || DEFAULT_PROPOSAL_TERMS);
+  const exclusionLines = splitIntoLines(settings?.proposalExclusions || DEFAULT_PROPOSAL_EXCLUSIONS);
+  const clarificationLines = splitIntoLines(settings?.proposalClarifications || DEFAULT_PROPOSAL_CLARIFICATIONS);
 
   const scopeBreakout = useMemo(() => {
     const sectionMap = new Map<string, {
@@ -101,171 +123,181 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
     return Array.from(sectionMap.values()).sort((a, b) => b.total - a.total);
   }, [lines, showLabor, showMaterial]);
 
-  const topHighlights = scopeBreakout.slice(0, 3);
+  const scopeSummaryRows = useMemo(() => {
+    return scopeBreakout.slice(0, 8).map((entry) => {
+      const examples = entry.highlights.slice(0, 2).map(trimScopeHighlight);
+      const descriptor = examples.length > 0 ? ` Includes ${examples.join(' and ')}.` : '';
+      return {
+        ...entry,
+        summary: `${toSentenceCase(entry.section)} includes ${entry.itemCount} scoped ${entry.itemCount === 1 ? 'item' : 'items'}.${descriptor}`,
+      };
+    });
+  }, [scopeBreakout]);
 
   return (
-    <div className="print-proposal mx-auto max-w-[8.5in] rounded-[30px] border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-10 text-slate-900 shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
-      <div className="mb-6 overflow-hidden rounded-[28px] border border-slate-200/40 bg-[linear-gradient(135deg,#0a224d_0%,#0b3d91_52%,#164fa8_100%)] px-6 py-6 text-white shadow-[0_18px_42px_rgba(10,34,77,0.24)]">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
+    <article data-proposal-document="true" className="print-proposal proposal-document mx-auto max-w-[8.27in] bg-white px-10 py-12 text-slate-900 shadow-[0_22px_56px_rgba(15,23,42,0.08)]">
+      <header className="border-b border-slate-200 pb-6">
+        <div className="flex items-start justify-between gap-6">
+          <div className="flex items-start gap-4">
             {settings?.logoUrl ? (
-              <img src={settings.logoUrl} alt="Company logo" className="h-16 w-16 rounded-2xl bg-white/95 object-contain p-2 shadow-sm" />
+              <img src={settings.logoUrl} alt="Company logo" className="h-14 w-14 object-contain" />
             ) : null}
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-100">Client Proposal</p>
-              <h2 className="mt-2 text-[24px] font-semibold tracking-[-0.03em] text-white">{settings?.companyName || 'Brighten Builders, LLC'}</h2>
-              <p className="mt-2 text-sm text-blue-100">{settings?.companyAddress || ''}</p>
-              <p className="text-sm text-blue-100">{website}</p>
-              <p className="text-sm text-blue-100">{settings?.companyPhone || ''} {settings?.companyEmail ? `| ${settings.companyEmail}` : ''}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Proposal</p>
+              <h1 className="mt-2 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">{settings?.companyName || 'Brighten Builders, LLC'}</h1>
+              <div className="mt-3 space-y-1 text-[13px] text-slate-600">
+                <p>{settings?.companyAddress || ''}</p>
+                <p>{settings?.companyPhone || ''} {settings?.companyEmail ? `| ${settings.companyEmail}` : ''}</p>
+                <p>{website}</p>
+              </div>
             </div>
           </div>
-          <div className="rounded-[24px] border border-white/15 bg-white/10 px-4 py-3 text-right text-sm backdrop-blur">
-            <p className="text-[10px] uppercase tracking-[0.18em] text-blue-100">Proposal</p>
-            <p className="mt-2 text-lg font-semibold text-white">{project.projectName}</p>
-            <p className="mt-1 text-blue-100">{project.clientName || 'Client'}</p>
-            <p className="text-blue-100">Project #{project.projectNumber || project.id.slice(0, 8)}</p>
-            <p className="text-blue-100">Date: {proposalDate}</p>
-            <p className="text-blue-100">Version: {proposalVersion}</p>
-          </div>
-        </div>
-
-        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <div className="rounded-[22px] bg-white/10 px-4 py-3 backdrop-blur">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-100">Lines Included</p>
-            <p className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-white">{lines.length}</p>
-          </div>
-          <div className="rounded-[22px] bg-white/10 px-4 py-3 backdrop-blur">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-100">Scope Sections</p>
-            <p className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-white">{scopeBreakout.length}</p>
-          </div>
-          <div className="rounded-[22px] bg-white/10 px-4 py-3 backdrop-blur">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-100">Assumptions</p>
-            <p className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-white">{conditionLines.length}</p>
-          </div>
-          <div className="rounded-[22px] bg-white px-4 py-3 text-slate-900 shadow-sm">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Proposal Total</p>
-            <p className="mt-2 text-[24px] font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe(summary.baseBidTotal)}</p>
-          </div>
-        </div>
-      </div>
-
-      {topHighlights.length > 0 ? (
-        <div className="mb-6 grid gap-3 md:grid-cols-3">
-          {topHighlights.map((entry) => (
-            <div key={entry.section} className="rounded-[24px] border border-slate-200/80 bg-white/85 p-4 shadow-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Featured Scope</p>
-              <h3 className="mt-2 text-base font-semibold tracking-tight text-slate-950">{entry.section}</h3>
-              <p className="mt-1 text-xs text-slate-500">{entry.itemCount} lines included</p>
-              {entry.highlights.length > 0 ? <p className="mt-3 text-sm leading-6 text-slate-700">{entry.highlights.join(', ')}</p> : null}
+          <div className="min-w-[240px] text-right text-[13px] text-slate-600">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Client / Project</p>
+            <div className="mt-3 space-y-1">
+              <p className="text-[18px] font-semibold text-slate-950">{project.projectName}</p>
+              <p>{project.clientName || 'Client'}</p>
+              {project.address ? <p>{project.address}</p> : null}
+              <p>Project #{project.projectNumber || project.id.slice(0, 8)}</p>
+              <p>Date {proposalDate}</p>
+              <p className="text-[11px] text-slate-500">Version {proposalVersion}</p>
             </div>
-          ))}
+          </div>
         </div>
-      ) : null}
+      </header>
 
-      <section className="mb-5 rounded-[24px] border border-slate-200/80 bg-white/85 p-5 shadow-sm">
-        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Scope Summary</h3>
-        <div className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+      <section className="mt-8">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Scope Summary</h2>
+        <div className="mt-3 whitespace-pre-wrap text-[15px] leading-7 text-slate-700">
           {settings?.proposalIntro || DEFAULT_PROPOSAL_INTRO}
         </div>
       </section>
 
-      <section className="mb-5 rounded-[24px] border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#f6f9fd_100%)] p-5 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Pricing Summary</h3>
-          <span className="rounded-full bg-[var(--brand-soft)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-blue-800">Client-facing pricing</span>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {showMaterial ? <div className="rounded-[20px] border border-slate-200/80 bg-white/90 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Material</p><p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe(summary.materialSubtotal)}</p></div> : null}
-          {showLabor ? <div className="rounded-[20px] border border-emerald-200/80 bg-emerald-50/70 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700">Labor</p><p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe(summary.laborSubtotal)}</p></div> : null}
-          {showLabor && summary.conditionAdjustmentAmount !== 0 ? <div className="rounded-[20px] border border-blue-200/80 bg-blue-50/70 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-700">Conditions</p><p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe(summary.conditionAdjustmentAmount)}</p><p className="mt-1 text-[11px] text-slate-500">Project labor and job-condition adjustments</p></div> : null}
-          <div className="rounded-[20px] border border-amber-200/80 bg-amber-50/70 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">Markup + Tax</p><p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe((summary.overheadAmount || 0) + (summary.profitAmount || 0) + (summary.taxAmount || 0) + (summary.burdenAmount || 0))}</p></div>
-        </div>
-        <div className="mt-4 space-y-2 rounded-[20px] border border-slate-200/80 bg-white/85 p-4 text-sm">
-          {showOverhead && <div className="flex justify-between"><span>Overhead</span><span>{formatCurrencySafe(summary.overheadAmount)}</span></div>}
-          <div className="flex justify-between"><span>Profit</span><span>{formatCurrencySafe(summary.profitAmount)}</span></div>
-          {showMaterial ? <div className="flex justify-between"><span>Tax</span><span>{formatCurrencySafe(summary.taxAmount)}</span></div> : null}
-          <div className="flex justify-between border-t border-slate-200 pt-2 font-semibold text-slate-900"><span>Total Proposal</span><span>{formatCurrencySafe(summary.baseBidTotal)}</span></div>
+      <section className="mt-8">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Included Scope</h2>
+        <div className="mt-4 space-y-3">
+          {scopeSummaryRows.map((entry) => (
+            <div key={entry.section} className="border-b border-slate-100 pb-3 last:border-b-0 last:pb-0">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-[16px] font-semibold text-slate-950">{entry.section}</h3>
+                  <p className="mt-1 text-[14px] leading-6 text-slate-600">{entry.summary}</p>
+                </div>
+                <div className="shrink-0 text-right text-[13px] text-slate-500">
+                  <p>{entry.itemCount} {entry.itemCount === 1 ? 'item' : 'items'}</p>
+                  <p className="mt-1 font-semibold text-slate-900">{formatCurrencySafe(entry.total)}</p>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 
       {conditionLines.length > 0 ? (
-        <section className="mb-5 rounded-[24px] border border-slate-200/80 bg-white/85 p-5 shadow-sm">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Pricing Assumptions</h3>
-          <ul className="mt-3 space-y-2 text-xs text-slate-700">
+        <section className="mt-8">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Project Assumptions</h2>
+          <ul className="mt-3 space-y-2 text-[13px] leading-6 text-slate-600">
             {conditionLines.map((line) => (
-              <li key={line} className="rounded-2xl bg-slate-50/80 px-3 py-2">{line}</li>
+              <li key={line} className="flex gap-2"><span className="text-slate-400">•</span><span>{line}</span></li>
             ))}
           </ul>
         </section>
       ) : null}
 
       {project.specialNotes?.trim() ? (
-        <section className="mb-5 rounded-[24px] border border-slate-200/80 bg-white/85 p-5 shadow-sm">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Special Notes</h3>
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{project.specialNotes}</p>
+        <section className="mt-8">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Additional Notes</h2>
+          <p className="mt-3 whitespace-pre-wrap text-[14px] leading-7 text-slate-600">{project.specialNotes}</p>
         </section>
       ) : null}
 
-      <section className="mb-5 rounded-[24px] border border-slate-200/80 bg-white/85 p-5 shadow-sm">
-        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Included Scope By Category</h3>
-        <div className="mt-4 overflow-hidden rounded-[20px] border border-slate-200/80">
-          <table className="w-full text-xs">
-            <thead className="bg-slate-100/90">
+      <section className="mt-8">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Pricing Summary</h2>
+        <div className="mt-4 overflow-hidden border border-slate-200">
+          <table className="w-full text-[13px]">
+            <thead className="bg-slate-50">
               <tr>
-                <th className="px-3 py-2 text-left">Proposal Section</th>
-                <th className="px-3 py-2 text-right">Lines</th>
-                {showMaterial ? <th className="px-3 py-2 text-right">Material</th> : null}
-                {showLabor ? <th className="px-3 py-2 text-right">Labor</th> : null}
-                <th className="px-3 py-2 text-right">Total</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-600">Item</th>
+                <th className="px-4 py-3 text-right font-semibold text-slate-600">Amount</th>
               </tr>
             </thead>
             <tbody>
-              {scopeBreakout.map((entry, index) => (
-                <tr key={entry.section} className={`border-t border-slate-100 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-                  <td className="px-3 py-3">
-                    <p className="font-semibold text-slate-900">{entry.section}</p>
-                    {entry.highlights.length > 0 ? (
-                      <p className="mt-1 text-[11px] leading-5 text-slate-500">Includes: {entry.highlights.join(', ')}</p>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-3 text-right text-slate-700">{entry.itemCount}</td>
-                  {showMaterial ? <td className="px-3 py-3 text-right text-slate-700">{formatCurrencySafe(entry.material)}</td> : null}
-                  {showLabor ? <td className="px-3 py-3 text-right text-slate-700">{formatCurrencySafe(entry.labor)}</td> : null}
-                  <td className="px-3 py-3 text-right font-semibold text-slate-900">{formatCurrencySafe(entry.total)}</td>
+              {showMaterial ? (
+                <tr className="border-t border-slate-100">
+                  <td className="px-4 py-3 text-slate-700">Material</td>
+                  <td className="px-4 py-3 text-right text-slate-900">{formatCurrencySafe(summary.materialSubtotal)}</td>
                 </tr>
-              ))}
+              ) : null}
+              {showLabor ? (
+                <tr className="border-t border-slate-100">
+                  <td className="px-4 py-3 text-slate-700">Labor</td>
+                  <td className="px-4 py-3 text-right text-slate-900">{formatCurrencySafe(summary.adjustedLaborSubtotal || summary.laborSubtotal)}</td>
+                </tr>
+              ) : null}
+              {showOverhead ? (
+                <tr className="border-t border-slate-100">
+                  <td className="px-4 py-3 text-slate-700">Overhead</td>
+                  <td className="px-4 py-3 text-right text-slate-900">{formatCurrencySafe(summary.overheadAmount)}</td>
+                </tr>
+              ) : null}
+              <tr className="border-t border-slate-100">
+                <td className="px-4 py-3 text-slate-700">Profit</td>
+                <td className="px-4 py-3 text-right text-slate-900">{formatCurrencySafe(summary.profitAmount)}</td>
+              </tr>
+              {showMaterial ? (
+                <tr className="border-t border-slate-100">
+                  <td className="px-4 py-3 text-slate-700">Tax</td>
+                  <td className="px-4 py-3 text-right text-slate-900">{formatCurrencySafe(summary.taxAmount)}</td>
+                </tr>
+              ) : null}
+              <tr className="border-t-2 border-slate-300 bg-slate-50">
+                <td className="px-4 py-3 text-[15px] font-semibold text-slate-950">Total Proposal</td>
+                <td className="px-4 py-3 text-right text-[16px] font-semibold text-slate-950">{formatCurrencySafe(summary.baseBidTotal)}</td>
+              </tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section className="mt-6 grid gap-4 text-xs text-slate-600 md:grid-cols-3">
-        <div className="rounded-[22px] border border-slate-200/80 bg-white/85 p-4 shadow-sm">
-          <h4 className="font-semibold uppercase tracking-wide text-slate-500">Terms</h4>
-          <p className="mt-3 whitespace-pre-wrap leading-6">{settings?.proposalTerms || DEFAULT_PROPOSAL_TERMS}</p>
+      <section className="mt-8 grid gap-8 md:grid-cols-3">
+        <div>
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Terms</h2>
+          <ul className="mt-3 space-y-2 text-[13px] leading-6 text-slate-600">
+            {termLines.map((line) => (
+              <li key={line} className="flex gap-2"><span className="text-slate-400">•</span><span>{line}</span></li>
+            ))}
+          </ul>
         </div>
-        <div className="rounded-[22px] border border-slate-200/80 bg-white/85 p-4 shadow-sm">
-          <h4 className="font-semibold uppercase tracking-wide text-slate-500">Exclusions</h4>
-          <p className="mt-3 whitespace-pre-wrap leading-6">{settings?.proposalExclusions || DEFAULT_PROPOSAL_EXCLUSIONS}</p>
+        <div>
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Exclusions</h2>
+          <ul className="mt-3 space-y-2 text-[13px] leading-6 text-slate-600">
+            {exclusionLines.map((line) => (
+              <li key={line} className="flex gap-2"><span className="text-slate-400">•</span><span>{line}</span></li>
+            ))}
+          </ul>
         </div>
-        <div className="rounded-[22px] border border-slate-200/80 bg-white/85 p-4 shadow-sm">
-          <h4 className="font-semibold uppercase tracking-wide text-slate-500">Clarifications</h4>
-          <p className="mt-3 whitespace-pre-wrap leading-6">{settings?.proposalClarifications || DEFAULT_PROPOSAL_CLARIFICATIONS}</p>
+        <div>
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Clarifications</h2>
+          <ul className="mt-3 space-y-2 text-[13px] leading-6 text-slate-600">
+            {clarificationLines.map((line) => (
+              <li key={line} className="flex gap-2"><span className="text-slate-400">•</span><span>{line}</span></li>
+            ))}
+          </ul>
         </div>
       </section>
 
-      <section className="mt-8 grid grid-cols-2 gap-8 border-t border-slate-300 pt-5 text-xs">
+      <section className="mt-12 grid grid-cols-2 gap-10 border-t border-slate-300 pt-8 text-[12px]">
         <div>
-          <p className="mb-2 text-slate-500 uppercase tracking-wide">Acceptance</p>
-          <div className="mb-2 h-10 border-b border-slate-400" />
+          <p className="mb-2 text-slate-500 uppercase tracking-[0.18em]">Acceptance</p>
+          <div className="mb-2 h-12 border-b border-slate-400" />
           <p>{settings?.proposalAcceptanceLabel || 'Accepted By'}</p>
         </div>
         <div>
-          <p className="mb-2 text-slate-500 uppercase tracking-wide">Date</p>
-          <div className="mb-2 h-10 border-b border-slate-400" />
+          <p className="mb-2 text-slate-500 uppercase tracking-[0.18em]">Date</p>
+          <div className="mb-2 h-12 border-b border-slate-400" />
           <p>Authorized Signature Date</p>
         </div>
       </section>
-    </div>
+    </article>
   );
 }

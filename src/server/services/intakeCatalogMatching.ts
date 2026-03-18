@@ -36,6 +36,19 @@ function normalizeText(value: unknown): string {
     .trim();
 }
 
+function normalizeCode(value: unknown): string {
+  return String(value ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .trim();
+}
+
+function extractCodeFamily(value: unknown): string {
+  const normalized = String(value ?? '').toUpperCase().trim();
+  const matched = normalized.match(/^[A-Z]{1,6}/);
+  return matched ? matched[0] : '';
+}
+
 function tokenize(value: unknown): string[] {
   const synonyms: Record<string, string[]> = {
     partition: ['compartment', 'stall'],
@@ -106,6 +119,8 @@ export function prepareCatalogMatch(input: CatalogMatchInput, catalog: CatalogIt
   suggestedMatch: IntakeCatalogMatch | null;
 } {
   const itemCode = normalizeText(input.itemCode);
+  const itemCodeCompact = normalizeCode(input.itemCode);
+  const itemCodeFamily = extractCodeFamily(input.itemCode);
   const itemName = String(input.itemName || '').trim();
   const description = String(input.description || '').trim();
   const category = String(input.category || '').trim();
@@ -121,6 +136,8 @@ export function prepareCatalogMatch(input: CatalogMatchInput, catalog: CatalogIt
 
   for (const item of catalog) {
     const itemSku = normalizeText(item.sku);
+    const itemSkuCompact = normalizeCode(item.sku);
+    const itemSkuFamily = extractCodeFamily(item.sku);
     const itemDescription = normalizeText(item.description);
     const itemAliases = tokenize(`${(item.tags || []).join(' ')} ${item.notes || ''} ${item.family || ''} ${item.subcategory || ''}`);
     const inputDescription = normalizeText(description || itemName);
@@ -130,10 +147,11 @@ export function prepareCatalogMatch(input: CatalogMatchInput, catalog: CatalogIt
     const aliasExact = itemCode && itemAliases.includes(itemCode) ? 1 : 0;
     const unitCompatible = !unit || !item.uom ? 1 : Number(unit === normalizeText(item.uom));
 
-    const skuExact = itemCode && itemSku ? Number(itemCode === itemSku) : 0;
-    const skuContained = itemCode && itemSku && itemCode !== itemSku
-      ? Number(itemCode.includes(itemSku) || itemSku.includes(itemCode))
+    const skuExact = itemCodeCompact && itemSkuCompact ? Number(itemCodeCompact === itemSkuCompact) : 0;
+    const skuContained = itemCodeCompact && itemSkuCompact && itemCodeCompact !== itemSkuCompact
+      ? Number(itemCodeCompact.includes(itemSkuCompact) || itemSkuCompact.includes(itemCodeCompact))
       : 0;
+    const skuFamilyMatch = itemCodeFamily && itemSkuFamily ? Number(itemCodeFamily === itemSkuFamily) : 0;
     const descriptionOverlap = overlapScore(queryTokens, descriptionTokens);
     const descriptionContains = inputDescription && itemDescription
       ? Number(inputDescription.includes(itemDescription) || itemDescription.includes(inputDescription))
@@ -147,6 +165,7 @@ export function prepareCatalogMatch(input: CatalogMatchInput, catalog: CatalogIt
       (skuExact * 0.72) +
         (aliasExact * 0.3) +
         (skuContained * 0.12) +
+        (skuFamilyMatch * 0.14) +
         (descriptionOverlap * 0.48) +
         (descriptionContains * 0.16) +
         (categoryOverlap * 0.14) +
@@ -169,6 +188,7 @@ export function prepareCatalogMatch(input: CatalogMatchInput, catalog: CatalogIt
     if (skuExact) reasons.push('Exact item code / SKU match');
     else if (aliasExact) reasons.push('Exact alias / search-key match');
     else if (skuContained) reasons.push('Partial item code / SKU overlap');
+    else if (skuFamilyMatch) reasons.push('Item code family aligns with catalog SKU');
     if (descriptionContains) reasons.push('Description text closely contains catalog language');
     if (descriptionOverlap >= 0.55) reasons.push('Description tokens strongly overlap');
     else if (descriptionOverlap >= 0.3) reasons.push('Description tokens partially overlap');

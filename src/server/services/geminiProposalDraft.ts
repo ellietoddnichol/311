@@ -67,13 +67,15 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
     'Draft concise, professional proposal language from the estimate data provided.',
     'Use the estimate data as source material. Do not invent scope that is not supported by the input.',
     'Keep the language client-facing and commercially usable.',
+    'Keep all wording short, plain, and easy to scan.',
+    'Avoid long paragraphs, legal boilerplate, and repetitive phrasing.',
     mode === 'scope_summary'
-      ? 'Focus on drafting a clean scope summary for the proposal intro field. Leave other fields blank unless a change is strongly warranted.'
+      ? 'Focus on drafting a short scope summary for the proposal intro field. Use no more than two short sentences.'
       : mode === 'default_short'
-        ? 'Draft a short default proposal pack. Keep the intro to one concise paragraph. Keep terms, exclusions, and clarifications practical and brief. Return a short acceptance label suitable for signature.'
+        ? 'Draft a short default proposal pack. Keep the intro to one short paragraph. Keep terms, exclusions, and clarifications to three short lines each. Return a short acceptance label suitable for signature.'
       : mode === 'terms_and_conditions'
-        ? 'Improve the proposal terms, exclusions, and clarifications using the estimate scope and project assumptions. Keep the proposal intro unchanged unless necessary.'
-        : 'Draft proposal intro, terms, exclusions, and clarifications. Improve readability while preserving practical construction assumptions.',
+        ? 'Improve the proposal terms, exclusions, and clarifications using the estimate scope and project assumptions. Keep them short and practical. Keep the proposal intro unchanged unless necessary.'
+        : 'Draft proposal intro, terms, exclusions, and clarifications. Improve readability while preserving practical construction assumptions, and keep each field concise.',
     '',
     `Project Name: ${input.project.projectName}`,
     `Client: ${input.project.clientName || ''}`,

@@ -1,33 +1,26 @@
 import { SettingsRecord } from '../types/estimator';
 
 export const DEFAULT_PROPOSAL_INTRO = [
-  'Brighten Builders, LLC is pleased to provide this proposal for the scope outlined in this estimate. This pricing reflects the included work items, the current project information available at the time of pricing, and the assumptions listed in this proposal.',
-  'Unless specifically noted otherwise, pricing assumes standard site access, coordinated work areas, normal material handling, and one continuous mobilization for the included scope.',
+  'Thank you for the opportunity to provide pricing for the included scope.',
+  'This proposal covers the listed items based on the current bid information provided.',
 ].join('\n\n');
 
 export const DEFAULT_PROPOSAL_TERMS = [
-  'Pricing is valid for 30 calendar days from the proposal date unless otherwise stated in writing.',
-  'Proposal pricing is based on normal working hours, reasonable site access, and installation sequencing that allows the included work to proceed efficiently.',
-  'Material price escalation, freight increases, tax changes, schedule delays, or customer-directed scope revisions after proposal issuance may require a pricing adjustment.',
-  'Work outside the accepted scope will be handled by written change order before execution.',
-  'Applicable sales tax is included only where specifically stated in the pricing summary.',
+  'Pricing is valid for 30 days.',
+  'Work outside this scope will be handled by change order.',
+  'Pricing assumes normal working hours and standard site access.',
 ].join('\n');
 
 export const DEFAULT_PROPOSAL_EXCLUSIONS = [
-  'Permits, permit fees, bonds, special inspections, and testing unless specifically included in the scope.',
-  'Patch, paint, wall repair, ceiling repair, and finish touch-up by others unless specifically included.',
-  'Electrical rough-in, dedicated power, low-voltage wiring, backing, blocking, and structural support unless specifically included.',
-  'Unforeseen field conditions, concealed conditions, hazardous materials abatement, and code-required upgrades not shown in the bid documents.',
-  'Demolition, removals, disposal, and temporary protection except where specifically described in the included scope.',
-  'Off-hours work, overtime, phased turnover, premium access logistics, and additional mobilizations unless specifically included.',
+  'Permits, testing, and bonds unless specifically included.',
+  'Patch, paint, and repairs unless specifically included.',
+  'Electrical, backing, and structural support unless specifically included.',
 ].join('\n');
 
 export const DEFAULT_PROPOSAL_CLARIFICATIONS = [
-  'This proposal is based on the drawings, specifications, and other bid information made available at the time of pricing; final field verification remains required before release for fabrication or installation.',
-  'Quantities, room names, and scope descriptions should be reviewed against final approved construction documents; revisions in scope, layout, or quantity may require updated pricing.',
-  'Installation assumptions are based on substrate and field conditions being suitable for the specified products and methods of installation unless specifically noted otherwise.',
-  'Material lead times, procurement timing, and installation schedule remain subject to final release dates and project coordination by others.',
-  'This proposal includes only the listed scope categories and accepted estimate items shown in this submission.',
+  'Pricing is based on the current bid documents provided.',
+  'Final field verification is required before release or installation.',
+  'Scope or quantity changes may require revised pricing.',
 ].join('\n');
 
 export const DEFAULT_PROPOSAL_ACCEPTANCE_LABEL = 'Accepted By / Title';

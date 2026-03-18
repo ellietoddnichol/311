@@ -47,6 +47,8 @@ interface StructuredSpreadsheetResult {
   preludeText: string;
 }
 
+const SPREADSHEET_GEMINI_TIMEOUT_MS = Number.parseInt(process.env.INTAKE_SPREADSHEET_GEMINI_TIMEOUT_MS || '12000', 10);
+
 type ParsedChunkType = 'project_metadata' | 'header_row' | 'section_header' | 'actual_scope_line' | 'ignore';
 
 interface ParsedChunkClassification {
@@ -54,8 +56,35 @@ interface ParsedChunkClassification {
   metadata: Partial<IntakeProjectMetadata>;
 }
 
+interface CatalogInferenceHint {
+  category: string;
+  itemName: string;
+  description: string;
+}
+
 function asText(value: unknown): string {
   return String(value ?? '').trim();
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return promise;
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 function hasProjectMetadataValue(metadata: Partial<IntakeProjectMetadata>): boolean {
@@ -334,6 +363,50 @@ function inferCategory(text: string): string {
   return '';
 }
 
+function normalizeCompactCode(value: unknown): string {
+  return String(value ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .trim();
+}
+
+function codeFamily(value: unknown): string {
+  const normalized = String(value ?? '').toUpperCase().trim();
+  const match = normalized.match(/^[A-Z]{1,6}/);
+  return match ? match[0] : '';
+}
+
+function inferFromCatalogByCode(catalog: CatalogItem[], itemCode: string): CatalogInferenceHint | null {
+  const compactCode = normalizeCompactCode(itemCode);
+  const family = codeFamily(itemCode);
+  if (!compactCode && !family) return null;
+
+  const exact = compactCode
+    ? catalog.find((item) => normalizeCompactCode(item.sku) === compactCode)
+    : null;
+
+  if (exact) {
+    return {
+      category: exact.category || '',
+      itemName: exact.description || exact.sku || '',
+      description: exact.description || exact.sku || '',
+    };
+  }
+
+  const familyMatches = family
+    ? catalog.filter((item) => codeFamily(item.sku) === family)
+    : [];
+
+  if (!familyMatches.length) return null;
+
+  const first = familyMatches[0];
+  return {
+    category: first.category || '',
+    itemName: first.description || first.sku || '',
+    description: first.description || first.sku || '',
+  };
+}
+
 function normalizeExtractedCategory(candidate: string, context: string): string {
   const inferred = inferCategory(context);
   const normalizedCandidate = normalizeComparableText(candidate);
@@ -379,6 +452,14 @@ function expandMatrixHeaderItem(header: string): { itemCode: string; itemName: s
     description: itemCode,
     category: inferCategory(itemCode),
   };
+}
+
+function looksLikeItemCode(value: string): boolean {
+  const text = asText(value).toUpperCase();
+  if (!text) return false;
+  if (text.length > 24) return false;
+  if (!/^[A-Z0-9][A-Z0-9\-./ ]+$/.test(text)) return false;
+  return /\d/.test(text) || /[-/]/.test(text) || /^[A-Z]{2,6}$/.test(text);
 }
 
 function parseQtyAndText(line: string): { qty: number; text: string } {
@@ -471,7 +552,7 @@ function inferSpreadsheetKind(rows: string[][], mapping: ReturnType<typeof detec
   return 'spreadsheet-unstructured';
 }
 
-function parseSpreadsheetRows(rows: Array<Array<string | number | boolean | null | undefined>>, sourceReference: string): StructuredSpreadsheetResult | null {
+function parseSpreadsheetRows(rows: Array<Array<string | number | boolean | null | undefined>>, sourceReference: string, catalog: CatalogItem[]): StructuredSpreadsheetResult | null {
   const normalizedRows = rows
     .map((row) => row.map((cell) => asText(cell)))
     .filter((row) => row.some(Boolean));
@@ -510,12 +591,13 @@ function parseSpreadsheetRows(rows: Array<Array<string | number | boolean | null
         if (quantity <= 0) continue;
         const itemHeader = asText(tableRows[0][columnIndex]) || `Column ${columnIndex + 1}`;
         const itemDetails = expandMatrixHeaderItem(itemHeader);
+        const catalogHint = inferFromCatalogByCode(catalog, itemDetails.itemCode);
         outputRows.push({
           roomName,
-          category: itemDetails.category,
+          category: itemDetails.category || catalogHint?.category || '',
           itemCode: itemDetails.itemCode,
-          itemName: itemDetails.itemName,
-          description: itemDetails.description,
+          itemName: itemDetails.itemName || catalogHint?.itemName || itemDetails.description,
+          description: itemDetails.description || catalogHint?.description || itemDetails.itemName,
           quantity,
           unit: 'EA',
           notes: '',
@@ -567,16 +649,25 @@ function parseSpreadsheetRows(rows: Array<Array<string | number | boolean | null
       const row = dataRows[rowIndex];
       const classification = classifyParsedChunk(row, headerRowIndex + rowIndex + 1, preludeMetadata);
       if (classification.kind !== 'actual_scope_line') continue;
-      const itemName = mapping.item !== null ? asText(row[mapping.item]) : '';
-      const description = mapping.description !== null ? asText(row[mapping.description]) : '';
-      const category = mapping.category !== null ? asText(row[mapping.category]) : '';
+      const rawItem = mapping.item !== null ? asText(row[mapping.item]) : '';
+      const rawDescription = mapping.description !== null ? asText(row[mapping.description]) : '';
+      const rawCategory = mapping.category !== null ? asText(row[mapping.category]) : '';
+      const explicitItemCode = mapping.itemCode !== null ? asText(row[mapping.itemCode]) : '';
+      const inferredItemCode = explicitItemCode || (looksLikeItemCode(rawItem) ? rawItem : '');
+      const expandedItem = inferredItemCode ? expandMatrixHeaderItem(inferredItemCode) : null;
+      const catalogHint = inferredItemCode ? inferFromCatalogByCode(catalog, inferredItemCode) : null;
+      const itemName = rawDescription
+        ? (rawItem && rawItem !== inferredItemCode ? rawItem : rawDescription)
+        : catalogHint?.itemName || expandedItem?.itemName || rawItem || '';
+      const description = rawDescription || catalogHint?.description || expandedItem?.description || (rawItem && rawItem !== inferredItemCode ? rawItem : '') || rawItem || '';
+      const category = normalizeExtractedCategory(rawCategory, `${inferredItemCode} ${itemName} ${description}`) || expandedItem?.category || catalogHint?.category || '';
       if (!itemName && !description && !category) continue;
       const parsedQuantity = mapping.qty !== null ? parsePositiveNumberWithDefault(row[mapping.qty], 1) : { value: 1, defaulted: true };
       const explicitUnit = mapping.unit !== null ? asText(row[mapping.unit]) : '';
       outputRows.push({
         roomName: mapping.room !== null ? normalizeRoomName(row[mapping.room]) : 'General Scope',
-        category: category || inferCategory(`${itemName} ${description}`),
-        itemCode: mapping.itemCode !== null ? asText(row[mapping.itemCode]) : '',
+        category: category || inferCategory(`${inferredItemCode} ${itemName} ${description}`),
+        itemCode: inferredItemCode,
         itemName: itemName || description,
         description: description || itemName,
         quantity: parsedQuantity.value,
@@ -790,9 +881,10 @@ function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogItem[], ma
         }, catalog)
       : { catalogMatch: null, suggestedMatch: null };
 
+    const resolvedCategory = line.category || catalogMatch?.category || suggestedMatch?.category || '';
     const completeness = description && line.quantity > 0 && line.unit ? 'complete' : 'partial';
     const warnings = [...line.warnings];
-    if (!line.category) warnings.push('Category could not be confidently inferred.');
+    if (!resolvedCategory) warnings.push('Category could not be confidently inferred.');
     if (!catalogMatch && !suggestedMatch) warnings.push('No catalog match identified.');
     const matchStatus = catalogMatch ? 'matched' : suggestedMatch ? 'suggested' : 'needs_match';
     const matchExplanation = catalogMatch?.reason || suggestedMatch?.reason || 'No confident catalog candidate was found.';
@@ -802,7 +894,7 @@ function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogItem[], ma
       roomName: normalizeRoomName(line.roomName),
       itemName: line.itemName || description,
       description,
-      category: line.category,
+      category: resolvedCategory,
       itemCode: line.itemCode,
       quantity: line.quantity,
       unit: line.unit || 'EA',
@@ -861,7 +953,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         skip_empty_lines: true,
         trim: true,
       }) as Array<Array<string | number | boolean | null | undefined>>;
-      const parsed = parseSpreadsheetRows(rows, fileName);
+      const parsed = parseSpreadsheetRows(rows, fileName, catalog);
       if (parsed) parsedSheets.push(parsed);
     } else {
       const workbook = xlsx.read(Buffer.from(input.dataBase64, 'base64'), { type: 'buffer' });
@@ -869,7 +961,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       workbook.SheetNames.forEach((sheetName) => {
         const sheet = workbook.Sheets[sheetName];
         const rows = xlsx.utils.sheet_to_json<Array<string | number | boolean | null | undefined>>(sheet, { header: 1, defval: '' });
-        const parsed = parseSpreadsheetRows(rows, `${fileName}:${sheetName}`);
+        const parsed = parseSpreadsheetRows(rows, `${fileName}:${sheetName}`, catalog);
         if (parsed) parsedSheets.push(parsed);
       });
     }
@@ -920,22 +1012,26 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
     let metadataSources = ['spreadsheet-structure'];
 
     try {
-      const gemini = await extractIntakeFromGemini({
-        fileName,
-        mimeType,
-        sourceType: 'spreadsheet',
-        extractedText: `${preludeText}\n${flattenedText}`,
-        normalizedRows: deterministicRows.map((row) => ({
-          roomArea: row.roomName,
-          category: row.category,
-          itemCode: row.itemCode,
-          itemName: row.itemName,
-          description: row.description,
-          quantity: row.quantity,
-          unit: row.unit,
-          notes: row.notes,
-        })),
-      });
+      const gemini = await withTimeout(
+        extractIntakeFromGemini({
+          fileName,
+          mimeType,
+          sourceType: 'spreadsheet',
+          extractedText: `${preludeText}\n${flattenedText}`,
+          normalizedRows: deterministicRows.map((row) => ({
+            roomArea: row.roomName,
+            category: row.category,
+            itemCode: row.itemCode,
+            itemName: row.itemName,
+            description: row.description,
+            quantity: row.quantity,
+            unit: row.unit,
+            notes: row.notes,
+          })),
+        }),
+        SPREADSHEET_GEMINI_TIMEOUT_MS,
+        'Spreadsheet parsed locally. AI enrichment timed out, so deterministic parsing was used.'
+      );
 
       warnings.push(...filterSpreadsheetGeminiWarnings(gemini.warnings));
       const geminiLines = gemini.parsedLines.map((line) => ({

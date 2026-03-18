@@ -373,18 +373,69 @@ export function ProjectWorkspace() {
     setActiveTab('proposal');
   }
 
-  async function exportProposal() {
+  function collectProposalStyles(): string {
+    const cssChunks: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      try {
+        const rules = Array.from(sheet.cssRules || []);
+        if (!rules.length) continue;
+        cssChunks.push(rules.map((rule) => rule.cssText).join('\n'));
+      } catch (_error) {
+        // Ignore cross-origin or restricted stylesheets.
+      }
+    }
+
+    cssChunks.push(`
+      @page { size: A4; margin: 0.55in; }
+      html, body { background: #ffffff !important; margin: 0; padding: 0; }
+      body { color: #0f172a; }
+      .print-proposal { max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; }
+      .proposal-document { box-shadow: none !important; }
+    `);
+
+    return cssChunks.join('\n');
+  }
+
+  function buildProposalHtml(container: HTMLElement, title: string): string {
+    const styles = collectProposalStyles();
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${styles}</style></head><body>${container.outerHTML}</body></html>`;
+  }
+
+  function getProposalContainer(): HTMLElement | null {
+    return document.querySelector('[data-proposal-document="true"]') as HTMLElement | null;
+  }
+
+  async function printProposalDocument() {
     if (!project) return;
-    const container = document.querySelector('.print-proposal') as HTMLElement | null;
-    if (!container) {
-      window.print();
+    const container = getProposalContainer();
+    if (!container) return;
+
+    const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=1100,height=900');
+    if (!printWindow) {
+      window.alert('Unable to open the print window. Check popup settings and try again.');
       return;
     }
+
+    const title = `proposal-${project.projectNumber || project.id.slice(0, 8)}`;
+    printWindow.document.open();
+    printWindow.document.write(buildProposalHtml(container, title));
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
+  }
+
+  async function exportProposal() {
+    if (!project) return;
+    const container = getProposalContainer();
+    if (!container) return;
 
     const dateStamp = new Date().toISOString().slice(0, 10);
     const number = project.projectNumber || project.id.slice(0, 8);
     const filename = `proposal-${number}-${dateStamp}.html`;
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${filename}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#0f172a}.print-proposal{max-width:8.5in;margin:0 auto}</style></head><body>${container.outerHTML}</body></html>`;
+    const html = buildProposalHtml(container, filename);
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1485,7 +1536,7 @@ export function ProjectWorkspace() {
                   >
                     Reset To Defaults
                   </button>
-                  <button onClick={() => window.print()} className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Print</button>
+                  <button onClick={() => void printProposalDocument()} className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Print</button>
                   <button onClick={exportProposal} className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-4 text-[11px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03]"><Download className="h-3.5 w-3.5" />Export</button>
                 </div>
               </div>
