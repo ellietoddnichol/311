@@ -4,6 +4,8 @@ export type DeliveryPricingMode = 'included' | 'flat' | 'percent';
 
 export interface ProjectJobConditions {
   locationLabel: string;
+  travelDistanceMiles: number | null;
+  installerCount: number;
   locationTaxPercent: number | null;
   unionWage: boolean;
   unionWageMultiplier: number;
@@ -42,8 +44,10 @@ export interface ProjectRecord {
   projectNumber: string | null;
   projectName: string;
   clientName: string | null;
+  generalContractor: string | null;
   estimator: string | null;
   bidDate: string | null;
+  proposalDate: string | null;
   dueDate: string | null;
   address: string | null;
   projectType: string | null;
@@ -77,6 +81,8 @@ export interface RoomRecord {
   updatedAt: string;
 }
 
+export type TakeoffPricingSource = 'auto' | 'manual';
+
 export interface TakeoffLineRecord {
   id: string;
   projectId: string;
@@ -95,6 +101,7 @@ export interface TakeoffLineRecord {
   laborMinutes: number;
   laborCost: number;
   baseLaborCost: number;
+  pricingSource: TakeoffPricingSource;
   unitSell: number;
   lineTotal: number;
   notes: string | null;
@@ -159,6 +166,7 @@ export interface SettingsRecord {
   companyPhone: string;
   companyEmail: string;
   logoUrl: string;
+  defaultLaborRatePerHour: number;
   defaultOverheadPercent: number;
   defaultProfitPercent: number;
   defaultTaxPercent: number;

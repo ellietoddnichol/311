@@ -9,7 +9,7 @@ import {
 } from '../../shared/utils/proposalDefaults.ts';
 
 export function initEstimatorSchema() {
-  const defaultLaborRatePerHour = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 30);
+  const defaultLaborRatePerHour = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 85);
 
   estimatorDb.exec(`
     CREATE TABLE IF NOT EXISTS projects_v1 (
@@ -17,8 +17,10 @@ export function initEstimatorSchema() {
       project_number TEXT,
       project_name TEXT NOT NULL,
       client_name TEXT,
+      general_contractor TEXT,
       estimator TEXT,
       bid_date TEXT,
+      proposal_date TEXT,
       due_date TEXT,
       address TEXT,
       project_type TEXT,
@@ -71,6 +73,7 @@ export function initEstimatorSchema() {
       labor_minutes REAL NOT NULL DEFAULT 0,
       labor_cost REAL NOT NULL DEFAULT 0,
       base_labor_cost REAL NOT NULL DEFAULT 0,
+      pricing_source TEXT NOT NULL DEFAULT 'auto',
       unit_sell REAL NOT NULL DEFAULT 0,
       line_total REAL NOT NULL DEFAULT 0,
       notes TEXT,
@@ -90,6 +93,7 @@ export function initEstimatorSchema() {
       company_phone TEXT NOT NULL,
       company_email TEXT NOT NULL,
       logo_url TEXT NOT NULL,
+      default_labor_rate_per_hour REAL NOT NULL DEFAULT 85,
       default_overhead_percent REAL NOT NULL DEFAULT 0,
       default_profit_percent REAL NOT NULL DEFAULT 0,
       default_tax_percent REAL NOT NULL DEFAULT 0,
@@ -203,6 +207,11 @@ export function initEstimatorSchema() {
     estimatorDb.exec("ALTER TABLE settings_v1 ADD COLUMN proposal_exclusions TEXT NOT NULL DEFAULT ''");
   }
 
+  const hasDefaultLaborRatePerHour = settingsColumns.some((column) => column.name === 'default_labor_rate_per_hour');
+  if (!hasDefaultLaborRatePerHour) {
+    estimatorDb.exec(`ALTER TABLE settings_v1 ADD COLUMN default_labor_rate_per_hour REAL NOT NULL DEFAULT ${defaultLaborRatePerHour}`);
+  }
+
   const hasProposalClarifications = settingsColumns.some((column) => column.name === 'proposal_clarifications');
   if (!hasProposalClarifications) {
     estimatorDb.exec("ALTER TABLE settings_v1 ADD COLUMN proposal_clarifications TEXT NOT NULL DEFAULT ''");
@@ -236,6 +245,16 @@ export function initEstimatorSchema() {
     estimatorDb.exec('ALTER TABLE projects_v1 ADD COLUMN special_notes TEXT');
   }
 
+  const hasGeneralContractor = projectColumns.some((column) => column.name === 'general_contractor');
+  if (!hasGeneralContractor) {
+    estimatorDb.exec('ALTER TABLE projects_v1 ADD COLUMN general_contractor TEXT');
+  }
+
+  const hasProposalDate = projectColumns.some((column) => column.name === 'proposal_date');
+  if (!hasProposalDate) {
+    estimatorDb.exec('ALTER TABLE projects_v1 ADD COLUMN proposal_date TEXT');
+  }
+
   estimatorDb.exec("UPDATE projects_v1 SET job_conditions_json = '{}' WHERE job_conditions_json IS NULL OR trim(job_conditions_json) = ''");
   estimatorDb.exec("UPDATE projects_v1 SET scope_categories_json = '[]' WHERE scope_categories_json IS NULL OR trim(scope_categories_json) = ''");
   const hasBaseMaterialCost = takeoffColumns.some((column) => column.name === 'base_material_cost');
@@ -250,9 +269,23 @@ export function initEstimatorSchema() {
     estimatorDb.exec("UPDATE takeoff_lines_v1 SET base_labor_cost = labor_cost WHERE base_labor_cost = 0");
   }
 
+  const hasPricingSource = takeoffColumns.some((column) => column.name === 'pricing_source');
+  if (!hasPricingSource) {
+    estimatorDb.exec("ALTER TABLE takeoff_lines_v1 ADD COLUMN pricing_source TEXT NOT NULL DEFAULT 'auto'");
+  }
+
+  estimatorDb.exec(`
+    UPDATE takeoff_lines_v1
+    SET pricing_source = CASE
+      WHEN abs(coalesce(unit_sell, 0) - round(coalesce(material_cost, 0) + coalesce(labor_cost, 0), 2)) > 0.009 THEN 'manual'
+      ELSE 'auto'
+    END
+    WHERE pricing_source IS NULL OR trim(pricing_source) = ''
+  `);
+
   if (Number.isFinite(defaultLaborRatePerHour) && defaultLaborRatePerHour > 0) {
     const rows = estimatorDb.prepare(`
-      SELECT id, qty, material_cost, labor_minutes, labor_cost, base_labor_cost, unit_sell
+      SELECT id, qty, material_cost, labor_minutes, labor_cost, base_labor_cost, pricing_source, unit_sell
       FROM takeoff_lines_v1
       WHERE labor_minutes > 0
         AND (labor_cost <= 0 OR base_labor_cost <= 0)
@@ -263,6 +296,7 @@ export function initEstimatorSchema() {
       labor_minutes: number;
       labor_cost: number;
       base_labor_cost: number;
+      pricing_source: string;
       unit_sell: number;
     }>;
 
@@ -270,6 +304,7 @@ export function initEstimatorSchema() {
       UPDATE takeoff_lines_v1
       SET labor_cost = ?,
           base_labor_cost = ?,
+          pricing_source = ?,
           unit_sell = ?,
           line_total = ?,
           updated_at = ?
@@ -280,12 +315,17 @@ export function initEstimatorSchema() {
       const derivedLaborCost = Number(((row.labor_minutes / 60) * defaultLaborRatePerHour).toFixed(2));
       const resolvedLaborCost = row.labor_cost > 0 ? row.labor_cost : derivedLaborCost;
       const resolvedBaseLaborCost = row.base_labor_cost > 0 ? row.base_labor_cost : derivedLaborCost;
-      const resolvedUnitSell = row.unit_sell > 0 ? row.unit_sell : Number((row.material_cost + resolvedLaborCost).toFixed(2));
+      const resolvedPricingSource = row.pricing_source === 'manual' ? 'manual' : 'auto';
+      const calculatedUnitSell = Number((row.material_cost + resolvedLaborCost).toFixed(2));
+      const resolvedUnitSell = resolvedPricingSource === 'manual' && row.unit_sell > 0
+        ? row.unit_sell
+        : calculatedUnitSell;
       const resolvedLineTotal = Number((resolvedUnitSell * Number(row.qty || 0)).toFixed(2));
 
       updateLine.run(
         resolvedLaborCost,
         resolvedBaseLaborCost,
+        resolvedPricingSource,
         resolvedUnitSell,
         resolvedLineTotal,
         new Date().toISOString(),
@@ -304,10 +344,10 @@ export function initEstimatorSchema() {
   if (!settingsExists) {
     estimatorDb.prepare(`
       INSERT INTO settings_v1 (
-        id, company_name, company_address, company_phone, company_email, logo_url,
+        id, company_name, company_address, company_phone, company_email, logo_url, default_labor_rate_per_hour,
         default_overhead_percent, default_profit_percent, default_tax_percent, default_labor_burden_percent,
         proposal_intro, proposal_terms, proposal_exclusions, proposal_clarifications, proposal_acceptance_label, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'global',
       'Brighten Builders, LLC',
@@ -315,6 +355,7 @@ export function initEstimatorSchema() {
       '',
       '',
       'https://static.wixstatic.com/media/18d091_be2178f095264ea0a1d2c8d78520b2ce%7Emv2.png/v1/fit/w_2500,h_1330,al_c/18d091_be2178f095264ea0a1d2c8d78520b2ce%7Emv2.png',
+      defaultLaborRatePerHour,
       15,
       10,
       8.25,
@@ -327,6 +368,12 @@ export function initEstimatorSchema() {
       new Date().toISOString()
     );
   } else {
+    estimatorDb.prepare(`
+      UPDATE settings_v1
+      SET default_labor_rate_per_hour = ?, updated_at = ?
+      WHERE id = 'global' AND (default_labor_rate_per_hour IS NULL OR default_labor_rate_per_hour <= 0)
+    `).run(defaultLaborRatePerHour, new Date().toISOString());
+
     estimatorDb.prepare(`
       UPDATE settings_v1
       SET company_name = ?, updated_at = ?

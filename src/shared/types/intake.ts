@@ -1,144 +1,142 @@
-import { z } from 'zod';
+export type IntakeSourceType = 'spreadsheet' | 'pdf' | 'document';
 
-export const intakeSourceTypeSchema = z.enum(['pdf', 'document', 'spreadsheet', 'image']);
+export type IntakeSourceKind =
+  | 'spreadsheet-row'
+  | 'spreadsheet-matrix'
+  | 'spreadsheet-mixed'
+  | 'spreadsheet-unstructured'
+  | 'pdf-document'
+  | 'text-document'
+  | 'semi-structured-text';
 
-export const intakeMatchStatusSchema = z.enum(['matched', 'needs_review', 'unmatched', 'ignored']);
+export type IntakeMatchConfidence = 'strong' | 'possible' | 'none';
 
-export const intakeLaborBasisSchema = z.enum(['material_only', 'install_only', 'labor_and_material', 'unspecified']);
+export type IntakeMatchStatus = 'matched' | 'suggested' | 'needs_match';
 
-export const intakeParseRequestSchema = z.object({
-  fileName: z.string().min(1),
-  mimeType: z.string().min(1).default('application/octet-stream'),
-  sourceType: intakeSourceTypeSchema,
-  dataBase64: z.string().optional(),
-  extractedText: z.string().optional(),
-  normalizedRows: z.array(z.record(z.string(), z.unknown())).optional(),
-});
+export type IntakeAssumptionKind =
+  | 'pricing_basis'
+  | 'tax'
+  | 'delivery'
+  | 'bond'
+  | 'shipment'
+  | 'site_visit'
+  | 'alternate'
+  | 'clarification'
+  | 'exclusion'
+  | 'other';
 
-export const intakeProjectSchema = z.object({
-  projectName: z.string().default(''),
-  projectNumber: z.string().default(''),
-  client: z.string().default(''),
-  gc: z.string().default(''),
-  address: z.string().default(''),
-  bidDate: z.string().default(''),
-  estimator: z.string().default(''),
-  pricingMode: intakeLaborBasisSchema.default('unspecified'),
-  scopeSummary: z.string().default(''),
-  sourceFiles: z.array(z.string()).default([]),
-});
+export interface IntakeParseRequest {
+  fileName: string;
+  mimeType: string;
+  sourceType?: IntakeSourceType;
+  dataBase64?: string;
+  extractedText?: string;
+  matchCatalog?: boolean;
+}
 
-export const intakeRoomSchema = z.object({
-  name: z.string().default(''),
-  sourceReference: z.string().default(''),
-  confidence: z.number().min(0).max(1).default(0),
-});
+export interface IntakeProjectAssumption {
+  kind: IntakeAssumptionKind;
+  text: string;
+  confidence: number;
+}
 
-export const intakeMatchCandidateSchema = z.object({
-  catalogItemId: z.string().default(''),
-  sku: z.string().default(''),
-  description: z.string().default(''),
-  category: z.string().default(''),
-  unit: z.string().default(''),
-  score: z.number().min(0).max(1).default(0),
-  reason: z.string().default(''),
-});
+export interface IntakeProjectMetadata {
+  projectName: string;
+  projectNumber: string;
+  client: string;
+  generalContractor: string;
+  address: string;
+  bidDate: string;
+  proposalDate: string;
+  estimator: string;
+  sourceFiles: string[];
+  assumptions: IntakeProjectAssumption[];
+  pricingBasis: '' | 'material_only' | 'labor_only' | 'labor_and_material';
+  confidence: number;
+  sources: string[];
+}
 
-export const intakeWebEnrichmentSchema = z.object({
-  applied: z.boolean().default(false),
-  query: z.string().default(''),
-  summary: z.string().default(''),
-  references: z.array(z.string()).default([]),
-});
+export interface IntakeCatalogMatch {
+  catalogItemId: string;
+  sku: string;
+  description: string;
+  category: string;
+  unit: string;
+  materialCost: number;
+  laborMinutes: number;
+  score: number;
+  confidence: IntakeMatchConfidence;
+  reason: string;
+}
 
-export const intakeParsedLineSchema = z.object({
-  roomArea: z.string().default(''),
-  category: z.string().default(''),
-  itemCode: z.string().default(''),
-  itemName: z.string().default(''),
-  description: z.string().default(''),
-  quantity: z.number().default(1),
-  unit: z.string().default('EA'),
-  notes: z.string().default(''),
-  sourceReference: z.string().default(''),
-  confidence: z.number().min(0).max(1).default(0),
-  matchStatus: intakeMatchStatusSchema.default('unmatched'),
-  matchedCatalogItemId: z.string().nullable().default(null),
-  matchedSku: z.string().nullable().default(null),
-  matchReason: z.string().default(''),
-  matchScore: z.number().min(0).max(1).default(0),
-  matchCandidates: z.array(intakeMatchCandidateSchema).default([]),
-  webEnrichment: intakeWebEnrichmentSchema.optional(),
-});
+export interface IntakeReviewLine {
+  lineId: string;
+  roomName: string;
+  itemName: string;
+  description: string;
+  category: string;
+  itemCode: string;
+  quantity: number;
+  unit: string;
+  notes: string;
+  sourceReference: string;
+  laborIncluded: boolean | null;
+  materialIncluded: boolean | null;
+  confidence: number;
+  completeness: 'complete' | 'partial';
+  matchStatus: IntakeMatchStatus;
+  matchedCatalogItemId: string | null;
+  matchExplanation: string;
+  catalogMatch: IntakeCatalogMatch | null;
+  suggestedMatch: IntakeCatalogMatch | null;
+  warnings: string[];
+}
 
-export const intakeAssumptionsSchema = z.object({
-  deliveryIncluded: z.boolean().nullable().default(null),
-  tax: z.boolean().nullable().default(null),
-  union: z.boolean().nullable().default(null),
-  prevailingWage: z.boolean().nullable().default(null),
-  laborBasis: intakeLaborBasisSchema.default('unspecified'),
-  projectConditions: z.array(z.string()).default([]),
-  specialNotes: z.array(z.string()).default([]),
-});
+export interface IntakeRoomCandidate {
+  roomName: string;
+  sourceReference: string;
+  lineCount: number;
+  confidence: number;
+}
 
-export const intakeProposalDraftSchema = z.object({
-  intro: z.string().default(''),
-  terms: z.string().default(''),
-  exclusions: z.array(z.string()).default([]),
-  clarifications: z.array(z.string()).default([]),
-});
+export interface IntakeProposalAssist {
+  introDraft: string;
+  scopeSummaryDraft: string;
+  clarificationsDraft: string;
+  exclusionsDraft: string;
+}
 
-export const intakeStrategySchema = z.object({
-  classification: z.string().default(''),
-  selectedStrategy: z.string().default(''),
-  summary: z.string().default(''),
-  primaryModel: z.string().default(''),
-  supportingModels: z.array(z.string()).default([]),
-  usedLocalSpreadsheetInterpretation: z.boolean().default(false),
-  usedWebEnrichment: z.boolean().default(false),
-});
+export interface IntakeConfidenceSummary {
+  metadata: number;
+  lineExtraction: number;
+  matching: number;
+  overall: number;
+}
 
-export const intakeDiagnosticsSchema = z.object({
-  warnings: z.array(z.string()).default([]),
-  logs: z.array(z.string()).default([]),
-  modelDecisions: z.array(z.string()).default([]),
-  fallbackReasons: z.array(z.string()).default([]),
-  webLookups: z.array(z.string()).default([]),
-  confidenceBySection: z.object({
-    project: z.number().min(0).max(1).default(0),
-    scope: z.number().min(0).max(1).default(0),
-    matching: z.number().min(0).max(1).default(0),
-    assumptions: z.number().min(0).max(1).default(0),
-  }),
-});
+export interface IntakeParseDiagnostics {
+  parserStrategy: string;
+  parseStrategy: string;
+  sourceKind: IntakeSourceKind;
+  metadataSources: string[];
+  warnings: string[];
+  totalLines: number;
+  completeLines: number;
+  matchedLines: number;
+  needsMatchLines: number;
+  modelUsed: string;
+  confidenceSummary: IntakeConfidenceSummary;
+  webEnrichmentUsed: boolean;
+}
 
-export const intakeReviewSchema = z.object({
-  matchedItems: z.number().int().nonnegative().default(0),
-  needsMatchItems: z.number().int().nonnegative().default(0),
-  ignoredItems: z.number().int().nonnegative().default(0),
-  roomCount: z.number().int().nonnegative().default(0),
-  assumptionSuggestions: z.number().int().nonnegative().default(0),
-});
-
-export const intakeParseResponseSchema = z.object({
-  strategy: intakeStrategySchema,
-  project: intakeProjectSchema,
-  rooms: z.array(intakeRoomSchema).default([]),
-  parsedLines: z.array(intakeParsedLineSchema).default([]),
-  assumptions: intakeAssumptionsSchema,
-  proposalDraft: intakeProposalDraftSchema,
-  diagnostics: intakeDiagnosticsSchema,
-  review: intakeReviewSchema,
-});
-
-export type IntakeParseRequest = z.infer<typeof intakeParseRequestSchema>;
-export type IntakeProject = z.infer<typeof intakeProjectSchema>;
-export type IntakeRoom = z.infer<typeof intakeRoomSchema>;
-export type IntakeMatchCandidate = z.infer<typeof intakeMatchCandidateSchema>;
-export type IntakeParsedLine = z.infer<typeof intakeParsedLineSchema>;
-export type IntakeAssumptions = z.infer<typeof intakeAssumptionsSchema>;
-export type IntakeProposalDraft = z.infer<typeof intakeProposalDraftSchema>;
-export type IntakeStrategy = z.infer<typeof intakeStrategySchema>;
-export type IntakeDiagnostics = z.infer<typeof intakeDiagnosticsSchema>;
-export type IntakeReview = z.infer<typeof intakeReviewSchema>;
-export type IntakeParseResponse = z.infer<typeof intakeParseResponseSchema>;
+export interface IntakeParseResult {
+  sourceType: IntakeSourceType;
+  sourceKind: IntakeSourceKind;
+  project: IntakeProjectMetadata;
+  projectMetadata: IntakeProjectMetadata;
+  rooms: IntakeRoomCandidate[];
+  parsedLines: IntakeReviewLine[];
+  reviewLines: IntakeReviewLine[];
+  warnings: string[];
+  diagnostics: IntakeParseDiagnostics;
+  proposalAssist: IntakeProposalAssist;
+}

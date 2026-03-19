@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileUp, FolderInput, PlusCircle, Save, Search, Upload, WandSparkles } from 'lucide-react';
 import { api } from '../services/api';
-import { PricingMode, ProjectJobConditions, ProjectRecord, RoomRecord, TakeoffLineRecord } from '../shared/types/estimator';
-import { IntakeParseResponse } from '../shared/types/intake';
-import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../shared/utils/jobConditions';
+import { PricingMode, ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
+import { IntakeParseResult, IntakeReviewLine } from '../shared/types/intake';
 import { CatalogItem } from '../types';
+import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../shared/utils/jobConditions';
+import { OFFICE_ADDRESS, getDistanceInMiles } from '../utils/geo';
+import { formatNumberSafe } from '../utils/numberFormat';
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
 
@@ -28,9 +30,8 @@ interface LineSuggestion {
   laborIncluded: boolean | null;
   materialIncluded: boolean | null;
   matched: boolean;
-  confidence: number;
-  matchStatus: 'matched' | 'needs_review' | 'unmatched' | 'ignored';
-  matchExplanation: string;
+  matchConfidence?: 'strong' | 'possible' | 'none';
+  matchReason?: string;
 }
 
 type SourceKind =
@@ -114,8 +115,6 @@ interface GeminiIntakeResult {
 interface GeminiQuality {
   uncertain: boolean;
   warnings: string[];
-  usableLineCount: number;
-  hasMetadata: boolean;
 }
 
 interface NewCatalogDraft {
@@ -211,44 +210,6 @@ function mergeSourceNote(currentNotes: string | null | undefined, sourceLabel: s
   return `${sourceNote}; ${existing}`;
 }
 
-function derivePricingModeFromIntake(result: IntakeParseResponse, fallback: PricingMode | undefined): PricingMode | undefined {
-  const laborBasis = result.project.pricingMode !== 'unspecified' ? result.project.pricingMode : result.assumptions.laborBasis;
-  if (laborBasis === 'material_only') return 'material_only';
-  if (laborBasis === 'install_only') return 'labor_only';
-  if (laborBasis === 'labor_and_material') return 'labor_and_material';
-  return fallback;
-}
-
-function deriveJobConditionUpdatesFromIntake(result: IntakeParseResponse): Partial<ProjectJobConditions> {
-  const text = [
-    ...result.assumptions.projectConditions,
-    ...result.assumptions.specialNotes,
-    result.project.scopeSummary,
-  ].join(' ').toLowerCase();
-  const updates: Partial<ProjectJobConditions> = {};
-
-  if (result.assumptions.deliveryIncluded === true || /delivery/.test(text)) {
-    updates.deliveryRequired = true;
-    updates.deliveryPricingMode = 'included';
-  }
-  if (result.assumptions.union === true || /\bunion\b/.test(text)) {
-    updates.unionWage = true;
-    updates.laborRateBasis = 'union';
-  }
-  if (result.assumptions.prevailingWage === true || /prevailing wage/.test(text)) {
-    updates.prevailingWage = true;
-    updates.laborRateBasis = 'prevailing';
-  }
-  if (/after[- ]hours|night work|off[- ]hours/.test(text)) updates.afterHoursWork = true;
-  if (/phased|multi[- ]phase/.test(text)) updates.phasedWork = true;
-  if (/occupied/.test(text)) updates.occupiedBuilding = true;
-  if (/restricted access|limited access|secure area/.test(text)) updates.restrictedAccess = true;
-  if (/remote|travel/.test(text)) updates.remoteTravel = true;
-  if (/schedule compression|fast[- ]track|accelerated/.test(text)) updates.scheduleCompression = true;
-
-  return updates;
-}
-
 function normalizeHeader(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -284,34 +245,6 @@ function detectSpreadsheetColumns(headers: string[]): InferredColumnMap {
     notes: findColumnIndex(normalized, ['notes', 'remarks', 'comment']),
     room: findColumnIndex(normalized, ['room', 'area', 'location', 'zone']),
   };
-}
-
-function countMappedColumns(mapping: InferredColumnMap): number {
-  return Object.values(mapping).filter((value) => value !== null).length;
-}
-
-function detectSpreadsheetHeaderRow(rows: string[][]): number {
-  const searchRows = rows.slice(0, Math.min(rows.length, 12));
-  let bestIndex = 0;
-  let bestScore = -1;
-
-  searchRows.forEach((row, index) => {
-    const nonEmptyCount = row.filter(Boolean).length;
-    if (nonEmptyCount === 0) return;
-
-    const mapping = detectSpreadsheetColumns(row);
-    const mappedCount = countMappedColumns(mapping);
-    const normalizedCells = row.map((cell) => normalizeHeader(cell)).filter(Boolean);
-    const keywordHits = normalizedCells.filter((cell) => /project|client|address|date|category|item|description|qty|quantity|unit|room|area|notes|scope|sku|code/.test(cell)).length;
-    const score = mappedCount * 10 + keywordHits * 3 + Math.min(nonEmptyCount, 8);
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = index;
-    }
-  });
-
-  return bestIndex;
 }
 
 function parseNumber(value: unknown, fallback = 1): number {
@@ -450,14 +383,10 @@ function parseStructuredSpreadsheetRows(rows: Array<Array<string | number | bool
 
   if (nonEmptyRows.length < 2) return null;
 
-  const headerRowIndex = detectSpreadsheetHeaderRow(nonEmptyRows);
-  const workingRows = nonEmptyRows.slice(headerRowIndex);
-  if (workingRows.length < 2) return null;
-
-  const headers = workingRows[0];
+  const headers = nonEmptyRows[0];
   const mapping = detectSpreadsheetColumns(headers);
 
-  const sourceKind = inferSpreadsheetSourceKind(workingRows, mapping);
+  const sourceKind = inferSpreadsheetSourceKind(nonEmptyRows, mapping);
 
   const looksStructured =
     sourceKind === 'spreadsheet-matrix' ||
@@ -467,7 +396,7 @@ function parseStructuredSpreadsheetRows(rows: Array<Array<string | number | bool
   if (!looksStructured) return null;
 
   if (sourceKind === 'spreadsheet-matrix') {
-    const matrixRows = parseMatrixSpreadsheetRows(workingRows, mapping, sourceReference);
+    const matrixRows = parseMatrixSpreadsheetRows(nonEmptyRows, mapping, sourceReference);
     if (!matrixRows.length) return null;
     return {
       rows: matrixRows,
@@ -482,7 +411,7 @@ function parseStructuredSpreadsheetRows(rows: Array<Array<string | number | bool
   }
 
   if (sourceKind === 'spreadsheet-mixed') {
-    const mixedRows = parseMixedSpreadsheetRows(workingRows, sourceReference);
+    const mixedRows = parseMixedSpreadsheetRows(nonEmptyRows, sourceReference);
     if (!mixedRows.length) return null;
     return {
       rows: mixedRows,
@@ -498,8 +427,8 @@ function parseStructuredSpreadsheetRows(rows: Array<Array<string | number | bool
 
   const parsedRows: ParsedImportLine[] = [];
 
-  for (let i = 1; i < workingRows.length; i += 1) {
-    const row = workingRows[i];
+  for (let i = 1; i < nonEmptyRows.length; i += 1) {
+    const row = nonEmptyRows[i];
 
     const projectName = mapping.project !== null ? String(row[mapping.project] || '').trim() : '';
     const projectNumber = mapping.projectNumber !== null ? String(row[mapping.projectNumber] || '').trim() : '';
@@ -666,19 +595,6 @@ function parseAdaptiveTextDocument(text: string, sourceReference: string): { met
 function evaluateGeminiQuality(result: GeminiIntakeResult): GeminiQuality {
   const warnings = [...(result.warnings || [])];
   const parsedLines = Array.isArray(result.parsedLines) ? result.parsedLines : [];
-  const usableLineCount = parsedLines.filter((line) => {
-    const hasName = String(line.itemName || '').trim().length > 0;
-    const hasDescription = String(line.description || '').trim().length > 0;
-    const hasQty = Number.isFinite(Number(line.quantity)) && Number(line.quantity) > 0;
-    return (hasName || hasDescription) && hasQty;
-  }).length;
-  const hasMetadata = [
-    result.projectName,
-    result.projectNumber,
-    result.client,
-    result.address,
-    result.bidDate,
-  ].some((value) => String(value || '').trim().length > 0) || (Array.isArray(result.rooms) && result.rooms.length > 0);
 
   if (parsedLines.length === 0) {
     warnings.push('Gemini returned no structured lines.');
@@ -696,10 +612,8 @@ function evaluateGeminiQuality(result: GeminiIntakeResult): GeminiQuality {
   }
 
   return {
-    uncertain: usableLineCount === 0 && !hasMetadata,
+    uncertain: warnings.length > 0,
     warnings,
-    usableLineCount,
-    hasMetadata,
   };
 }
 
@@ -896,6 +810,143 @@ function dedupeSuggestions(lines: LineSuggestion[]): LineSuggestion[] {
   return Array.from(bucket.values());
 }
 
+function mapIntakeSourceKind(sourceKind: IntakeParseResult['sourceKind']): SourceKind {
+  if (sourceKind === 'spreadsheet-unstructured') return 'spreadsheet-mixed';
+  return sourceKind;
+}
+
+function buildIntakeLineSuggestion(line: IntakeReviewLine, fallbackSource: string): LineSuggestion {
+  const preferredMatch = line.catalogMatch ?? line.suggestedMatch;
+  const notes = [line.notes, ...line.warnings].filter(Boolean).join(' | ');
+
+  return {
+    id: makeId('line-suggest'),
+    include: true,
+    roomName: normalizeRoomName(line.roomName || 'General'),
+    rawText: line.description || line.itemName,
+    itemName: line.itemName || line.description,
+    description: preferredMatch?.description || line.description || line.itemName,
+    qty: Number(line.quantity) || 1,
+    unit: line.unit || preferredMatch?.unit || 'EA',
+    category: line.category || preferredMatch?.category || null,
+    sourceReference: line.sourceReference || fallbackSource,
+    sku: preferredMatch?.sku || null,
+    catalogItemId: preferredMatch?.catalogItemId || null,
+    materialCost: preferredMatch?.materialCost || 0,
+    laborMinutes: preferredMatch?.laborMinutes || 0,
+    notes,
+    laborIncluded: line.laborIncluded,
+    materialIncluded: line.materialIncluded,
+    matched: !!preferredMatch,
+    matchConfidence: preferredMatch?.confidence || 'none',
+    matchReason: preferredMatch?.reason || '',
+  };
+}
+
+function buildIntakeParsedImportLine(line: IntakeReviewLine, fallbackSource: string): ParsedImportLine {
+  return {
+    projectName: '',
+    projectNumber: '',
+    client: '',
+    address: '',
+    bidDate: '',
+    category: line.category,
+    itemCode: line.itemCode,
+    itemName: line.itemName || line.description,
+    description: line.description || line.itemName,
+    qty: Number(line.quantity) || 1,
+    unit: line.unit || 'EA',
+    laborIncluded: line.laborIncluded,
+    materialIncluded: line.materialIncluded,
+    notes: [line.notes, ...line.warnings].filter(Boolean).join(' | '),
+    roomName: normalizeRoomName(line.roomName || 'General'),
+    sourceReference: line.sourceReference || fallbackSource,
+  };
+}
+
+function buildIntakeRoomSuggestions(result: IntakeParseResult, lines: LineSuggestion[]): RoomSuggestion[] {
+  const roomNames = result.rooms.length > 0
+    ? result.rooms.map((room) => room.roomName)
+    : lines.map((line) => line.roomName);
+
+  return (roomNames.length > 0 ? Array.from(new Set(roomNames.map(normalizeRoomName))) : ['General']).map((roomName) => ({
+    id: makeId('room-suggest'),
+    include: true,
+    roomName,
+  }));
+}
+
+function buildIntakeWarnings(result: IntakeParseResult): string[] {
+  const categoryReviewCount = result.reviewLines.filter((line) =>
+    (line.warnings || []).includes('Category could not be confidently inferred.')
+  ).length;
+  const catalogReviewCount = result.reviewLines.filter((line) =>
+    (line.warnings || []).includes('No catalog match identified.')
+  ).length;
+
+  const summaryWarnings: string[] = [];
+  if (categoryReviewCount > 0) {
+    summaryWarnings.push(
+      `${categoryReviewCount} imported line${categoryReviewCount === 1 ? '' : 's'} need category review.`
+    );
+  }
+  if (catalogReviewCount > 0) {
+    summaryWarnings.push(
+      `${catalogReviewCount} imported line${catalogReviewCount === 1 ? '' : 's'} need catalog matching.`
+    );
+  }
+
+  return Array.from(new Set([...result.warnings, ...result.diagnostics.warnings, ...summaryWarnings].filter(Boolean)));
+}
+
+function mergeDistinctText(base: string | null | undefined, additions: Array<string | null | undefined>): string {
+  const parts = [String(base || '').trim(), ...additions.map((value) => String(value || '').trim())]
+    .filter(Boolean);
+  return Array.from(new Set(parts)).join('\n');
+}
+
+function summarizeAssumptions(result: IntakeParseResult): string {
+  const assumptions = result.projectMetadata.assumptions || [];
+  return assumptions.map((assumption) => assumption.text).filter(Boolean).join('\n');
+}
+
+function createInitialProjectDraft(settings?: SettingsRecord | null): Partial<ProjectRecord> {
+  return {
+    projectName: '',
+    projectNumber: '',
+    clientName: '',
+    generalContractor: '',
+    estimator: '',
+    address: '',
+    proposalDate: '',
+    projectType: 'Commercial',
+    projectSize: 'Medium',
+    floorLevel: 'Ground',
+    accessDifficulty: 'Easy',
+    installHeight: 'Standard',
+    materialHandling: 'Standard',
+    wallSubstrate: 'Drywall',
+    laborBurdenPercent: settings?.defaultLaborBurdenPercent ?? 25,
+    overheadPercent: settings?.defaultOverheadPercent ?? 15,
+    profitPercent: settings?.defaultProfitPercent ?? 10,
+    taxPercent: settings?.defaultTaxPercent ?? 8.25,
+    pricingMode: 'labor_and_material',
+    selectedScopeCategories: [],
+    bidDate: '',
+    dueDate: '',
+    notes: '',
+    specialNotes: '',
+    jobConditions: createDefaultProjectJobConditions(),
+  };
+}
+
+function mergeDetectedCategories(existing: string[] | undefined, additions: Array<string | null | undefined>): string[] {
+  return Array.from(new Set([
+    ...(existing || []).map((entry) => String(entry || '').trim()).filter(Boolean),
+    ...additions.map((entry) => String(entry || '').trim()).filter(Boolean),
+  ])).sort();
+}
+
 export function ProjectIntake() {
   const navigate = useNavigate();
 
@@ -905,6 +956,7 @@ export function ProjectIntake() {
 
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [settingsDefaults, setSettingsDefaults] = useState<SettingsRecord | null>(null);
 
   const [sourceProjectId, setSourceProjectId] = useState('');
   const [takeoffUploadedFile, setTakeoffUploadedFile] = useState<File | null>(null);
@@ -914,6 +966,7 @@ export function ProjectIntake() {
   const [takeoffStructuredProjectName, setTakeoffStructuredProjectName] = useState('');
   const [takeoffStructuredKind, setTakeoffStructuredKind] = useState<SourceKind | ''>('');
   const [takeoffHasRoomColumn, setTakeoffHasRoomColumn] = useState(false);
+  const [takeoffParsedFromServer, setTakeoffParsedFromServer] = useState(false);
   const [takeoffUploadState, setTakeoffUploadState] = useState<'idle' | 'processing' | 'ready' | 'error'>('idle');
   const [takeoffUploadMessage, setTakeoffUploadMessage] = useState('');
   const [takeoffDragOver, setTakeoffDragOver] = useState(false);
@@ -922,8 +975,6 @@ export function ProjectIntake() {
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [uploadedText, setUploadedText] = useState('');
   const [intakeWarnings, setIntakeWarnings] = useState<string[]>([]);
-  const [intakeServerResult, setIntakeServerResult] = useState<IntakeParseResponse | null>(null);
-  const [proposalDraftPreview, setProposalDraftPreview] = useState({ intro: '', terms: '', exclusions: '', clarifications: '' });
 
   const [createConfirmedOnly, setCreateConfirmedOnly] = useState(true);
   const [catalogPickerLineId, setCatalogPickerLineId] = useState<string | null>(null);
@@ -931,22 +982,10 @@ export function ProjectIntake() {
   const [newCatalogLineId, setNewCatalogLineId] = useState<string | null>(null);
   const [newCatalogDraft, setNewCatalogDraft] = useState<NewCatalogDraft | null>(null);
 
-  const [projectDraft, setProjectDraft] = useState<Partial<ProjectRecord>>({
-    projectName: '',
-    projectNumber: '',
-    clientName: '',
-    estimator: '',
-    address: '',
-    projectType: 'Commercial',
-    projectSize: 'Medium',
-    pricingMode: 'labor_and_material',
-    selectedScopeCategories: [],
-    jobConditions: createDefaultProjectJobConditions(),
-    bidDate: '',
-    dueDate: '',
-    notes: '',
-    specialNotes: ''
-  });
+  const [projectDraft, setProjectDraft] = useState<Partial<ProjectRecord>>(() => createInitialProjectDraft());
+  const [distanceCalculating, setDistanceCalculating] = useState(false);
+  const [distanceError, setDistanceError] = useState<string | null>(null);
+  const [distanceMessage, setDistanceMessage] = useState('No calculated distance yet.');
 
   const [roomSuggestions, setRoomSuggestions] = useState<RoomSuggestion[]>([]);
   const [lineSuggestions, setLineSuggestions] = useState<LineSuggestion[]>([]);
@@ -955,9 +994,25 @@ export function ProjectIntake() {
 
   useEffect(() => {
     void (async () => {
-      const [projectData, catalogData] = await Promise.all([api.getV1Projects(), api.getCatalog()]);
+      const [projectData, catalogData, settingsData] = await Promise.all([api.getV1Projects(), api.getCatalog(), api.getV1Settings()]);
       setProjects(projectData);
       setCatalog(catalogData);
+      setSettingsDefaults(settingsData);
+
+      const defaults = createInitialProjectDraft(settingsData);
+      setProjectDraft((prev) => ({
+        ...defaults,
+        ...prev,
+        laborBurdenPercent: prev.laborBurdenPercent ?? defaults.laborBurdenPercent,
+        overheadPercent: prev.overheadPercent ?? defaults.overheadPercent,
+        profitPercent: prev.profitPercent ?? defaults.profitPercent,
+        taxPercent: prev.taxPercent ?? defaults.taxPercent,
+        selectedScopeCategories: Array.isArray(prev.selectedScopeCategories) ? prev.selectedScopeCategories : defaults.selectedScopeCategories,
+        jobConditions: normalizeProjectJobConditions({
+          ...defaults.jobConditions,
+          ...(prev.jobConditions || {}),
+        }),
+      }));
     })();
   }, []);
 
@@ -967,12 +1022,12 @@ export function ProjectIntake() {
   );
 
   const matchedSuggestions = useMemo(
-    () => lineSuggestions.filter((line) => line.matchStatus === 'matched'),
+    () => lineSuggestions.filter((line) => line.matched),
     [lineSuggestions]
   );
 
   const unmatchedSuggestions = useMemo(
-    () => lineSuggestions.filter((line) => line.matchStatus !== 'matched'),
+    () => lineSuggestions.filter((line) => !line.matched),
     [lineSuggestions]
   );
 
@@ -987,16 +1042,18 @@ export function ProjectIntake() {
   }, [catalog, catalogSearch]);
 
   const scopeCategoryOptions = useMemo(
-    () => Array.from(new Set(catalog.map((item) => item.category).filter(Boolean))).sort(),
-    [catalog]
+    () => Array.from(new Set([
+      ...catalog.map((item) => String(item.category || '').trim()),
+      ...lineSuggestions.map((line) => String(line.category || '').trim()),
+    ].filter(Boolean))).sort(),
+    [catalog, lineSuggestions]
   );
 
-  const jobConditions = useMemo(
-    () => normalizeProjectJobConditions(projectDraft.jobConditions),
-    [projectDraft.jobConditions]
-  );
+  function patchProjectDraft(updates: Partial<ProjectRecord>) {
+    setProjectDraft((prev) => ({ ...prev, ...updates }));
+  }
 
-  function patchJobConditions(updates: Partial<ProjectJobConditions>) {
+  function patchDraftJobConditions(updates: Partial<ProjectJobConditions>) {
     setProjectDraft((prev) => ({
       ...prev,
       jobConditions: normalizeProjectJobConditions({
@@ -1006,100 +1063,92 @@ export function ProjectIntake() {
     }));
   }
 
-  function toggleScopeCategory(category: string) {
-    setProjectDraft((prev) => {
-      const current = prev.selectedScopeCategories || [];
-      const next = current.includes(category)
-        ? current.filter((entry) => entry !== category)
-        : [...current, category].sort();
-      return {
-        ...prev,
-        selectedScopeCategories: next,
-      };
-    });
+  async function refreshDraftDistance(addressOverride?: string, silentOnFailure = false): Promise<number | null> {
+    const address = String(addressOverride ?? projectDraft.address ?? '').trim();
+    if (!address) {
+      patchDraftJobConditions({ travelDistanceMiles: null });
+      setDistanceError(null);
+      setDistanceMessage('Add a site address to calculate travel distance.');
+      return null;
+    }
+
+    setDistanceCalculating(true);
+    setDistanceError(null);
+    setDistanceMessage('Calculating travel distance...');
+    try {
+      const distance = await getDistanceInMiles(address);
+      if (distance === null) {
+        patchDraftJobConditions({ travelDistanceMiles: null });
+        const errorMessage = 'Unable to calculate distance from the current address.';
+        setDistanceError(errorMessage);
+        setDistanceMessage(errorMessage);
+        return null;
+      }
+
+      patchDraftJobConditions({
+        travelDistanceMiles: distance,
+        remoteTravel: distance > 50 ? true : normalizeProjectJobConditions(projectDraft.jobConditions).remoteTravel,
+      });
+      setDistanceMessage(`${formatNumberSafe(distance, 1)} miles from office.`);
+      return distance;
+    } catch (error) {
+      console.error('Distance lookup failed', error);
+      const errorMessage = 'Distance lookup failed.';
+      setDistanceError(errorMessage);
+      setDistanceMessage(errorMessage);
+      if (!silentOnFailure) {
+        patchDraftJobConditions({ travelDistanceMiles: null });
+      }
+      return null;
+    } finally {
+      setDistanceCalculating(false);
+    }
+  }
+
+  function applyIntakeParseToDraft(result: IntakeParseResult, sourceLabel: string) {
+    const assumptionNotes = summarizeAssumptions(result);
+    setProjectDraft((prev) => ({
+      ...prev,
+      projectName: prev.projectName || result.projectMetadata.projectName || prev.projectName,
+      projectNumber: prev.projectNumber || result.projectMetadata.projectNumber || prev.projectNumber,
+      clientName: prev.clientName || result.projectMetadata.client || prev.clientName,
+      generalContractor: prev.generalContractor || result.projectMetadata.generalContractor || prev.generalContractor,
+      estimator: prev.estimator || result.projectMetadata.estimator || prev.estimator,
+      address: prev.address || result.projectMetadata.address || prev.address,
+      bidDate: prev.bidDate || normalizeDateString(result.projectMetadata.bidDate || result.projectMetadata.proposalDate) || prev.bidDate,
+      proposalDate: prev.proposalDate || normalizeDateString(result.projectMetadata.proposalDate) || prev.proposalDate,
+      pricingMode: prev.pricingMode || result.projectMetadata.pricingBasis || prev.pricingMode,
+      notes: mergeDistinctText(mergeSourceNote(prev.notes, sourceLabel), [assumptionNotes]),
+      specialNotes: mergeDistinctText(prev.specialNotes, [result.proposalAssist.scopeSummaryDraft, result.proposalAssist.clarificationsDraft, result.proposalAssist.exclusionsDraft]),
+    }));
+  }
+
+  function applyIntakeParseToReview(result: IntakeParseResult, fallbackSource: string) {
+    const suggestions = dedupeSuggestions(result.reviewLines.map((line) => buildIntakeLineSuggestion(line, fallbackSource)));
+    setLineSuggestions(suggestions);
+    setRoomSuggestions(buildIntakeRoomSuggestions(result, suggestions));
+    setIntakeWarnings(buildIntakeWarnings(result));
+    setProjectDraft((prev) => ({
+      ...prev,
+      selectedScopeCategories: prev.selectedScopeCategories && prev.selectedScopeCategories.length > 0
+        ? prev.selectedScopeCategories
+        : mergeDetectedCategories(prev.selectedScopeCategories, suggestions.map((line) => line.category)),
+    }));
+    return suggestions;
   }
 
   function hasUsableTakeoffSource(): boolean {
-    return !!takeoffFileText.trim() || !!takeoffImportText.trim() || !!sourceProjectId || takeoffStructuredLines.length > 0 || !!intakeServerResult;
-  }
-
-  function applyIntakeParseResult(result: IntakeParseResponse, sourceLabel: string) {
-    setIntakeServerResult(result);
-    setIntakeWarnings(result.diagnostics.warnings || []);
-    setProposalDraftPreview({
-      intro: result.proposalDraft.intro || '',
-      terms: result.proposalDraft.terms || '',
-      exclusions: (result.proposalDraft.exclusions || []).join('\n'),
-      clarifications: (result.proposalDraft.clarifications || []).join('\n'),
-    });
-
-    setProjectDraft((prev) => ({
-      ...prev,
-      projectName: prev.projectName || result.project.projectName || prev.projectName,
-      projectNumber: prev.projectNumber || result.project.projectNumber || prev.projectNumber,
-      clientName: prev.clientName || result.project.client || result.project.gc || prev.clientName,
-      address: prev.address || result.project.address || prev.address,
-      bidDate: prev.bidDate || normalizeDateString(result.project.bidDate) || prev.bidDate,
-      pricingMode: derivePricingModeFromIntake(result, prev.pricingMode),
-      specialNotes: prev.specialNotes || [...result.assumptions.specialNotes, ...result.assumptions.projectConditions].join(' | ') || prev.specialNotes,
-      jobConditions: normalizeProjectJobConditions({
-        ...(prev.jobConditions || createDefaultProjectJobConditions()),
-        ...deriveJobConditionUpdatesFromIntake(result),
-      }),
-      notes: mergeSourceNote(prev.notes, sourceLabel),
-    }));
-
-    const roomNames = Array.from(new Set([
-      ...result.rooms.map((room) => normalizeRoomName(room.name)),
-      ...result.parsedLines.map((line) => normalizeRoomName(line.roomArea || 'General')),
-    ].filter(Boolean)));
-
-    setRoomSuggestions((roomNames.length > 0 ? roomNames : ['General']).map((roomName) => ({
-      id: makeId('room-suggest'),
-      include: true,
-      roomName,
-    })));
-
-    setLineSuggestions(result.parsedLines.map((line) => {
-      const matchedCatalog = line.matchedCatalogItemId ? catalog.find((item) => item.id === line.matchedCatalogItemId) : null;
-      return {
-        id: makeId('line-suggest'),
-        include: line.matchStatus !== 'ignored',
-        roomName: normalizeRoomName(line.roomArea || 'General'),
-        rawText: line.description || line.itemName,
-        itemName: line.itemName,
-        description: matchedCatalog?.description || line.description || line.itemName,
-        qty: line.quantity,
-        unit: line.unit || matchedCatalog?.uom || 'EA',
-        category: line.category || matchedCatalog?.category || null,
-        sourceReference: line.sourceReference || sourceLabel,
-        sku: line.matchedSku || matchedCatalog?.sku || null,
-        catalogItemId: line.matchedCatalogItemId || null,
-        materialCost: matchedCatalog?.baseMaterialCost || 0,
-        laborMinutes: matchedCatalog?.baseLaborMinutes || 0,
-        notes: [line.notes, line.webEnrichment?.summary].filter(Boolean).join(' | '),
-        laborIncluded: null,
-        materialIncluded: null,
-        matched: line.matchStatus === 'matched',
-        confidence: line.confidence,
-        matchStatus: line.matchStatus,
-        matchExplanation: line.matchReason,
-      } as LineSuggestion;
-    }));
+    return !!takeoffFileText.trim() || !!takeoffImportText.trim() || !!sourceProjectId || takeoffStructuredLines.length > 0 || (takeoffParsedFromServer && lineSuggestions.length > 0);
   }
 
   async function loadTakeoffSource() {
-    if (intakeServerResult?.parsedLines?.length) {
-      applyIntakeParseResult(intakeServerResult, takeoffFileName || 'uploaded takeoff');
-      return;
-    }
-
     const combinedText = [takeoffFileText, takeoffImportText].filter(Boolean).join('\n');
     const hasStructuredSource = takeoffStructuredLines.length > 0;
+    const hasServerParsedSource = takeoffParsedFromServer && lineSuggestions.length > 0;
     const hasTextSource = combinedText.trim().length > 0;
     const hasProjectSource = !!sourceProjectId;
 
-    if (!hasStructuredSource && !hasTextSource && !hasProjectSource) {
+    if (!hasStructuredSource && !hasServerParsedSource && !hasTextSource && !hasProjectSource) {
       alert(takeoffFileName ? 'The uploaded takeoff file has not produced usable scope lines yet. Wait for parsing to finish, try the file again, or paste/import text.' : 'Upload a takeoff file or paste takeoff text before continuing.');
       return;
     }
@@ -1150,15 +1199,47 @@ export function ProjectIntake() {
           notes: `Imported from optional project source ${line.id}`,
           laborIncluded: null,
           materialIncluded: null,
-          matched: !!match,
-          confidence: match ? 0.92 : 0.35,
-          matchStatus: match ? 'matched' : 'unmatched',
-          matchExplanation: match ? 'Imported from existing project/catalog context.' : 'No reliable catalog match from project source.',
+          matched: !!match
         };
       });
     }
 
-    if (hasStructuredSource) {
+    if (hasServerParsedSource) {
+      if (takeoffStructuredProjectName) {
+        applyIntakeParseToDraft({
+          sourceType: 'document',
+          sourceKind: 'text-document',
+          projectMetadata: {
+            projectName: takeoffStructuredProjectName,
+            projectNumber: '',
+            client: '',
+            address: '',
+            bidDate: '',
+            confidence: 1,
+            sources: [],
+          },
+          rooms: [],
+          reviewLines: [],
+          warnings: [],
+          diagnostics: {
+            parserStrategy: 'review-state',
+            sourceKind: 'text-document',
+            metadataSources: [],
+            warnings: [],
+            totalLines: 0,
+            completeLines: 0,
+            matchedLines: 0,
+            needsMatchLines: 0,
+          },
+        }, takeoffFileName || 'uploaded takeoff');
+      }
+
+      roomNames = [...roomNames, ...roomSuggestions.filter((room) => room.include).map((room) => room.roomName)];
+      importedFromStructured = lineSuggestions.map((line) => ({
+        ...line,
+        id: makeId('line-suggest'),
+      }));
+    } else if (hasStructuredSource) {
       const dominantProjectNumber = mostCommonValue(takeoffStructuredLines.map((line) => line.projectNumber || ''));
       const dominantClient = mostCommonValue(takeoffStructuredLines.map((line) => line.client || ''));
       const dominantAddress = mostCommonValue(takeoffStructuredLines.map((line) => line.address || ''));
@@ -1221,9 +1302,6 @@ export function ProjectIntake() {
           laborIncluded: line.laborIncluded,
           materialIncluded: line.materialIncluded,
           matched: !!match,
-          confidence: match ? 0.82 : 0.4,
-          matchStatus: match ? 'matched' : 'unmatched',
-          matchExplanation: match ? 'Deterministic spreadsheet match.' : 'Spreadsheet row needs catalog review.',
         } as LineSuggestion;
       });
     }
@@ -1288,9 +1366,6 @@ export function ProjectIntake() {
         laborIncluded: line.laborIncluded,
         materialIncluded: line.materialIncluded,
         matched: !!match,
-        confidence: match ? 0.74 : 0.32,
-        matchStatus: match ? 'matched' : 'unmatched',
-        matchExplanation: match ? 'Deterministic text match.' : 'Needs catalog review.',
       } as LineSuggestion;
     });
     setLineSuggestions(dedupeSuggestions([...importedFromProject, ...importedFromStructured, ...importedFromText]));
@@ -1300,125 +1375,48 @@ export function ProjectIntake() {
     setTakeoffUploadedFile(file);
     setTakeoffFileName(file.name);
     setIntakeWarnings([]);
-    setIntakeServerResult(null);
+    setTakeoffParsedFromServer(false);
     setTakeoffUploadState('processing');
     setTakeoffUploadMessage('Reading uploaded takeoff file...');
     const fileName = file.name.toLowerCase();
 
     try {
-      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
-      const xlsx = await import('xlsx');
-      const buffer = await file.arrayBuffer();
-      const workbook = xlsx.read(buffer, { type: 'array' });
+      const lowerMime = (file.type || '').toLowerCase();
+      const sourceType =
+        fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv') || lowerMime.includes('spreadsheet') || lowerMime.includes('excel') || lowerMime.includes('csv')
+          ? 'spreadsheet'
+          : fileName.endsWith('.pdf') || lowerMime.includes('pdf')
+            ? 'pdf'
+            : 'document';
 
-      let structuredResult: StructuredSpreadsheetResult | null = null;
-      const flattenedRows: string[] = [];
-
-      workbook.SheetNames.forEach((sheetName) => {
-        const sheet = workbook.Sheets[sheetName];
-        const rows = xlsx.utils.sheet_to_json<Array<string | number | boolean | null | undefined>>(sheet, { header: 1, defval: '' });
-        const parsed = parseStructuredSpreadsheetRows(rows, `${file.name}:${sheetName}`);
-        if (parsed && (!structuredResult || parsed.rows.length > structuredResult.rows.length)) {
-          structuredResult = parsed;
-        }
-
-        rows.forEach((row) => {
-          const line = (row || []).map((cell) => String(cell ?? '').trim()).filter(Boolean).join(' ');
-          if (line) flattenedRows.push(line);
-        });
+      const extractedText = sourceType === 'document' ? await extractTextFromUploadedTakeoffFile(file) : undefined;
+      const result = await api.parseV1Intake({
+        fileName: file.name,
+        mimeType: file.type || (sourceType === 'spreadsheet' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : sourceType === 'pdf' ? 'application/pdf' : 'text/plain'),
+        sourceType,
+        dataBase64: await toBase64Payload(file),
+        extractedText,
+        matchCatalog: true,
       });
 
-      if (structuredResult) {
-        setTakeoffStructuredLines(structuredResult.rows);
-        setTakeoffStructuredProjectName(structuredResult.dominantProjectName);
-        setTakeoffStructuredKind(structuredResult.sourceKind);
-        setTakeoffHasRoomColumn(structuredResult.hasRoomColumn);
-        setProjectDraft((prev) => ({
-          ...prev,
-          projectName: prev.projectName || structuredResult.dominantProjectName || prev.projectName,
-          projectNumber: prev.projectNumber || structuredResult.dominantProjectNumber || prev.projectNumber,
-          clientName: prev.clientName || structuredResult.dominantClient || prev.clientName,
-          address: prev.address || structuredResult.dominantAddress || prev.address,
-          bidDate: prev.bidDate || structuredResult.dominantBidDate || prev.bidDate,
-        }));
-        setTakeoffFileText('');
-        setTakeoffUploadState('ready');
-        setTakeoffUploadMessage(`Parsed ${structuredResult.rows.length} structured takeoff lines from ${file.name}. AI enrichment will continue in the background when available.`);
-
-        void (async () => {
-          try {
-            const gemini = await api.extractV1IntakeWithGemini({
-              fileName: file.name,
-              mimeType: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-              sourceType: 'spreadsheet',
-              normalizedRows: structuredResult.rows.map((row) => ({
-                roomArea: row.roomName,
-                category: row.category,
-                itemCode: row.itemCode,
-                itemName: row.itemName,
-                description: row.description,
-                quantity: row.qty,
-                unit: row.unit,
-                notes: row.notes,
-              })),
-            });
-            if (takeoffFileName !== file.name) return;
-            applyIntakeParseResult(gemini, file.name);
-            setTakeoffUploadMessage(`Parsed ${gemini.parsedLines.length} takeoff lines from ${file.name}. ${gemini.strategy.summary}`);
-          } catch (error) {
-            setIntakeWarnings((prev) => Array.from(new Set([...prev, buildGeminiFallbackWarning(error, 'spreadsheet')])));
-          }
-        })();
-        return true;
-      }
-
-      setTakeoffStructuredLines([]);
-      setTakeoffStructuredProjectName('');
-      setTakeoffStructuredKind('spreadsheet-mixed');
-      setTakeoffHasRoomColumn(false);
-      setTakeoffFileText(flattenedRows.join('\n'));
-      const hasFlattenedRows = flattenedRows.join('\n').trim().length > 0;
-      setTakeoffUploadState(hasFlattenedRows ? 'ready' : 'error');
-      setTakeoffUploadMessage(hasFlattenedRows ? `Loaded spreadsheet content from ${file.name}.` : `No usable takeoff rows were found in ${file.name}.`);
-      return hasFlattenedRows;
-      }
-
-      const extracted = await extractTextFromUploadedTakeoffFile(file);
-      const fileKind = classifyUploadedFile(file, extracted);
-
-      setTakeoffStructuredLines([]);
-      setTakeoffStructuredProjectName('');
-      setTakeoffStructuredKind(fileKind);
-      setTakeoffHasRoomColumn(false);
-      setTakeoffFileText(extracted);
-      const hasExtractedText = extracted.trim().length > 0;
-      setTakeoffUploadState(hasExtractedText ? 'ready' : 'error');
-      setTakeoffUploadMessage(hasExtractedText ? `Loaded raw takeoff text from ${file.name}. AI extraction will continue in the background when available.` : `No readable text was extracted from ${file.name}.`);
-
-      if (hasExtractedText && (fileKind === 'pdf-document' || fileKind === 'text-document' || fileKind === 'semi-structured-text')) {
-        void (async () => {
-          try {
-            const sourceType: 'pdf' | 'document' = fileKind === 'pdf-document' ? 'pdf' : 'document';
-            const gemini = await api.extractV1IntakeWithGemini({
-              fileName: file.name,
-              mimeType: file.type || (sourceType === 'pdf' ? 'application/pdf' : 'text/plain'),
-              sourceType,
-              dataBase64: sourceType === 'pdf' ? await toBase64Payload(file) : undefined,
-              extractedText: sourceType === 'document' ? extracted : undefined,
-            });
-            if (takeoffFileName !== file.name) return;
-            applyIntakeParseResult(gemini, file.name);
-            setTakeoffFileText('');
-            setTakeoffUploadMessage(`Parsed ${gemini.parsedLines.length} takeoff lines from ${file.name}. ${gemini.strategy.summary}`);
-          } catch (error) {
-            setIntakeWarnings((prev) => Array.from(new Set([...prev, buildGeminiFallbackWarning(error, 'document')])));
-          }
-        })();
-      }
-
-      return hasExtractedText;
+      applyIntakeParseToDraft(result, file.name);
+      applyIntakeParseToReview(result, file.name);
+      setTakeoffParsedFromServer(true);
+      setTakeoffStructuredLines(result.reviewLines.map((line) => buildIntakeParsedImportLine(line, file.name)));
+      setTakeoffStructuredProjectName(result.projectMetadata.projectName || '');
+      setTakeoffStructuredKind(mapIntakeSourceKind(result.sourceKind));
+      setTakeoffHasRoomColumn(result.rooms.length > 0 || result.reviewLines.some((line) => !!line.roomName));
+      setTakeoffFileText('');
+      setTakeoffUploadState(result.reviewLines.length > 0 ? 'ready' : 'error');
+      setTakeoffUploadMessage(
+        result.reviewLines.length > 0
+          ? `Parsed ${result.reviewLines.length} takeoff lines from ${file.name} using the server intake pipeline.`
+          : `No usable takeoff lines were found in ${file.name}.`
+      );
+      return result.reviewLines.length > 0;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Takeoff upload failed.';
+      setTakeoffParsedFromServer(false);
       setTakeoffUploadState('error');
       setTakeoffUploadMessage(message);
       setIntakeWarnings((prev) => Array.from(new Set([...prev, message])));
@@ -1430,7 +1428,6 @@ export function ProjectIntake() {
     setUploadedDocumentFile(file);
     setUploadedFileName(file.name);
     setIntakeWarnings([]);
-    setIntakeServerResult(null);
 
     const lower = file.name.toLowerCase();
     const mime = (file.type || '').toLowerCase();
@@ -1459,19 +1456,24 @@ export function ProjectIntake() {
     }
 
     const text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
-    setUploadedText(text);
+    setUploadedText(text || file.name);
 
     try {
       const sourceType: 'pdf' | 'document' = lower.endsWith('.pdf') ? 'pdf' : 'document';
-      const gemini = await api.extractV1IntakeWithGemini({
+      const result = await api.parseV1Intake({
         fileName: file.name,
         mimeType: file.type || (sourceType === 'pdf' ? 'application/pdf' : 'text/plain'),
         sourceType,
-        dataBase64: sourceType === 'pdf' ? await toBase64Payload(file) : undefined,
+        dataBase64: await toBase64Payload(file),
         extractedText: sourceType === 'document' ? text : undefined,
+        matchCatalog: true,
       });
-      applyIntakeParseResult(gemini, file.name);
-      return;
+
+      if (result.reviewLines.length > 0) {
+        applyIntakeParseToDraft(result, file.name);
+        applyIntakeParseToReview(result, file.name);
+        return;
+      }
     } catch (_error) {
       // Fall through to raw-line preservation parser.
       setIntakeWarnings(['Gemini extraction failed. Preserving raw lines for manual review.']);
@@ -1520,10 +1522,7 @@ export function ProjectIntake() {
         notes: line.notes || `Parsed from ${file.name}`,
         laborIncluded: null,
         materialIncluded: null,
-        matched: !!match,
-        confidence: match ? 0.72 : 0.28,
-        matchStatus: match ? 'matched' : 'unmatched',
-        matchExplanation: match ? 'Deterministic document fallback match.' : 'Fallback parse needs catalog review.',
+        matched: !!match
       } as LineSuggestion;
     });
 
@@ -1548,9 +1547,6 @@ export function ProjectIntake() {
           notes: `${line.notes}; matched to catalog ${item.sku}`,
           laborIncluded: line.laborIncluded,
           materialIncluded: line.materialIncluded,
-          confidence: Math.max(line.confidence, 0.96),
-          matchStatus: 'matched',
-          matchExplanation: 'Manually confirmed against catalog.',
         };
       })
     );
@@ -1599,7 +1595,7 @@ export function ProjectIntake() {
   function ignoreLine(lineId: string) {
     setLineSuggestions((prev) =>
       prev.map((line) =>
-        line.id === lineId ? { ...line, include: false, matchStatus: 'ignored', notes: `${line.notes}; ignored` } : line
+        line.id === lineId ? { ...line, include: false, notes: `${line.notes}; ignored` } : line
       )
     );
   }
@@ -1607,7 +1603,7 @@ export function ProjectIntake() {
   function reincludeLine(lineId: string) {
     setLineSuggestions((prev) =>
       prev.map((line) =>
-        line.id === lineId ? { ...line, include: true, matchStatus: line.catalogItemId ? 'matched' : 'unmatched' } : line
+        line.id === lineId ? { ...line, include: true } : line
       )
     );
   }
@@ -1668,9 +1664,6 @@ export function ProjectIntake() {
         laborIncluded: null,
         materialIncluded: null,
         matched: !!match,
-        confidence: match ? 0.86 : 0.3,
-        matchStatus: match ? 'matched' : 'unmatched',
-        matchExplanation: match ? 'Template seed matched to catalog.' : 'Template seed needs a catalog match.',
       } as LineSuggestion;
     });
     setLineSuggestions(dedupeSuggestions(starter));
@@ -1702,16 +1695,15 @@ export function ProjectIntake() {
         alert(takeoffFileName ? `The uploaded file "${takeoffFileName}" is not ready yet or did not produce readable takeoff content. ${takeoffUploadMessage || 'Try the file again, wait for parsing to finish, or paste/import text.'}` : 'Upload a takeoff file, paste takeoff text, or select an optional project takeoff.');
         return false;
       }
+      if (takeoffParsedFromServer && !sourceProjectId && !takeoffImportText.trim()) {
+        return true;
+      }
       await loadTakeoffSource();
       return true;
     }
 
     if (mode === 'document') {
-      if (intakeServerResult?.parsedLines?.length) {
-        return true;
-      }
-
-      if (!uploadedText.trim()) {
+      if (!uploadedText.trim() && lineSuggestions.length === 0) {
         alert('Upload a source file first.');
         return false;
       }
@@ -1733,23 +1725,48 @@ export function ProjectIntake() {
 
   async function handleCreateProject() {
     if (creating) return;
+    if (scopeCategoryOptions.length > 0 && !(projectDraft.selectedScopeCategories || []).length) {
+      alert('Select at least one scope category to include before creating the project.');
+      return;
+    }
+
     setCreating(true);
 
     try {
       const uploadedSourceFile = mode === 'takeoff' ? takeoffUploadedFile : mode === 'document' ? uploadedDocumentFile : null;
+      const normalizedJobConditions = normalizeProjectJobConditions(projectDraft.jobConditions);
+      if ((projectDraft.address || '').trim() && normalizedJobConditions.travelDistanceMiles === null) {
+        const distance = await refreshDraftDistance(projectDraft.address, true);
+        if (distance !== null) {
+          normalizedJobConditions.travelDistanceMiles = distance;
+          if (distance > 50) normalizedJobConditions.remoteTravel = true;
+        }
+      }
+
       const createdProject = await api.createV1Project({
         projectNumber: projectDraft.projectNumber || null,
         projectName: projectDraft.projectName || 'Untitled Project',
         clientName: projectDraft.clientName || null,
+        generalContractor: projectDraft.generalContractor || null,
         estimator: projectDraft.estimator || null,
         bidDate: projectDraft.bidDate || null,
+        proposalDate: projectDraft.proposalDate || null,
         dueDate: projectDraft.dueDate || null,
         address: projectDraft.address || null,
         projectType: projectDraft.projectType || null,
         projectSize: projectDraft.projectSize || null,
+        floorLevel: projectDraft.floorLevel || null,
+        accessDifficulty: projectDraft.accessDifficulty || null,
+        installHeight: projectDraft.installHeight || null,
+        materialHandling: projectDraft.materialHandling || null,
+        wallSubstrate: projectDraft.wallSubstrate || null,
+        laborBurdenPercent: Number(projectDraft.laborBurdenPercent ?? settingsDefaults?.defaultLaborBurdenPercent ?? 25),
+        overheadPercent: Number(projectDraft.overheadPercent ?? settingsDefaults?.defaultOverheadPercent ?? 15),
+        profitPercent: Number(projectDraft.profitPercent ?? settingsDefaults?.defaultProfitPercent ?? 10),
+        taxPercent: Number(projectDraft.taxPercent ?? settingsDefaults?.defaultTaxPercent ?? 8.25),
         pricingMode: (projectDraft.pricingMode as PricingMode) || 'labor_and_material',
         selectedScopeCategories: projectDraft.selectedScopeCategories || [],
-        jobConditions,
+        jobConditions: normalizedJobConditions,
         notes: projectDraft.notes || null,
         specialNotes: projectDraft.specialNotes || null
       });
@@ -1807,7 +1824,7 @@ export function ProjectIntake() {
         }
       }
 
-      navigate(`/project/${createdProject.id}`);
+      navigate(`/project/${createdProject.id}?tab=takeoff`);
     } catch (error) {
       console.error(error);
       alert('Failed to create project from reviewed items.');
@@ -1928,13 +1945,6 @@ export function ProjectIntake() {
                       </ul>
                     </div>
                   )}
-                  {intakeServerResult && (
-                    <div className="mt-3 rounded border border-blue-200 bg-blue-50 p-2 space-y-1">
-                      <p className="text-xs font-semibold text-blue-800">AI Parse Strategy</p>
-                      <p className="text-xs text-blue-900">{intakeServerResult.strategy.summary}</p>
-                      <p className="text-[11px] text-blue-800">Model: {intakeServerResult.strategy.primaryModel}</p>
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -1992,12 +2002,6 @@ export function ProjectIntake() {
                   </ul>
                 </div>
               )}
-              {intakeServerResult && (
-                <div className="rounded border border-blue-200 bg-blue-50 p-2">
-                  <p className="text-xs font-semibold text-blue-800">AI Parse Strategy</p>
-                  <p className="text-xs text-blue-900">{intakeServerResult.strategy.summary}</p>
-                </div>
-              )}
             </>
           )}
 
@@ -2044,187 +2048,221 @@ export function ProjectIntake() {
 
       {step === 3 && (
         <section className="space-y-5">
-          {intakeServerResult && (
-            <div className="ui-surface p-4 space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">{intakeServerResult.strategy.selectedStrategy}</span>
-                <span className="text-xs text-slate-500">{intakeServerResult.strategy.summary}</span>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-slate-600">
-                <div><span className="font-semibold text-slate-800">Matched</span><div>{intakeServerResult.review.matchedItems}</div></div>
-                <div><span className="font-semibold text-slate-800">Needs Review</span><div>{intakeServerResult.review.needsMatchItems}</div></div>
-                <div><span className="font-semibold text-slate-800">Rooms</span><div>{intakeServerResult.review.roomCount}</div></div>
-                <div><span className="font-semibold text-slate-800">Models</span><div>{[intakeServerResult.strategy.primaryModel, ...intakeServerResult.strategy.supportingModels].filter(Boolean).join(', ')}</div></div>
-              </div>
-              {(intakeServerResult.diagnostics.warnings.length > 0 || intakeServerResult.diagnostics.webLookups.length > 0) && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
-                  {intakeServerResult.diagnostics.warnings.length > 0 && (
-                    <ul className="space-y-1 text-xs text-slate-600">
-                      {intakeServerResult.diagnostics.warnings.map((warning, index) => (
-                        <li key={`${warning}-${index}`}>- {warning}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {intakeServerResult.diagnostics.webLookups.length > 0 && (
-                    <p className="text-xs text-slate-600">Web enrichment was used selectively for ambiguous line items.</p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
           <div className="ui-surface p-5 space-y-3">
-            <h2 className="text-sm font-semibold text-slate-800">Project Details</h2>
-            <p className="text-xs text-slate-500">Confirm the core details before creating the project.</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label className="text-xs text-slate-600">Project Name<input className="ui-input mt-1" value={projectDraft.projectName || ''} onChange={(e) => setProjectDraft({ ...projectDraft, projectName: e.target.value })} /></label>
-              <label className="text-xs text-slate-600">Project # / Bid Package<input className="ui-input mt-1" value={projectDraft.projectNumber || ''} onChange={(e) => setProjectDraft({ ...projectDraft, projectNumber: e.target.value })} /></label>
-              <label className="text-xs text-slate-600">Client / GC<input className="ui-input mt-1" value={projectDraft.clientName || ''} onChange={(e) => setProjectDraft({ ...projectDraft, clientName: e.target.value })} /></label>
-              <label className="text-xs text-slate-600">Project Address<input className="ui-input mt-1" value={projectDraft.address || ''} onChange={(e) => setProjectDraft({ ...projectDraft, address: e.target.value })} /></label>
-              <label className="text-xs text-slate-600">Pricing Basis
-                <select className="ui-input mt-1" value={(projectDraft.pricingMode as PricingMode) || 'labor_and_material'} onChange={(e) => setProjectDraft({ ...projectDraft, pricingMode: e.target.value as PricingMode })}>
-                  <option value="material_only">Material Only</option>
-                  <option value="labor_only">Install Only</option>
-                  <option value="labor_and_material">Material + Install</option>
-                </select>
-              </label>
-              <label className="text-xs text-slate-600">Special Notes<input className="ui-input mt-1" value={projectDraft.specialNotes || ''} onChange={(e) => setProjectDraft({ ...projectDraft, specialNotes: e.target.value })} /></label>
-              <label className="text-xs text-slate-600 md:col-span-2">Notes<input className="ui-input mt-1" value={projectDraft.notes || ''} onChange={(e) => setProjectDraft({ ...projectDraft, notes: e.target.value })} /></label>
-            </div>
-          </div>
-
-          <div className="ui-surface p-5 space-y-4">
-            {(proposalDraftPreview.intro || proposalDraftPreview.terms || proposalDraftPreview.exclusions || proposalDraftPreview.clarifications) && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">AI Proposal Assist</p>
-                  <h3 className="text-sm font-semibold text-slate-900 mt-1">Draft proposal language from the parsed scope.</h3>
+            <h2 className="text-sm font-semibold text-slate-800">Final Setup</h2>
+            <p className="text-xs text-slate-500">Lock the job setup before you open takeoff.</p>
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)]">
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Job Basics</p>
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <label className="text-xs text-slate-600">Project Name<input className="ui-input mt-1" value={projectDraft.projectName || ''} onChange={(e) => patchProjectDraft({ projectName: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">Bid Package / Job #<input className="ui-input mt-1" value={projectDraft.projectNumber || ''} onChange={(e) => patchProjectDraft({ projectNumber: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">Client<input className="ui-input mt-1" value={projectDraft.clientName || ''} onChange={(e) => patchProjectDraft({ clientName: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">GC<input className="ui-input mt-1" value={projectDraft.generalContractor || ''} onChange={(e) => patchProjectDraft({ generalContractor: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">Estimator<input className="ui-input mt-1" value={projectDraft.estimator || ''} onChange={(e) => patchProjectDraft({ estimator: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">Project Type
+                      <select className="ui-input mt-1" value={projectDraft.projectType || 'Commercial'} onChange={(e) => patchProjectDraft({ projectType: e.target.value })}>
+                        <option value="Commercial">Commercial</option>
+                        <option value="Residential">Residential</option>
+                        <option value="Industrial">Industrial</option>
+                        <option value="Institutional">Institutional</option>
+                        <option value="Multi-Family">Multi-Family</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-600">Bid Date<input type="date" className="ui-input mt-1" value={projectDraft.bidDate || ''} onChange={(e) => patchProjectDraft({ bidDate: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">Proposal Date<input type="date" className="ui-input mt-1" value={projectDraft.proposalDate || ''} onChange={(e) => patchProjectDraft({ proposalDate: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600 md:col-span-2">Due Date<input type="date" className="ui-input mt-1" value={projectDraft.dueDate || ''} onChange={(e) => patchProjectDraft({ dueDate: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600 md:col-span-2">Site Address
+                      <textarea
+                        rows={2}
+                        className="ui-input mt-1 min-h-[84px] py-2"
+                        value={projectDraft.address || ''}
+                        onChange={(e) => {
+                          patchProjectDraft({ address: e.target.value });
+                          setDistanceError(null);
+                          setDistanceMessage('Address updated. Recalculate travel distance.');
+                          patchDraftJobConditions({ travelDistanceMiles: null });
+                        }}
+                      />
+                    </label>
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <label className="text-xs text-slate-600">Intro
-                    <textarea rows={4} className="ui-textarea mt-1" value={proposalDraftPreview.intro} onChange={(e) => setProposalDraftPreview((prev) => ({ ...prev, intro: e.target.value }))} />
-                  </label>
-                  <label className="text-xs text-slate-600">Terms
-                    <textarea rows={4} className="ui-textarea mt-1" value={proposalDraftPreview.terms} onChange={(e) => setProposalDraftPreview((prev) => ({ ...prev, terms: e.target.value }))} />
-                  </label>
-                  <label className="text-xs text-slate-600">Exclusions
-                    <textarea rows={4} className="ui-textarea mt-1" value={proposalDraftPreview.exclusions} onChange={(e) => setProposalDraftPreview((prev) => ({ ...prev, exclusions: e.target.value }))} />
-                  </label>
-                  <label className="text-xs text-slate-600">Clarifications
-                    <textarea rows={4} className="ui-textarea mt-1" value={proposalDraftPreview.clarifications} onChange={(e) => setProposalDraftPreview((prev) => ({ ...prev, clarifications: e.target.value }))} />
-                  </label>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Pricing</p>
+                      <p className="mt-1 text-xs text-slate-500">Set markups, crew assumptions, and adders now.</p>
+                    </div>
+                    <span className="rounded-full bg-white px-3 py-1 text-[11px] font-medium text-slate-600 shadow-sm ring-1 ring-slate-200">Settings defaults loaded</span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <label className="text-xs text-slate-600">Price Mode
+                      <select className="ui-input mt-1" value={(projectDraft.pricingMode as PricingMode) || 'labor_and_material'} onChange={(e) => patchProjectDraft({ pricingMode: e.target.value as PricingMode })}>
+                        <option value="material_only">Material Only</option>
+                        <option value="labor_only">Install Only</option>
+                        <option value="labor_and_material">Material + Install</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-600">Burden %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.laborBurdenPercent ?? ''} onChange={(e) => patchProjectDraft({ laborBurdenPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-xs text-slate-600">Overhead %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.overheadPercent ?? ''} onChange={(e) => patchProjectDraft({ overheadPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-xs text-slate-600">Profit %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.profitPercent ?? ''} onChange={(e) => patchProjectDraft({ profitPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-xs text-slate-600">Tax %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.taxPercent ?? ''} onChange={(e) => patchProjectDraft({ taxPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-xs text-slate-600">Labor Factor<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).laborRateMultiplier} onChange={(e) => patchDraftJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })} /></label>
+                    <label className="text-xs text-slate-600">Adder %<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderPercent} onChange={(e) => patchDraftJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-xs text-slate-600">Adder $<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderAmount} onChange={(e) => patchDraftJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-xs text-slate-600">Crew Size<input type="number" min={1} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerCount} onChange={(e) => patchDraftJobConditions({ installerCount: Number(e.target.value) || 1 })} /></label>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Scope Categories</p>
+                  <p className="mt-1 text-xs text-slate-500">Pick the scope buckets this job should keep active.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {scopeCategoryOptions.map((category) => {
+                      const active = (projectDraft.selectedScopeCategories || []).includes(category);
+                      return (
+                        <button
+                          key={category}
+                          type="button"
+                          onClick={() => patchProjectDraft({
+                            selectedScopeCategories: active
+                              ? (projectDraft.selectedScopeCategories || []).filter((entry) => entry !== category)
+                              : [...(projectDraft.selectedScopeCategories || []), category].sort(),
+                          })}
+                          className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${active ? 'bg-blue-700 text-white shadow-sm' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'}`}
+                        >
+                          {category}
+                        </button>
+                      );
+                    })}
+                    {scopeCategoryOptions.length === 0 ? <p className="text-xs text-slate-500">Categories appear after review lines load.</p> : null}
+                  </div>
                 </div>
               </div>
-            )}
 
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">Project Setup Questions</h2>
-              <p className="text-xs text-slate-500 mt-1">Review the job-wide add-ins, labor basis, and access conditions before creating the project.</p>
-            </div>
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Travel Distance</p>
+                      <p className="mt-1 text-xs text-slate-500">Office: {OFFICE_ADDRESS}</p>
+                    </div>
+                    <button type="button" onClick={() => void refreshDraftDistance()} className="ui-btn-secondary h-9 px-3 text-[11px]" disabled={distanceCalculating}>{distanceCalculating ? 'Calculating...' : 'Calc Miles'}</button>
+                  </div>
+                  <div className="mt-3 rounded-2xl bg-slate-50/80 p-3 text-sm text-slate-700 ring-1 ring-slate-200/80">
+                    <p className="font-medium text-slate-900">{normalizeProjectJobConditions(projectDraft.jobConditions).travelDistanceMiles !== null ? `${formatNumberSafe(normalizeProjectJobConditions(projectDraft.jobConditions).travelDistanceMiles, 1)} miles from office.` : distanceMessage}</p>
+                    {distanceError ? <p className="mt-1 text-xs text-red-600">{distanceError}</p> : null}
+                  </div>
+                </div>
 
-            <div className="space-y-2">
-              <p className="text-[11px] font-medium text-slate-700">Included Catalog Categories</p>
-              <div className="flex flex-wrap gap-2">
-                {scopeCategoryOptions.map((category) => {
-                  const active = (projectDraft.selectedScopeCategories || []).includes(category);
-                  return (
-                    <button
-                      key={category}
-                      type="button"
-                      onClick={() => toggleScopeCategory(category)}
-                      className={`px-2.5 py-1.5 rounded-full border text-[11px] font-medium transition-colors ${active ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
-                    >
-                      {category}
-                    </button>
-                  );
-                })}
-              </div>
-              {scopeCategoryOptions.length === 0 ? <p className="text-xs text-slate-500">Catalog categories will appear here after catalog sync.</p> : null}
-            </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Job Conditions</p>
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <label className="text-xs text-slate-600">Project Size
+                      <select className="ui-input mt-1" value={projectDraft.projectSize || 'Medium'} onChange={(e) => patchProjectDraft({ projectSize: e.target.value })}>
+                        <option value="Small">Small</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Large">Large</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-600">Floor Level
+                      <select className="ui-input mt-1" value={projectDraft.floorLevel || 'Ground'} onChange={(e) => patchProjectDraft({ floorLevel: e.target.value })}>
+                        <option value="Ground">Ground</option>
+                        <option value="2-3">2-3</option>
+                        <option value="4+">4+</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-600">Access Difficulty
+                      <select className="ui-input mt-1" value={projectDraft.accessDifficulty || 'Easy'} onChange={(e) => patchProjectDraft({ accessDifficulty: e.target.value })}>
+                        <option value="Easy">Easy</option>
+                        <option value="Moderate">Moderate</option>
+                        <option value="Difficult">Difficult</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-600">Install Height
+                      <select className="ui-input mt-1" value={projectDraft.installHeight || 'Standard'} onChange={(e) => patchProjectDraft({ installHeight: e.target.value })}>
+                        <option value="Standard">Standard</option>
+                        <option value="Ladder">Ladder</option>
+                        <option value="Lift">Lift</option>
+                        <option value="Scaffold">Scaffold</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-600">Material Handling
+                      <select className="ui-input mt-1" value={projectDraft.materialHandling || 'Standard'} onChange={(e) => patchProjectDraft({ materialHandling: e.target.value })}>
+                        <option value="Standard">Standard</option>
+                        <option value="Manual">Manual</option>
+                        <option value="Multiple Moves">Multiple Moves</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-600">Wall Substrate
+                      <select className="ui-input mt-1" value={projectDraft.wallSubstrate || 'Drywall'} onChange={(e) => patchProjectDraft({ wallSubstrate: e.target.value })}>
+                        <option value="Drywall">Drywall</option>
+                        <option value="CMU">CMU</option>
+                        <option value="Concrete">Concrete</option>
+                        <option value="Tile">Tile</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-600">Floors<input type="number" min={1} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).floors} onChange={(e) => patchDraftJobConditions({ floors: Number(e.target.value) || 1 })} /></label>
+                    <label className="text-xs text-slate-600">Tax / Location Note<input className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).locationLabel || ''} onChange={(e) => patchDraftJobConditions({ locationLabel: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">Tax Override %<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).locationTaxPercent ?? ''} onChange={(e) => patchDraftJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) })} /></label>
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <label className="text-[11px] font-medium text-slate-700">Location / Region<input className="ui-input mt-1 h-9" value={jobConditions.locationLabel} onChange={(e) => patchJobConditions({ locationLabel: e.target.value })} /></label>
-              <label className="text-[11px] font-medium text-slate-700">Location Tax Override %<input type="number" className="ui-input mt-1 h-9" value={jobConditions.locationTaxPercent ?? ''} onChange={(e) => patchJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) || 0 })} /></label>
-              <label className="text-[11px] font-medium text-slate-700">Labor Basis
-                <select className="ui-input mt-1 h-9" value={jobConditions.laborRateBasis} onChange={(e) => patchJobConditions({ laborRateBasis: e.target.value as ProjectJobConditions['laborRateBasis'] })}>
-                  <option value="standard">Standard</option>
-                  <option value="union">Union</option>
-                  <option value="prevailing">Prevailing Wage</option>
-                </select>
-              </label>
-              <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.laborRateMultiplier} onChange={(e) => patchJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })} /></label>
-              <label className="text-[11px] font-medium text-slate-700">Floors<input type="number" min={1} className="ui-input mt-1 h-9" value={jobConditions.floors} onChange={(e) => patchJobConditions({ floors: Number(e.target.value) || 1 })} /></label>
-              <label className="text-[11px] font-medium text-slate-700">Floor Labor Add / Floor<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.floorMultiplierPerFloor} onChange={(e) => patchJobConditions({ floorMultiplierPerFloor: Number(e.target.value) || 0 })} /></label>
-              <label className="text-[11px] font-medium text-slate-700">Delivery Difficulty
-                <select className="ui-input mt-1 h-9" value={jobConditions.deliveryDifficulty} onChange={(e) => patchJobConditions({ deliveryDifficulty: e.target.value as ProjectJobConditions['deliveryDifficulty'] })}>
-                  <option value="standard">Standard</option>
-                  <option value="constrained">Constrained</option>
-                  <option value="difficult">Difficult</option>
-                </select>
-              </label>
-              <label className="text-[11px] font-medium text-slate-700">Mobilization Complexity
-                <select className="ui-input mt-1 h-9" value={jobConditions.mobilizationComplexity} onChange={(e) => patchJobConditions({ mobilizationComplexity: e.target.value as ProjectJobConditions['mobilizationComplexity'] })}>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </label>
-              <label className="text-[11px] font-medium text-slate-700">Project Adder %<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.estimateAdderPercent} onChange={(e) => patchJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} /></label>
-              <label className="text-[11px] font-medium text-slate-700">Project Adder $<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.estimateAdderAmount} onChange={(e) => patchJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} /></label>
-            </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Job Adders</p>
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {[
+                      ['unionWage', 'Union wage'],
+                      ['prevailingWage', 'Prevailing wage'],
+                      ['occupiedBuilding', 'Occupied building'],
+                      ['restrictedAccess', 'Restricted access'],
+                      ['afterHoursWork', 'After-hours work'],
+                      ['phasedWork', 'Phased work'],
+                      ['remoteTravel', 'Remote travel'],
+                      ['scheduleCompression', 'Schedule compression'],
+                      ['smallJobFactor', 'Small job factor'],
+                      ['deliveryRequired', 'Delivery required'],
+                    ].map(([key, label]) => {
+                      const active = Boolean(normalizeProjectJobConditions(projectDraft.jobConditions)[key as keyof ProjectJobConditions]);
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => patchDraftJobConditions({ [key]: !active } as Partial<ProjectJobConditions>)}
+                          className={`flex items-center justify-between rounded-2xl px-3 py-3 text-left text-sm transition ${active ? 'bg-blue-50 text-blue-800 ring-1 ring-blue-200' : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100'}`}
+                        >
+                          <span>{label}</span>
+                          <span className={`h-2.5 w-2.5 rounded-full ${active ? 'bg-blue-700' : 'bg-slate-300'}`} />
+                        </button>
+                      );
+                    })}
+                  </div>
 
-            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 grid grid-cols-1 md:grid-cols-[1fr_180px_180px] gap-3 items-end">
-              <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.deliveryRequired} onChange={(e) => patchJobConditions({ deliveryRequired: e.target.checked })} />Delivery is included in this job</label>
-              <label className="text-[11px] font-medium text-slate-700">Delivery Pricing Mode
-                <select className="ui-input mt-1 h-9" value={jobConditions.deliveryPricingMode} onChange={(e) => patchJobConditions({ deliveryPricingMode: e.target.value as ProjectJobConditions['deliveryPricingMode'] })}>
-                  <option value="included">Included / No Charge</option>
-                  <option value="flat">Flat Amount</option>
-                  <option value="percent">Percent of Base</option>
-                </select>
-              </label>
-              <label className="text-[11px] font-medium text-slate-700">Delivery Value<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.deliveryValue} onChange={(e) => patchJobConditions({ deliveryValue: Number(e.target.value) || 0 })} /></label>
-            </div>
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <label className="text-xs text-slate-600">Delivery Mode
+                      <select className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).deliveryPricingMode} onChange={(e) => patchDraftJobConditions({ deliveryPricingMode: e.target.value as ProjectJobConditions['deliveryPricingMode'] })}>
+                        <option value="included">Included</option>
+                        <option value="flat">Flat</option>
+                        <option value="percent">Percent</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-600">Delivery $<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).deliveryValue} onChange={(e) => patchDraftJobConditions({ deliveryValue: Number(e.target.value) || 0 })} /></label>
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.unionWage} onChange={(e) => patchJobConditions({ unionWage: e.target.checked })} />Union Wage</label>
-                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.unionWageMultiplier} onChange={(e) => patchJobConditions({ unionWageMultiplier: Number(e.target.value) || 0 })} /></label>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.prevailingWage} onChange={(e) => patchJobConditions({ prevailingWage: e.target.checked })} />Prevailing Wage</label>
-                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.prevailingWageMultiplier} onChange={(e) => patchJobConditions({ prevailingWageMultiplier: Number(e.target.value) || 0 })} /></label>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.smallJobFactor} onChange={(e) => patchJobConditions({ smallJobFactor: e.target.checked })} />Small Job Factor</label>
-                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.smallJobMultiplier} onChange={(e) => patchJobConditions({ smallJobMultiplier: Number(e.target.value) || 0 })} /></label>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.elevatorAvailable} onChange={(e) => patchJobConditions({ elevatorAvailable: e.target.checked })} />Elevator Available</label>
-                <p className="text-[11px] text-slate-500">If unchecked on multi-floor work, labor increases automatically.</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.occupiedBuilding} onChange={(e) => patchJobConditions({ occupiedBuilding: e.target.checked })} />Occupied Building</label>
-                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.occupiedBuildingMultiplier} onChange={(e) => patchJobConditions({ occupiedBuildingMultiplier: Number(e.target.value) || 0 })} /></label>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.restrictedAccess} onChange={(e) => patchJobConditions({ restrictedAccess: e.target.checked })} />Restricted Access</label>
-                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.restrictedAccessMultiplier} onChange={(e) => patchJobConditions({ restrictedAccessMultiplier: Number(e.target.value) || 0 })} /></label>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.remoteTravel} onChange={(e) => patchJobConditions({ remoteTravel: e.target.checked })} />Remote / Travel Job</label>
-                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.remoteTravelMultiplier} onChange={(e) => patchJobConditions({ remoteTravelMultiplier: Number(e.target.value) || 0 })} /></label>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.afterHoursWork} onChange={(e) => patchJobConditions({ afterHoursWork: e.target.checked })} />After-hours Work</label>
-                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.afterHoursMultiplier} onChange={(e) => patchJobConditions({ afterHoursMultiplier: Number(e.target.value) || 0 })} /></label>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.phasedWork} onChange={(e) => patchJobConditions({ phasedWork: e.target.checked })} />Phased Work</label>
-                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.phasedWorkMultiplier} onChange={(e) => patchJobConditions({ phasedWorkMultiplier: Number(e.target.value) || 0 })} /></label>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.scheduleCompression} onChange={(e) => patchJobConditions({ scheduleCompression: e.target.checked })} />Schedule Compression</label>
-                <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.scheduleCompressionMultiplier} onChange={(e) => patchJobConditions({ scheduleCompressionMultiplier: Number(e.target.value) || 0 })} /></label>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Notes</p>
+                  <div className="mt-3 space-y-3">
+                    <label className="text-xs text-slate-600">Proposal Notes
+                      <textarea rows={4} className="ui-input mt-1 min-h-[112px] py-2" value={projectDraft.specialNotes || ''} onChange={(e) => patchProjectDraft({ specialNotes: e.target.value })} />
+                    </label>
+                    <label className="text-xs text-slate-600">Internal Notes
+                      <textarea rows={4} className="ui-input mt-1 min-h-[112px] py-2" value={projectDraft.notes || ''} onChange={(e) => patchProjectDraft({ notes: e.target.value })} />
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2246,7 +2284,7 @@ export function ProjectIntake() {
             <div className="ui-surface p-4 space-y-4">
               <div>
                 <h3 className="text-sm font-semibold text-slate-800 mb-2">Matched Items</h3>
-                <p className="text-xs text-slate-500 mb-3">These items matched your catalog and are ready to add.</p>
+                <p className="text-xs text-slate-500 mb-3">These items were auto-linked to your catalog first. Suggested matches are prefilled but labeled for quick review.</p>
                 <div className="space-y-2 max-h-[36vh] overflow-y-auto pr-1">
                   {matchedSuggestions.map((line) => (
                     <div key={line.id} className="border border-emerald-200 bg-emerald-50/30 rounded-md p-2">
@@ -2284,10 +2322,11 @@ export function ProjectIntake() {
                             </label>
                           </div>
                           <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">Matched</span>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 font-medium ${line.matchConfidence === 'possible' ? 'border border-amber-200 bg-amber-50 text-amber-700' : 'border border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                              {line.matchConfidence === 'possible' ? 'Suggested Match' : 'Matched'}
+                            </span>
+                            {line.matchReason ? <span className="text-slate-500">{line.matchReason}</span> : null}
                             <span className="text-slate-500">{line.catalogItemId ? `Catalog ID ${line.catalogItemId}` : 'No catalog ID stored'}</span>
-                            <span className="text-slate-500">Confidence {Math.round(line.confidence * 100)}%</span>
-                            {line.matchExplanation ? <span className="text-slate-500">{line.matchExplanation}</span> : null}
                           </div>
                         </div>
                       </div>
@@ -2329,10 +2368,6 @@ export function ProjectIntake() {
                           <label className="text-[11px] text-slate-600 md:col-span-2">Notes
                             <input className="ui-input mt-1 h-8" value={line.notes || ''} onChange={(e) => patchLineSuggestion(line.id, { notes: e.target.value })} />
                           </label>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                          <span>Confidence {Math.round(line.confidence * 100)}%</span>
-                          {line.matchExplanation ? <span>{line.matchExplanation}</span> : null}
                         </div>
                         {!line.include && <p className="text-amber-700 font-semibold">Ignored</p>}
                       </div>

@@ -31,22 +31,22 @@ projectsRouter.put('/:projectId', (req, res) => {
   return res.json({ data: project });
 });
 
-projectsRouter.post('/:projectId/archive', (req, res) => {
+projectsRouter.delete('/:projectId', (req, res) => {
+  if (String(req.query.permanent || '') === 'true') {
+    const deleted = deleteProject(req.params.projectId);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    return res.json({ data: { deleted: true } });
+  }
+
   const archived = archiveProject(req.params.projectId);
   if (!archived) {
     return res.status(404).json({ error: 'Project not found' });
   }
 
   return res.json({ data: { archived: true } });
-});
-
-projectsRouter.delete('/:projectId', (req, res) => {
-  const deleted = deleteProject(req.params.projectId);
-  if (!deleted) {
-    return res.status(404).json({ error: 'Project not found' });
-  }
-
-  return res.json({ data: { deleted: true } });
 });
 
 projectsRouter.get('/:projectId/files', (req, res) => {

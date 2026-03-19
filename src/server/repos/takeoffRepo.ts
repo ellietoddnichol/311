@@ -1,8 +1,14 @@
 import { randomUUID } from 'crypto';
 import { estimatorDb } from '../db/connection.ts';
-import { TakeoffLineRecord } from '../../shared/types/estimator.ts';
+import { TakeoffLineRecord, TakeoffPricingSource } from '../../shared/types/estimator.ts';
 
-const DEFAULT_LABOR_RATE_PER_HOUR = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 30);
+const DEFAULT_LABOR_RATE_PER_HOUR = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 85);
+
+export function getConfiguredLaborRatePerHour(): number {
+  const row = estimatorDb.prepare('SELECT default_labor_rate_per_hour FROM settings_v1 WHERE id = ?').get('global') as { default_labor_rate_per_hour?: number } | undefined;
+  const rate = Number(row?.default_labor_rate_per_hour);
+  return Number.isFinite(rate) && rate > 0 ? rate : DEFAULT_LABOR_RATE_PER_HOUR;
+}
 
 export function resolveUnitLaborCostFromMinutes(laborMinutes: number, laborRatePerHour = DEFAULT_LABOR_RATE_PER_HOUR): number {
   const minutes = Number.isFinite(Number(laborMinutes)) ? Number(laborMinutes) : 0;
@@ -11,8 +17,8 @@ export function resolveUnitLaborCostFromMinutes(laborMinutes: number, laborRateP
   return Number(((minutes / 60) * rate).toFixed(2));
 }
 
-function resolveLaborCostFromInput(laborMinutes: number, laborCost?: number, fallbackLaborCost?: number): number {
-  const derivedLaborCost = resolveUnitLaborCostFromMinutes(laborMinutes);
+function resolveLaborCostFromInput(laborMinutes: number, laborCost: number | undefined, fallbackLaborCost: number | undefined, laborRatePerHour: number): number {
+  const derivedLaborCost = resolveUnitLaborCostFromMinutes(laborMinutes, laborRatePerHour);
   const providedLaborCost = laborCost ?? fallbackLaborCost;
 
   // Treat zero/negative provided values as unset when labor minutes indicate real labor.
@@ -21,6 +27,14 @@ function resolveLaborCostFromInput(laborMinutes: number, laborCost?: number, fal
   }
 
   return Number.isFinite(Number(providedLaborCost)) ? Number(providedLaborCost) : 0;
+}
+
+function normalizePricingSource(value: unknown): TakeoffPricingSource {
+  return value === 'manual' ? 'manual' : 'auto';
+}
+
+function calculateUnitSell(materialCost: number, laborCost: number): number {
+  return Number((materialCost + laborCost).toFixed(2));
 }
 
 function mapTakeoffRow(row: any): TakeoffLineRecord {
@@ -42,6 +56,7 @@ function mapTakeoffRow(row: any): TakeoffLineRecord {
     laborMinutes: row.labor_minutes,
     laborCost: row.labor_cost,
     baseLaborCost: row.base_labor_cost,
+    pricingSource: normalizePricingSource(row.pricing_source),
     unitSell: row.unit_sell,
     lineTotal: row.line_total,
     notes: row.notes,
@@ -65,11 +80,20 @@ export function getTakeoffLine(lineId: string): TakeoffLineRecord | null {
   return row ? mapTakeoffRow(row) : null;
 }
 
-function computeLineTotal(qty: number, materialCost: number, laborCost: number, unitSell?: number): { unitSell: number; lineTotal: number } {
-  const resolvedUnitSell = unitSell ?? materialCost + laborCost;
+function computeLineTotal(
+  qty: number,
+  materialCost: number,
+  laborCost: number,
+  unitSell: number | undefined,
+  pricingSource: TakeoffPricingSource
+): { unitSell: number; lineTotal: number } {
+  const calculatedUnitSell = calculateUnitSell(materialCost, laborCost);
+  const resolvedUnitSell = pricingSource === 'manual'
+    ? (Number.isFinite(Number(unitSell)) ? Number(unitSell) : calculatedUnitSell)
+    : calculatedUnitSell;
   return {
-    unitSell: resolvedUnitSell,
-    lineTotal: resolvedUnitSell * qty
+    unitSell: Number(resolvedUnitSell.toFixed(2)),
+    lineTotal: Number((resolvedUnitSell * qty).toFixed(2))
   };
 }
 
@@ -107,13 +131,20 @@ function resolveCatalogDefaults(input: Partial<TakeoffLineRecord>): {
 export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectId: string; roomId: string; description: string }): TakeoffLineRecord {
   const now = new Date().toISOString();
   const catalogDefaults = resolveCatalogDefaults(input);
+  const laborRatePerHour = getConfiguredLaborRatePerHour();
   const qty = input.qty ?? 1;
   const materialCost = input.materialCost ?? catalogDefaults.materialCost ?? 0;
   const laborMinutes = input.laborMinutes ?? catalogDefaults.laborMinutes ?? 0;
-  const laborCost = resolveLaborCostFromInput(laborMinutes, input.laborCost, input.baseLaborCost);
   const baseMaterialCost = input.baseMaterialCost ?? materialCost;
-  const baseLaborCost = resolveLaborCostFromInput(laborMinutes, input.baseLaborCost, laborCost);
-  const totals = computeLineTotal(qty, materialCost, laborCost, input.unitSell);
+  const baseLaborCost = input.baseLaborCost !== undefined
+    ? Number(input.baseLaborCost) || 0
+    : resolveUnitLaborCostFromMinutes(laborMinutes, laborRatePerHour);
+  const laborCost = resolveLaborCostFromInput(laborMinutes, input.laborCost, input.baseLaborCost ?? baseLaborCost, laborRatePerHour);
+  const calculatedUnitSell = calculateUnitSell(materialCost, laborCost);
+  const pricingSource = normalizePricingSource(
+    input.pricingSource ?? (input.unitSell !== undefined && Number(input.unitSell) !== calculatedUnitSell ? 'manual' : 'auto')
+  );
+  const totals = computeLineTotal(qty, materialCost, laborCost, input.unitSell, pricingSource);
 
   const line: TakeoffLineRecord = {
     id: input.id ?? randomUUID(),
@@ -133,6 +164,7 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     laborMinutes,
     laborCost,
     baseLaborCost,
+    pricingSource,
     unitSell: totals.unitSell,
     lineTotal: totals.lineTotal,
     notes: input.notes ?? null,
@@ -146,9 +178,9 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
   estimatorDb.prepare(`
     INSERT INTO takeoff_lines_v1 (
       id, project_id, room_id, source_type, source_ref, description, sku, category, subcategory, base_type,
-      qty, unit, material_cost, base_material_cost, labor_minutes, labor_cost, base_labor_cost, unit_sell, line_total, notes, bundle_id, catalog_item_id,
+      qty, unit, material_cost, base_material_cost, labor_minutes, labor_cost, base_labor_cost, pricing_source, unit_sell, line_total, notes, bundle_id, catalog_item_id,
       variant_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     line.id,
     line.projectId,
@@ -167,6 +199,7 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     line.laborMinutes,
     line.laborCost,
     line.baseLaborCost,
+    line.pricingSource,
     line.unitSell,
     line.lineTotal,
     line.notes,
@@ -184,13 +217,25 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
   const existing = getTakeoffLine(lineId);
   if (!existing) return null;
 
+  const laborRatePerHour = getConfiguredLaborRatePerHour();
   const qty = input.qty ?? existing.qty;
   const materialCost = input.materialCost ?? existing.materialCost;
   const laborMinutes = input.laborMinutes ?? existing.laborMinutes;
-  const laborCost = resolveLaborCostFromInput(laborMinutes, input.laborCost, existing.laborCost);
   const baseMaterialCost = input.baseMaterialCost ?? (input.materialCost !== undefined ? materialCost : existing.baseMaterialCost);
-  const baseLaborCost = resolveLaborCostFromInput(laborMinutes, input.baseLaborCost, input.laborMinutes !== undefined ? laborCost : existing.baseLaborCost);
-  const totals = computeLineTotal(qty, materialCost, laborCost, input.unitSell ?? existing.unitSell);
+  const baseLaborCost = input.baseLaborCost !== undefined
+    ? Number(input.baseLaborCost) || 0
+    : input.laborMinutes !== undefined
+      ? resolveUnitLaborCostFromMinutes(laborMinutes, laborRatePerHour)
+      : existing.baseLaborCost;
+  const laborCost = resolveLaborCostFromInput(laborMinutes, input.laborCost, input.baseLaborCost ?? (input.laborMinutes !== undefined ? baseLaborCost : existing.laborCost), laborRatePerHour);
+  const pricingSource = normalizePricingSource(input.pricingSource ?? (input.unitSell !== undefined ? 'manual' : existing.pricingSource));
+  const totals = computeLineTotal(
+    qty,
+    materialCost,
+    laborCost,
+    input.unitSell ?? (pricingSource === 'manual' ? existing.unitSell : undefined),
+    pricingSource
+  );
 
   const next: TakeoffLineRecord = {
     ...existing,
@@ -202,6 +247,7 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
     baseMaterialCost,
     laborCost,
     baseLaborCost,
+    pricingSource,
     unitSell: totals.unitSell,
     lineTotal: totals.lineTotal,
     updatedAt: new Date().toISOString()
@@ -210,7 +256,7 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
   estimatorDb.prepare(`
     UPDATE takeoff_lines_v1 SET
       room_id = ?, source_type = ?, source_ref = ?, description = ?, sku = ?, category = ?, subcategory = ?, base_type = ?,
-      qty = ?, unit = ?, material_cost = ?, base_material_cost = ?, labor_minutes = ?, labor_cost = ?, base_labor_cost = ?, unit_sell = ?, line_total = ?, notes = ?,
+      qty = ?, unit = ?, material_cost = ?, base_material_cost = ?, labor_minutes = ?, labor_cost = ?, base_labor_cost = ?, pricing_source = ?, unit_sell = ?, line_total = ?, notes = ?,
       bundle_id = ?, catalog_item_id = ?, variant_id = ?, updated_at = ?
     WHERE id = ?
   `).run(
@@ -229,6 +275,7 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
     next.laborMinutes,
     next.laborCost,
     next.baseLaborCost,
+    next.pricingSource,
     next.unitSell,
     next.lineTotal,
     next.notes,

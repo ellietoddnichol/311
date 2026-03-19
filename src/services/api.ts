@@ -1,7 +1,7 @@
 
 import { Project, CatalogItem, UserProfile, EstimateResult } from '../types';
-import { BundleItemRecord, BundleRecord, CatalogSyncStatusRecord, ModifierRecord, ProjectFileRecord, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
-import { IntakeParseResponse } from '../shared/types/intake';
+import { BundleRecord, CatalogSyncStatusRecord, ModifierRecord, ProjectFileRecord, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
+import { IntakeParseRequest, IntakeParseResult } from '../shared/types/intake';
 
 const API_BASE = '/api';
 
@@ -58,11 +58,11 @@ export const api = {
     return payload.data;
   },
   async archiveV1Project(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/v1/projects/${id}/archive`, { method: 'POST' });
+    const res = await fetch(`${API_BASE}/v1/projects/${id}`, { method: 'DELETE' });
     await handleResponse<{ data: { archived: boolean } }>(res);
   },
   async deleteV1Project(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/v1/projects/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/v1/projects/${id}?permanent=true`, { method: 'DELETE' });
     await handleResponse<{ data: { deleted: boolean } }>(res);
   },
   async getV1ProjectFiles(projectId: string): Promise<ProjectFileRecord[]> {
@@ -198,8 +198,16 @@ export const api = {
     } }>(res);
     return payload.data;
   },
+  async repriceV1ProjectTakeoff(projectId: string): Promise<TakeoffLineRecord[]> {
+    const res = await fetch(`${API_BASE}/v1/takeoff/reprice/${encodeURIComponent(projectId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const payload = await handleResponse<{ data: TakeoffLineRecord[] }>(res);
+    return payload.data;
+  },
   async generateV1ProposalDraft(input: {
-    mode: 'scope_summary' | 'proposal_text' | 'terms_and_conditions';
+    mode: 'scope_summary' | 'proposal_text' | 'terms_and_conditions' | 'default_short';
     project: ProjectRecord;
     lines: TakeoffLineRecord[];
     summary: {
@@ -286,9 +294,33 @@ export const api = {
     const payload = await handleResponse<{ data: BundleRecord[] }>(res);
     return payload.data;
   },
-  async getV1BundleItems(bundleId: string): Promise<BundleItemRecord[]> {
-    const res = await fetch(`${API_BASE}/v1/bundles/${bundleId}/items`);
-    const payload = await handleResponse<{ data: BundleItemRecord[] }>(res);
+  async getV1BundleItems(bundleId: string): Promise<Array<{
+    id: string;
+    bundleId: string;
+    catalogItemId: string | null;
+    sku: string | null;
+    description: string;
+    qty: number;
+    materialCost: number;
+    laborMinutes: number;
+    laborCost: number;
+    sortOrder: number;
+    notes: string | null;
+  }>> {
+    const res = await fetch(`${API_BASE}/v1/bundles/${encodeURIComponent(bundleId)}/items`);
+    const payload = await handleResponse<{ data: Array<{
+      id: string;
+      bundleId: string;
+      catalogItemId: string | null;
+      sku: string | null;
+      description: string;
+      qty: number;
+      materialCost: number;
+      laborMinutes: number;
+      laborCost: number;
+      sortOrder: number;
+      notes: string | null;
+    }> }>(res);
     return payload.data;
   },
   async applyV1Bundle(bundleId: string, projectId: string, roomId: string): Promise<TakeoffLineRecord[]> {
@@ -372,17 +404,62 @@ export const api = {
   async extractV1IntakeWithGemini(input: {
     fileName: string;
     mimeType: string;
-    sourceType: 'pdf' | 'document' | 'spreadsheet' | 'image';
+    sourceType: 'pdf' | 'document' | 'spreadsheet';
     dataBase64?: string;
     extractedText?: string;
     normalizedRows?: Array<Record<string, unknown>>;
-  }): Promise<IntakeParseResponse> {
+  }): Promise<{
+    projectName: string;
+    projectNumber: string;
+    client: string;
+    address: string;
+    bidDate: string;
+    rooms: string[];
+    parsedLines: Array<{
+      roomArea: string;
+      category: string;
+      itemCode: string;
+      itemName: string;
+      description: string;
+      quantity: number;
+      unit: string;
+      notes: string;
+    }>;
+    warnings: string[];
+  }> {
     const res = await fetch(`${API_BASE}/v1/intake/extract`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });
-    const payload = await handleResponse<{ data: IntakeParseResponse }>(res);
+    const payload = await handleResponse<{ data: {
+      projectName: string;
+      projectNumber: string;
+      client: string;
+      address: string;
+      bidDate: string;
+      rooms: string[];
+      parsedLines: Array<{
+        roomArea: string;
+        category: string;
+        itemCode: string;
+        itemName: string;
+        description: string;
+        quantity: number;
+        unit: string;
+        notes: string;
+      }>;
+      warnings: string[];
+    } }>(res);
+    return payload.data;
+  },
+  async parseV1Intake(input: IntakeParseRequest): Promise<IntakeParseResult> {
+    const res = await fetch(`${API_BASE}/v1/intake/parse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const payload = await handleResponse<{ data: IntakeParseResult }>(res);
     return payload.data;
   },
   async getProjects(): Promise<Project[]> {
