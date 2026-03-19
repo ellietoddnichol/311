@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowUpDown, Database, Edit2, Package, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
-import { BundleItemRecord, CatalogSyncStatusRecord, BundleRecord, ModifierRecord } from '../shared/types/estimator';
+import { CatalogSyncStatusRecord, BundleRecord, ModifierRecord } from '../shared/types/estimator';
 import { CatalogItem } from '../types';
 import { formatCurrencySafe, formatNumberSafe, formatPercentSafe } from '../utils/numberFormat';
 
@@ -31,8 +31,6 @@ export function Catalog() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sortBy, setSortBy] = useState<SortKey>('sku-asc');
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
-  const [bundleDetails, setBundleDetails] = useState<{ bundle: BundleRecord; items: BundleItemRecord[] } | null>(null);
-  const [bundleDetailsLoading, setBundleDetailsLoading] = useState(false);
 
   useEffect(() => {
     void loadCatalogWorkspace();
@@ -268,33 +266,6 @@ export function Catalog() {
       alert(error instanceof Error ? error.message : 'Failed to deactivate bundle');
     }
   }
-
-  async function handleOpenBundleDetails(bundle: BundleRecord) {
-    setBundleDetailsLoading(true);
-    try {
-      const items = await api.getV1BundleItems(bundle.id);
-      setBundleDetails({ bundle, items });
-    } catch (error) {
-      console.error('Failed to load bundle items', error);
-      alert(error instanceof Error ? error.message : 'Failed to load bundle items');
-    } finally {
-      setBundleDetailsLoading(false);
-    }
-  }
-
-  const bundleItemSummary = useMemo(() => {
-    if (!bundleDetails) return null;
-    return bundleDetails.items.reduce(
-      (summary, item) => {
-        summary.count += 1;
-        summary.qty += item.qty || 0;
-        summary.materialCost += item.materialCost || 0;
-        summary.laborMinutes += item.laborMinutes || 0;
-        return summary;
-      },
-      { count: 0, qty: 0, materialCost: 0, laborMinutes: 0 }
-    );
-  }, [bundleDetails]);
 
   const lastSynced = syncStatus?.lastSuccessAt || syncStatus?.lastAttemptAt;
 
@@ -590,11 +561,7 @@ export function Catalog() {
               </thead>
               <tbody>
                 {filteredBundles.map((bundle) => (
-                  <tr
-                    key={bundle.id}
-                    className="cursor-pointer border-b border-slate-100 hover:bg-slate-50/70"
-                    onClick={() => void handleOpenBundleDetails(bundle)}
-                  >
+                  <tr key={bundle.id} className="border-b border-slate-100 hover:bg-slate-50/70">
                     <td className="py-2 px-3 text-slate-700">{bundle.id}</td>
                     <td className="py-2 px-2 font-medium text-slate-900">{bundle.bundleName}</td>
                     <td className="py-2 px-2 text-slate-700">{bundle.category || '-'}</td>
@@ -607,29 +574,14 @@ export function Catalog() {
                     <td className="py-2 px-3">
                       <div className="flex items-center justify-end gap-1">
                         <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleOpenBundleDetails(bundle);
-                          }}
-                          className="h-7 px-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1"
-                        >
-                          View
-                        </button>
-                        <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleEditBundle(bundle);
-                          }}
+                          onClick={() => void handleEditBundle(bundle)}
                           className="h-7 px-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1"
                         >
                           <Edit2 className="w-3 h-3" />
                           Edit
                         </button>
                         <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleDeleteBundle(bundle.id);
-                          }}
+                          onClick={() => void handleDeleteBundle(bundle.id)}
                           className="h-7 px-2 rounded border border-red-200 text-red-700 hover:bg-red-50 inline-flex items-center gap-1"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -776,65 +728,6 @@ export function Catalog() {
               </button>
             </div>
           </form>
-        </div>
-      ) : null}
-
-      {bundleDetails ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" onClick={() => setBundleDetails(null)}>
-          <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-              <div>
-                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">Bundle Contents</p>
-                <h2 className="mt-1 text-lg font-semibold text-slate-900">{bundleDetails.bundle.bundleName}</h2>
-                <p className="mt-1 text-xs text-slate-500">{bundleDetails.bundle.category || 'General'} · {bundleItemSummary?.count || 0} lines · Qty {formatNumberSafe(bundleItemSummary?.qty || 0, 0)} · Material {formatCurrencySafe(bundleItemSummary?.materialCost || 0)} · Labor {formatNumberSafe(bundleItemSummary?.laborMinutes || 0, 1)} min</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setBundleDetails(null)}
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="overflow-auto p-4">
-              {bundleDetailsLoading ? (
-                <div className="py-10 text-center text-sm text-slate-500">Loading bundle contents...</div>
-              ) : bundleDetails.items.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">This bundle has no linked items yet.</div>
-              ) : (
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-600 uppercase tracking-wide">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-semibold">#</th>
-                      <th className="px-2 py-2 text-left font-semibold">SKU</th>
-                      <th className="px-2 py-2 text-left font-semibold">Description</th>
-                      <th className="px-2 py-2 text-right font-semibold">Qty</th>
-                      <th className="px-2 py-2 text-right font-semibold">Material</th>
-                      <th className="px-2 py-2 text-right font-semibold">Labor</th>
-                      <th className="px-2 py-2 text-left font-semibold">Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bundleDetails.items.map((item, index) => (
-                      <tr key={item.id} className="border-b border-slate-100 align-top">
-                        <td className="px-3 py-2 text-slate-500">{index + 1}</td>
-                        <td className="px-2 py-2 text-slate-700">{item.sku || '-'}</td>
-                        <td className="px-2 py-2">
-                          <div className="font-medium text-slate-900">{item.description}</div>
-                          <div className="text-[11px] text-slate-500">Catalog item: {item.catalogItemId || 'Custom bundle line'}</div>
-                        </td>
-                        <td className="px-2 py-2 text-right text-slate-700">{formatNumberSafe(item.qty, 2)}</td>
-                        <td className="px-2 py-2 text-right text-slate-700">{formatCurrencySafe(item.materialCost)}</td>
-                        <td className="px-2 py-2 text-right text-slate-700">{formatNumberSafe(item.laborMinutes, 1)} min</td>
-                        <td className="px-2 py-2 text-slate-600">{item.notes || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
         </div>
       ) : null}
     </div>
