@@ -37,9 +37,7 @@
   }
 
   body {
-    @apply antialiased;
-    background: radial-gradient(1200px 800px at 5% -10%, #ffffff 0%, var(--bg-canvas) 52%, #e8edf5 100%);
-    color: var(--text);
+    @apply antialiased bg-white text-slate-900 p-0 m-0 w-full min-w-0;
   }
 
   h1, h2, h3, h4 {
@@ -57,11 +55,11 @@
 
 @layer utilities {
   .ui-page {
-    @apply mx-auto w-full max-w-[1480px] px-4 py-4 md:px-5 md:py-5;
+    @apply w-full max-w-full px-0 py-0 md:px-0 md:py-0 min-w-0;
   }
 
   .ui-page-narrow {
-    @apply mx-auto w-full max-w-[1240px] px-4 py-4 md:px-5 md:py-5;
+    @apply w-full max-w-full px-0 py-0 md:px-0 md:py-0 min-w-0;
   }
 
   .ui-surface {
@@ -87,13 +85,13 @@
   }
 
   .ui-label {
-    color: var(--text-subtle);
+    @apply mx-auto w-full max-w-full px-0 py-2 md:px-0 md:py-3;
     @apply text-[11px] font-semibold tracking-[0.06em];
   }
 
-  .ui-input {
-    background: #fff;
-    border: 1px solid var(--line);
+    @apply antialiased text-[17px];
+    background: radial-gradient(1200px 800px at 5% -10%, #ffffff 0%, var(--bg-canvas) 52%, #e8edf5 100%);
+    color: var(--text);
     color: var(--text);
     @apply h-9 w-full rounded-md px-3 text-sm outline-none transition;
   }

@@ -2155,7 +2155,7 @@ export function ProjectIntake() {
   }, [projectDraft.bidDate, projectDraft.proposalDate, projectDraft.dueDate]);
 
   return (
-    <div className="ui-page space-y-4">
+    <div className="ui-page space-y-4 w-full max-w-full px-0">
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/')} className="ui-btn-secondary h-9 w-9 grid place-items-center px-0">
           <ArrowLeft className="w-4 h-4" />

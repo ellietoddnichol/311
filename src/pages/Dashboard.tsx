@@ -148,7 +148,7 @@ export function Dashboard() {
   }
 
   return (
-    <div className="ui-page space-y-4">
+    <div className="ui-page space-y-4 w-full max-w-full px-0">
       <div className="ui-surface px-5 py-4 md:px-6 md:py-5 flex flex-wrap justify-between items-end gap-4">
         <div>
           <p className="ui-label">Operations Snapshot</p>

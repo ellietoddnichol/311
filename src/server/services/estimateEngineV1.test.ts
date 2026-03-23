@@ -102,8 +102,28 @@ test('night work applies globally to labor totals and labor hours', () => {
   assert.equal(summary.laborSubtotal, 150);
   assert.equal(summary.adjustedLaborSubtotal, 180);
   assert.ok(Math.abs(summary.totalLaborHours - 1.65) < 1e-9);
+  assert.equal(summary.durationDays, 1);
+  assert.equal(summary.durationWeeks, 0.2);
   assert.equal(summary.conditionLaborMultiplier, 1.2);
   assert.equal(summary.conditionLaborHoursMultiplier, 1.1);
   assert.equal(summary.projectConditions.nightWork, true);
   assert.equal(summary.conditionAssumptions.some((line) => /night work applies to all scoped items/i.test(line)), true);
+});
+
+test('labor burden is not added a second time on top of the base labor rate', () => {
+  const project = buildProject({
+    laborBurdenPercent: 25,
+    overheadPercent: 10,
+    profitPercent: 10,
+    taxPercent: 0,
+  });
+
+  const summary = calculateEstimateSummary(project, [buildLine({ materialCost: 50, baseMaterialCost: 50, laborCost: 100, baseLaborCost: 100 })]);
+
+  assert.equal(summary.laborSubtotal, 100);
+  assert.equal(summary.burdenAmount, 0);
+  assert.equal(summary.lineSubtotal, 150);
+  assert.equal(summary.overheadAmount, 15);
+  assert.equal(summary.profitAmount, 16.5);
+  assert.equal(summary.baseBidTotal, 181.5);
 });

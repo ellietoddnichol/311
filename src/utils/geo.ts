@@ -6,7 +6,6 @@
 export const OFFICE_ADDRESS = "512 S 70th Street Kansas City, KS 66111";
 const OFFICE_COORDS = { lat: 39.0911, lon: -94.7547 }; // Kansas City office approx coords
 const geocodeCache = new Map<string, { lat: number; lon: number }>();
-const DEFAULT_OFFICE_KEY = normalizeAddressKey(OFFICE_ADDRESS);
 
 function normalizeAddressKey(address: string): string {
   return address.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -55,11 +54,8 @@ async function geocodeAddress(address: string, fallback?: { lat: number; lon: nu
 export async function getDistanceInMiles(address: string, originAddress = OFFICE_ADDRESS): Promise<number | null> {
   if (!address || address.trim() === "") return null;
 
-  const normalizedOrigin = normalizeAddressKey(originAddress);
-  const originFallback = normalizedOrigin === DEFAULT_OFFICE_KEY ? OFFICE_COORDS : undefined;
-
   const [originCoords, targetCoords] = await Promise.all([
-    geocodeAddress(originAddress, originFallback),
+    geocodeAddress(originAddress, OFFICE_COORDS),
     geocodeAddress(address),
   ]);
 

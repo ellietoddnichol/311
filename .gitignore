@@ -11,3 +11,4 @@ gen-lang-client-*.json
 estimator.db
 estimator.db-shm
 estimator.db-wal
+node_modules

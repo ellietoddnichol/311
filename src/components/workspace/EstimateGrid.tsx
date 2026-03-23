@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Layers3, Sparkles } from 'lucide-react';
-import { RoomRecord, TakeoffLineRecord } from '../../shared/types/estimator';
-import { formatCurrencySafe } from '../../utils/numberFormat';
+import { LineModifierRecord, RoomRecord, TakeoffLineRecord } from '../../shared/types/estimator';
+import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat';
+import { CompactMetadataLine } from './CompactMetadataLine';
+import { ConditionsSummaryChip } from './ConditionsSummaryChip';
+import { GroupedSectionHeader } from './GroupedSectionHeader';
 
 interface Props {
   lines: TakeoffLineRecord[];
@@ -10,8 +13,10 @@ interface Props {
   roomNamesById: Record<string, string>;
   pricingMode: 'material_only' | 'labor_only' | 'labor_and_material';
   viewMode: 'takeoff' | 'estimate';
-  organizeBy: 'room' | 'item';
+  organizeBy: 'room' | 'category';
   laborMultiplier?: number;
+  lineModifiersByLineId?: Record<string, LineModifierRecord[]>;
+  compactMode?: boolean;
   selectedLineId: string | null;
   onSelectLine: (lineId: string) => void;
   onPersistLine: (lineId: string, updates?: Partial<TakeoffLineRecord>) => Promise<void> | void;
@@ -40,6 +45,15 @@ interface DisplayRow {
   canDelete: boolean;
 }
 
+interface GroupedRows {
+  key: string;
+  title: string;
+  quantityTotal: number;
+  subtotal: number;
+  unresolvedCount: number;
+  rows: DisplayRow[];
+}
+
 function normalizeGroupKey(line: TakeoffLineRecord): string {
   const catalogKey = String(line.catalogItemId || '').trim().toLowerCase();
   if (catalogKey) return `catalog:${catalogKey}`;
@@ -52,12 +66,15 @@ function normalizeGroupKey(line: TakeoffLineRecord): string {
     .join('|');
 }
 
-export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingMode, viewMode, organizeBy, laborMultiplier = 1, selectedLineId, onSelectLine, onPersistLine, onDeleteLine }: Props) {
+export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingMode, viewMode, organizeBy, laborMultiplier = 1, lineModifiersByLineId = {}, compactMode = false, selectedLineId, onSelectLine, onPersistLine, onDeleteLine }: Props) {
   const [collapsedBundles, setCollapsedBundles] = useState<Record<string, boolean>>({});
+  const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
   const showMaterial = pricingMode !== 'labor_only';
   const showLabor = pricingMode !== 'material_only';
   const isTakeoffView = viewMode === 'takeoff';
-  const columnCount = isTakeoffView ? 8 : 9 + (showLabor ? 1 : 0) + (showMaterial ? 1 : 0);
+  const hideUnitColumn = !isTakeoffView && compactMode;
+  // Remove unused column counts
 
   const bundleMeta = useMemo(() => {
     const byBundle: Record<string, { count: number; subtotal: number; name: string }> = {};
@@ -99,251 +116,314 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
   }
 
   const displayRows = useMemo<DisplayRow[]>(() => {
-    if (organizeBy === 'room') {
-      return lines.map((line) => ({
-        id: line.id,
-        lineId: line.id,
-        roomLabel: roomNamesById[line.roomId] || 'Unassigned',
-        roomHint: null,
-        category: line.category,
-        description: line.description,
-        qty: line.qty,
-        unit: line.unit,
-        notes: line.notes,
-        matched: !!line.catalogItemId,
-        sourceType: line.sourceType || 'line',
-        sourceRef: line.sourceRef,
-        sku: line.sku,
-        materialCost: line.materialCost,
-        laborCost: line.laborCost,
-        unitSell: line.unitSell,
-        lineTotal: line.lineTotal,
-        bundleId: line.bundleId,
-        canDelete: true,
-      }));
-    }
+    return lines.map((line) => ({
+      id: line.id,
+      lineId: line.id,
+      roomLabel: roomNamesById[line.roomId] || 'Unassigned',
+      roomHint: null,
+      category: line.category,
+      description: line.description,
+      qty: line.qty,
+      unit: line.unit,
+      notes: line.notes,
+      matched: !!line.catalogItemId,
+      sourceType: line.sourceType || 'line',
+      sourceRef: line.sourceRef,
+      sku: line.sku,
+      materialCost: line.materialCost,
+      laborCost: line.laborCost,
+      unitSell: line.unitSell,
+      lineTotal: line.lineTotal,
+      bundleId: line.bundleId,
+      canDelete: true,
+    }));
+  }, [lines, roomNamesById]);
 
-    const byItem = new Map<string, DisplayRow & { roomIds: Set<string>; notesSet: Set<string>; totalMaterial: number; totalLabor: number; totalSell: number }>();
-    lines.forEach((line) => {
-      const key = normalizeGroupKey(line);
-      const existing = byItem.get(key) || {
-        id: key,
-        lineId: line.id,
-        roomLabel: '',
-        roomHint: null,
-        category: line.category,
-        description: line.description,
-        qty: 0,
-        unit: line.unit,
-        notes: null,
-        matched: !!line.catalogItemId,
-        sourceType: line.sourceType || 'line',
-        sourceRef: line.sourceRef,
-        sku: line.sku,
-        materialCost: 0,
-        laborCost: 0,
-        unitSell: 0,
-        lineTotal: 0,
-        bundleId: null,
-        canDelete: false,
-        roomIds: new Set<string>(),
-        notesSet: new Set<string>(),
-        totalMaterial: 0,
-        totalLabor: 0,
-        totalSell: 0,
+  const groupedRows = useMemo<GroupedRows[]>(() => {
+    const groups = new Map<string, GroupedRows>();
+
+    displayRows.forEach((row) => {
+      const groupKey = organizeBy === 'category'
+        ? (row.category || 'Uncategorized')
+        : row.roomLabel;
+
+      const existing = groups.get(groupKey) || {
+        key: groupKey,
+        title: groupKey,
+        quantityTotal: 0,
+        subtotal: 0,
+        unresolvedCount: 0,
+        rows: [],
       };
 
-      existing.qty += Number(line.qty || 0);
-      existing.lineTotal += Number(line.lineTotal || 0);
-      existing.totalMaterial += Number(line.materialCost || 0) * Number(line.qty || 0);
-      existing.totalLabor += Number(line.laborCost || 0) * Number(line.qty || 0);
-      existing.totalSell += Number(line.unitSell || 0) * Number(line.qty || 0);
-      existing.roomIds.add(line.roomId);
-      if (line.notes) existing.notesSet.add(line.notes.trim());
-      if (!existing.category && line.category) existing.category = line.category;
-      if (!existing.sku && line.sku) existing.sku = line.sku;
-      if (!existing.sourceRef && line.sourceRef) existing.sourceRef = line.sourceRef;
-      existing.matched = existing.matched || !!line.catalogItemId;
-      if (existing.sourceType !== (line.sourceType || 'line')) existing.sourceType = 'mixed';
-      byItem.set(key, existing);
+      existing.rows.push(row);
+      existing.quantityTotal += Number(row.qty || 0);
+      existing.subtotal += Number(row.lineTotal || 0);
+      existing.unresolvedCount += row.matched ? 0 : 1;
+      groups.set(groupKey, existing);
     });
 
-    return Array.from(byItem.values()).map((entry) => {
-      const roomNames = Array.from(entry.roomIds).map((roomId) => roomNamesById[roomId] || 'Unassigned');
-      const roomLabel = roomNames.length === 1 ? roomNames[0] : `${roomNames.length} rooms`;
-      const roomHint = roomNames.slice(0, 4).join(', ');
-      const notes = Array.from(entry.notesSet).slice(0, 2).join(' | ') || null;
-      const qty = entry.qty || 1;
-      return {
-        ...entry,
-        roomLabel,
-        roomHint,
-        notes,
-        materialCost: Number((entry.totalMaterial / qty).toFixed(2)),
-        laborCost: Number((entry.totalLabor / qty).toFixed(2)),
-        unitSell: Number((entry.totalSell / qty).toFixed(2)),
-      };
-    }).sort((left, right) => right.lineTotal - left.lineTotal || left.description.localeCompare(right.description));
-  }, [lines, organizeBy, roomNamesById]);
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        rows: group.rows.sort((left, right) => right.lineTotal - left.lineTotal || left.description.localeCompare(right.description)),
+      }))
+      .sort((left, right) => left.title.localeCompare(right.title));
+  }, [displayRows, organizeBy]);
+
+  function handleSelectLine(lineId: string) {
+    onSelectLine(lineId);
+    if (!isTakeoffView) {
+      gridRef.current?.focus();
+    }
+  }
+
+  function handleGridKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (isTakeoffView) return;
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    const tagName = target.tagName;
+    if (target.isContentEditable || tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || tagName === 'BUTTON') {
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+      return;
+    }
+
+    event.preventDefault();
+    const flatRows = groupedRows.flatMap((group) => group.rows);
+
+    if (flatRows.length === 0) return;
+
+    const currentIndex = selectedLineId ? flatRows.findIndex((row) => row.lineId === selectedLineId) : -1;
+    if (event.key === 'ArrowDown') {
+      const nextIndex = currentIndex < 0 ? 0 : Math.min(currentIndex + 1, flatRows.length - 1);
+      handleSelectLine(flatRows[nextIndex].lineId);
+      return;
+    }
+
+    const nextIndex = currentIndex < 0 ? flatRows.length - 1 : Math.max(currentIndex - 1, 0);
+    handleSelectLine(flatRows[nextIndex].lineId);
+  }
+
+  function renderTakeoffHeader() {
+    return (
+      <div className="grid grid-cols-[minmax(0,1.2fr)_92px_76px_1fr_1fr_92px] gap-2 px-3 py-1 text-xs font-semibold text-slate-600 border-b border-slate-200 bg-white">
+        <div>Item</div>
+        <div>Qty</div>
+        <div>Unit</div>
+        <div>Room / Category</div>
+        <div>Add-ins / Scopes</div>
+        <div className="text-right">Actions</div>
+      </div>
+    );
+  }
+
+  function renderEstimateHeader() {
+    return (
+      <div className="grid grid-cols-[minmax(0,0.9fr)_72px_112px_112px_128px_112px_112px] gap-2.5 px-3 py-1 text-xs font-semibold text-slate-700 border-b border-slate-200 bg-white">
+        <div>Item</div>
+        <div>Qty</div>
+        <div>Material</div>
+        <div>Labor</div>
+        <div>Conditions</div>
+        <div>Total</div>
+        <div>Sell</div>
+      </div>
+    );
+  }
 
   return (
-    <div className={`overflow-hidden rounded-[22px] border shadow-[0_18px_38px_rgba(15,23,42,0.06)] ${isTakeoffView ? 'border-amber-200/70 bg-[linear-gradient(180deg,#fffdfa_0%,#ffffff_100%)]' : 'border-slate-200/70 bg-[linear-gradient(180deg,#fbfcfe_0%,#ffffff_100%)]'}`}>
-      <div className="overflow-y-auto max-h-[69vh]">
-        <table className="w-full table-fixed text-xs">
-          <thead className={`sticky top-0 z-10 border-b backdrop-blur ${isTakeoffView ? 'border-amber-200/70 bg-[linear-gradient(180deg,rgba(255,249,235,0.96)_0%,rgba(255,255,255,0.92)_100%)]' : 'border-slate-200/70 bg-[linear-gradient(180deg,rgba(245,248,252,0.96)_0%,rgba(255,255,255,0.92)_100%)]'}`}>
-            <tr>
-              <th className={`px-3 py-2 text-left text-[10px] font-semibold tracking-[0.03em] text-slate-500 ${isTakeoffView ? 'w-36' : 'w-30'}`}>Room</th>
-              <th className={`px-3 py-2 text-left text-[10px] font-semibold tracking-[0.03em] text-slate-500 ${isTakeoffView ? 'w-26' : 'w-24'}`}>Category</th>
-              <th className="px-3 py-2 text-left text-[10px] font-semibold tracking-[0.03em] text-slate-500">Item / Description</th>
-              <th className="px-3 py-2 w-16 text-left text-[10px] font-semibold tracking-[0.03em] text-slate-500">Qty</th>
-              <th className="px-3 py-2 w-14 text-left text-[10px] font-semibold tracking-[0.03em] text-slate-500">Unit</th>
-              {isTakeoffView ? <th className="px-3 py-2 w-32 text-left text-[10px] font-semibold tracking-[0.03em] text-slate-500">Notes</th> : null}
-              {isTakeoffView ? <th className="px-3 py-2 w-32 text-left text-[10px] font-semibold tracking-[0.03em] text-slate-500">Match / Source</th> : null}
-              {!isTakeoffView && showLabor ? <th className="px-3 py-2 w-24 text-right text-[10px] font-semibold tracking-[0.03em] text-slate-500">Labor</th> : null}
-              {!isTakeoffView && showMaterial ? <th className="px-3 py-2 w-24 text-right text-[10px] font-semibold tracking-[0.03em] text-slate-500">Material</th> : null}
-              {!isTakeoffView ? <th className="px-3 py-2 w-24 text-right text-[10px] font-semibold tracking-[0.03em] text-slate-500">Unit Sell</th> : null}
-              {!isTakeoffView ? <th className="px-3 py-2 w-24 text-right text-[10px] font-semibold tracking-[0.03em] text-slate-500">Total</th> : null}
-              {!isTakeoffView ? <th className="px-3 py-2 w-28 text-left text-[10px] font-semibold tracking-[0.03em] text-slate-500">Notes</th> : null}
-              <th className="px-2 py-2 w-24 text-right text-[10px] font-semibold tracking-[0.03em] text-slate-500">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {displayRows.length === 0 ? (
-              <tr>
-                <td colSpan={columnCount} className="px-3 py-10 text-center text-slate-500">No scope items yet. Add from catalog, bundle, import, or manual entry.</td>
-              </tr>
-            ) : (
-              displayRows.map((row, index) => {
-                const sourceLine = lines.find((line) => line.id === row.lineId) || null;
-                const selected = selectedLineId === row.lineId;
-                const stripe = index % 2 === 0;
-                const effectiveLaborCost = Number((row.laborCost * laborMultiplier).toFixed(2));
-                const previousBundleId = index > 0 ? displayRows[index - 1].bundleId : null;
-                const isBundleStart = organizeBy === 'room' && !!row.bundleId && (index === 0 || previousBundleId !== row.bundleId);
-                const isBundleCollapsed = organizeBy === 'room' && !!row.bundleId && !!collapsedBundles[row.bundleId];
-                const showLine = organizeBy === 'item' || !row.bundleId || !isBundleCollapsed || isBundleStart;
+    <div className="overflow-hidden rounded-none border-0 bg-white w-full min-w-0 m-0 p-0" style={{ fontFamily: 'var(--font-sans)', fontSize: 14 }}>
+      <div
+        ref={gridRef}
+        tabIndex={isTakeoffView ? -1 : 0}
+        onKeyDown={handleGridKeyDown}
+        className="max-h-[75vh] overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-200/30 focus:ring-inset"
+        aria-label={isTakeoffView ? 'Takeoff grid' : 'Estimate grid. Use up and down arrow keys to move between selected rows.'}
+      >
+        <div className={`sticky top-0 z-10 border-b backdrop-blur ${isTakeoffView ? 'border-amber-200/70 bg-[linear-gradient(180deg,rgba(255,249,235,0.96)_0%,rgba(255,255,255,0.92)_100%)]' : 'border-slate-200/70 bg-[linear-gradient(180deg,rgba(245,248,252,0.96)_0%,rgba(255,255,255,0.92)_100%)]'}`}>
+          {isTakeoffView ? renderTakeoffHeader() : renderEstimateHeader()}
+        </div>
 
-                if (!showLine) {
-                  return null;
-                }
+        {groupedRows.length === 0 ? (
+          <div className="px-3 py-12 text-center">
+            <div className="mx-auto max-w-md rounded-xl border border-dashed border-slate-200 bg-slate-50 px-5 py-6">
+              <p className="text-xs font-semibold text-slate-500">{isTakeoffView ? 'Takeoff Workspace' : 'Estimate Workspace'}</p>
+              <p className="mt-2 text-base font-semibold text-slate-900">No lines in this view</p>
+              <p className="mt-1 text-sm leading-5 text-slate-500">Use the Add Items panel to insert catalog items, apply a bundle, or create a manual line for the active room.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2 p-2">
+            {groupedRows.map((group) => (
+              <section key={group.key} className="space-y-1.5">
+                <GroupedSectionHeader
+                  title={group.title}
+                  lineCount={group.rows.length}
+                  quantityTotal={group.quantityTotal}
+                  subtotal={group.subtotal}
+                  unresolvedCount={group.unresolvedCount}
+                  tone={isTakeoffView ? 'takeoff' : 'estimate'}
+                />
 
-                return (
-                  <React.Fragment key={row.id}>
-                    {isBundleStart && row.bundleId ? (
-                      <tr className="border-b border-violet-100 bg-violet-50/60">
-                        <td colSpan={columnCount} className="px-3 py-2">
-                          <button
-                            className="inline-flex items-center gap-1.5 rounded-full bg-white/70 px-2.5 py-1 text-[11px] font-medium text-violet-800 shadow-sm"
-                            onClick={() => {
-                              setCollapsedBundles((prev) => ({
-                                ...prev,
-                                [row.bundleId!]: !prev[row.bundleId!],
-                              }));
-                            }}
-                          >
-                            {collapsedBundles[row.bundleId] ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                            <Layers3 className="h-3.5 w-3.5" />
-                            {bundleMeta[row.bundleId]?.name || 'Bundle'}
-                            <span className="text-violet-600/90">({bundleMeta[row.bundleId]?.count || 0} lines)</span>
-                            <span className="ml-1 text-violet-900">{formatCurrencySafe(bundleMeta[row.bundleId]?.subtotal)}</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ) : null}
-                    <tr
-                      onClick={() => onSelectLine(row.lineId)}
-                      className={`cursor-pointer border-b border-slate-100/90 border-l-2 ${sourceLine ? rowAccentClass(sourceLine) : 'border-l-slate-200'} ${selected ? (isTakeoffView ? 'bg-amber-50/90 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.18)]' : 'bg-[linear-gradient(90deg,rgba(231,239,255,0.82)_0%,rgba(243,248,255,0.96)_100%)] shadow-[inset_0_0_0_1px_rgba(11,61,145,0.12)]') : stripe ? 'bg-white' : isTakeoffView ? 'bg-amber-50/10' : 'bg-slate-50/[0.55]'} hover:bg-[linear-gradient(90deg,rgba(241,245,249,0.96)_0%,rgba(248,250,252,0.96)_100%)] transition-colors`}
-                    >
-                      <td className="px-3 py-2.5 align-top">
-                        <div className="truncate text-[11px] font-semibold text-slate-700" title={row.roomHint || row.roomLabel}>
-                          {row.roomLabel}
-                        </div>
-                        {row.roomHint && row.roomHint !== row.roomLabel ? <div className="mt-1 truncate text-[10px] text-slate-500">{row.roomHint}</div> : null}
-                      </td>
-                      <td className="px-3 py-2.5 align-top">
-                        <div className="truncate text-[11px] text-slate-600" title={row.category || 'Uncategorized'}>
-                          {row.category || 'Uncategorized'}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 align-top">
-                        <div className="line-clamp-2 text-[11px] font-semibold text-slate-800" title={row.description}>
-                          {row.description}
-                        </div>
-                        {row.sku ? <div className="mt-1 text-[10px] text-slate-500">SKU: {row.sku}</div> : null}
-                      </td>
-                      <td className="px-3 py-2.5 align-top text-[11px] font-medium text-slate-700 tabular-nums">
-                        {row.qty}
-                      </td>
-                      <td className="px-3 py-2.5 align-top text-[11px] font-medium text-slate-700">
-                        {row.unit}
-                      </td>
-                      {isTakeoffView ? (
-                        <td className="px-3 py-2.5 align-top">
-                          <div className="line-clamp-2 text-[11px] text-slate-600" title={row.notes || undefined}>
-                            {row.notes || (organizeBy === 'item' ? 'Combined across matching items' : 'No notes')}
+                <div className="overflow-hidden">
+                  {group.rows.map((row, index) => {
+                    const sourceLine = lines.find((line) => line.id === row.lineId) || null;
+                    const selected = selectedLineId === row.lineId;
+                    const expanded = expandedLineId === row.lineId || selected;
+                    const stripe = index % 2 === 0;
+                    const effectiveLaborCost = Number((row.laborCost * laborMultiplier).toFixed(2));
+                    const rowModifiers = lineModifiersByLineId[row.lineId] || [];
+                    const baseMaterialCost = Number(sourceLine?.baseMaterialCost || row.materialCost || 0);
+                    const baseLaborCost = Number(sourceLine?.baseLaborCost || row.laborCost || 0);
+                    const addInDelta = Number((((row.materialCost - baseMaterialCost) + (row.laborCost - baseLaborCost)) * row.qty).toFixed(2));
+                    const totalCost = Number((((showMaterial ? row.materialCost : 0) + (showLabor ? effectiveLaborCost : 0)) * row.qty).toFixed(2));
+                    const margin = row.lineTotal > 0 ? ((row.lineTotal - totalCost) / row.lineTotal) * 100 : 0;
+                    const previousRow = group.rows[index - 1] || null;
+                    const isBundleStart = !!row.bundleId && (!previousRow || previousRow.bundleId !== row.bundleId);
+                    const isBundleCollapsed = !!row.bundleId && !!collapsedBundles[row.bundleId];
+
+                    if (isBundleCollapsed && !isBundleStart) {
+                      return null;
+                    }
+
+                    return (
+                      <React.Fragment key={row.id}>
+                        {isBundleStart && row.bundleId ? (
+                          <div className="border-b border-slate-100 bg-slate-50 px-3 py-1">
+                            <button
+                              className="inline-flex items-center gap-1.5 rounded bg-white/80 px-2 py-1 text-xs font-medium text-slate-700"
+                              onClick={() => {
+                                setCollapsedBundles((prev) => ({
+                                  ...prev,
+                                  [row.bundleId!]: !prev[row.bundleId!],
+                                }));
+                              }}
+                            >
+                              {collapsedBundles[row.bundleId] ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              <Layers3 className="h-4 w-4" />
+                              {bundleMeta[row.bundleId]?.name || 'Bundle'}
+                              <span className="text-slate-500">({bundleMeta[row.bundleId]?.count || 0} lines)</span>
+                              <span className="ml-1 text-slate-700">{formatCurrencySafe(bundleMeta[row.bundleId]?.subtotal)}</span>
+                            </button>
                           </div>
-                        </td>
-                      ) : null}
-                      {isTakeoffView ? (
-                        <td className="px-3 py-2.5 align-top">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${row.matched ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                                {row.matched ? 'Matched' : 'Unmatched'}
-                              </span>
-                              {row.bundleId ? <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">Bundle</span> : null}
-                              {organizeBy === 'item' ? <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Combined</span> : null}
+                        ) : null}
+
+                        <div
+                          onClick={() => handleSelectLine(row.lineId)}
+                          className={`px-3 py-2.5 border-b border-slate-100 transition-colors ${selected ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'}`}
+                        >
+                          {isTakeoffView ? (
+                            <div className="grid grid-cols-[minmax(0,1.2fr)_92px_76px_1fr_1fr_92px] gap-2 items-center">
+                              <div className="min-w-0">
+                                <p className={`${compactMode ? 'line-clamp-1' : 'line-clamp-2'} text-[13px] font-semibold text-slate-900`} title={row.description}>{row.description}</p>
+                              </div>
+                              <div className="text-xs font-semibold text-slate-900 tabular-nums">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={sourceLine?.qty ?? row.qty}
+                                  onClick={stopRowEvent}
+                                  onChange={(event) => {
+                                    const nextQty = Number(event.target.value);
+                                    onPersistLine(row.lineId, { qty: Number.isFinite(nextQty) ? nextQty : 0 });
+                                  }}
+                                  className="h-7 w-16 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none"
+                                  aria-label={`Quantity for ${row.description}`}
+                                />
+                              </div>
+                              <div className="text-xs font-medium text-slate-700">{row.unit}</div>
+                              <div className="text-xs text-slate-600">
+                                <p className="font-medium text-slate-900">{row.roomLabel}</p>
+                                <p className="mt-0.5 text-xs text-slate-400">{row.category || 'Uncategorized'}</p>
+                              </div>
+                              <div>
+                                {/* Show only add-ins/scopes badges, not cost deltas */}
+                                <ConditionsSummaryChip count={rowModifiers.length} amount={0} tone="takeoff" />
+                              </div>
+                              <div className="flex items-start justify-end gap-1" onClick={stopRowEvent}>
+                                <button onClick={() => setExpandedLineId((current) => current === row.lineId ? null : row.lineId)} className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50">{expanded ? 'Hide' : 'Open'}</button>
+                                {row.canDelete ? <button onClick={(event) => { event.stopPropagation(); onDeleteLine(row.lineId); }} className="rounded border border-transparent px-2 py-0.5 text-xs font-medium text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700">Delete</button> : null}
+                              </div>
                             </div>
-                            <div className="flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
-                              <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 font-medium ${sourceBadgeClass(row.sourceType)}`} title={row.sourceType}>
-                                {row.sourceType || 'line'}
-                              </span>
-                              {row.sourceRef ? <span className="truncate" title={row.sourceRef}>{row.sourceRef}</span> : null}
+                          ) : (
+                            <div className="grid grid-cols-[minmax(0,0.9fr)_72px_112px_112px_128px_112px_112px] gap-2.5">
+                              <div className="min-w-0">
+                                <p className={`${compactMode ? 'line-clamp-1' : 'line-clamp-2'} text-[12px] font-semibold text-slate-900`} title={row.description}>{row.description}</p>
+                                <CompactMetadataLine
+                                  tone="estimate"
+                                  parts={[
+                                    row.category,
+                                    row.sku ? `SKU: ${row.sku}` : null,
+                                    row.roomLabel,
+                                  ]}
+                                />
+                              </div>
+                              <div className="text-[11px] font-semibold text-slate-900">{formatNumberSafe(row.qty, 2)}{hideUnitColumn ? ` ${row.unit}` : ''}</div>
+                              <div className="text-[11px] font-medium text-slate-700">{formatCurrencySafe(showMaterial ? baseMaterialCost * row.qty : 0)}</div>
+                              <div className="text-[11px] font-medium text-slate-700">
+                                <div>{formatCurrencySafe(showLabor ? effectiveLaborCost * row.qty : 0)}</div>
+                                {laborMultiplier !== 1 && showLabor ? <p className="mt-1 text-[10px] text-slate-500">eff. {formatCurrencySafe(effectiveLaborCost)}/unit</p> : null}
+                              </div>
+                              <div>
+                                <ConditionsSummaryChip count={rowModifiers.length} amount={addInDelta} tone="estimate" />
+                              </div>
+                              <div className="text-[11px] font-semibold text-slate-900">{formatCurrencySafe(totalCost)}</div>
+                              <div className="text-[11px] font-semibold text-slate-900">{formatCurrencySafe(row.lineTotal)}</div>
                             </div>
-                            <div className="truncate text-[10px] text-slate-500" title={row.sku || undefined}>{row.sku || 'No SKU'}</div>
-                          </div>
-                        </td>
-                      ) : null}
-                      {!isTakeoffView && showLabor ? (
-                        <td className="px-3 py-2.5 align-top text-right text-[11px] font-medium text-slate-700 tabular-nums">
-                          <div>{formatCurrencySafe(effectiveLaborCost)}</div>
-                          {laborMultiplier !== 1 ? <div className="text-[10px] text-slate-500">base {formatCurrencySafe(row.laborCost)}</div> : null}
-                        </td>
-                      ) : null}
-                      {!isTakeoffView && showMaterial ? (
-                        <td className="px-3 py-2.5 align-top text-right text-[11px] font-medium text-slate-700 tabular-nums">
-                          {formatCurrencySafe(row.materialCost)}
-                        </td>
-                      ) : null}
-                      {!isTakeoffView ? (
-                        <td className="px-3 py-2.5 align-top text-right text-[11px] font-medium text-slate-700 tabular-nums">
-                          {formatCurrencySafe(row.unitSell)}
-                        </td>
-                      ) : null}
-                      {!isTakeoffView ? <td className="px-3 py-2.5 align-top text-right text-[12px] font-semibold text-slate-900 tabular-nums">{formatCurrencySafe(row.lineTotal)}</td> : null}
-                      {!isTakeoffView ? (
-                        <td className="px-3 py-2.5 align-top">
-                          <div className="line-clamp-2 text-[11px] text-slate-600" title={row.notes || undefined}>
-                            {row.notes || (organizeBy === 'item' ? 'Combined across matching items' : 'No notes')}
-                          </div>
-                        </td>
-                      ) : null}
-                      <td className="px-2 py-2 text-right" onClick={stopRowEvent}>
-                        <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => onSelectLine(row.lineId)} className={`text-[10px] px-2 py-1 rounded-full border transition ${selected ? 'border-blue-200 bg-white text-blue-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:bg-white hover:shadow-sm'}`}>{selected ? <span className="inline-flex items-center gap-1"><Sparkles className="h-3 w-3" /> Open</span> : organizeBy === 'item' ? 'Inspect' : 'Edit'}</button>
-                          {row.canDelete ? <button onClick={(e) => { e.stopPropagation(); onDeleteLine(row.lineId); }} className="text-[10px] px-1.5 py-1 rounded-full border border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700">X</button> : null}
+                          )}
+
+                          {expanded ? (
+                            <div className="mt-2 rounded bg-slate-50 px-3 py-2 text-xs border border-slate-100">
+                              <div className="grid gap-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(220px,0.9fr)]">
+                                <div className="space-y-2">
+                                  <div>
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Line Detail</p>
+                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                      <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-medium text-slate-700 ring-1 ring-slate-200/80">{row.roomLabel}</span>
+                                      {row.category ? <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-medium text-slate-700 ring-1 ring-slate-200/80">{row.category}</span> : null}
+                                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-medium ring-1 ${row.matched ? 'bg-emerald-50 text-emerald-700 ring-emerald-200/80' : 'bg-amber-50 text-amber-800 ring-amber-200/80'}`}>{row.matched ? 'Matched line' : 'Unresolved line'}</span>
+                                      {row.sku ? <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-medium text-slate-700 ring-1 ring-slate-200/80">SKU {row.sku}</span> : null}
+                                    </div>
+                                  </div>
+                                  <div className="grid gap-2 sm:grid-cols-2">
+                                    <div className="rounded-[14px] bg-white px-3 py-2 ring-1 ring-slate-200/80">
+                                      <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Source</p>
+                                      <p className="mt-1 text-[11px] font-medium text-slate-900">{row.sourceType}</p>
+                                      <p className="mt-1 text-[10px] text-slate-500">{row.sourceRef || 'No extraction source attached'}</p>
+                                    </div>
+                                    <div className="rounded-[14px] bg-white px-3 py-2 ring-1 ring-slate-200/80">
+                                      <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Conditions</p>
+                                      <p className="mt-1 text-[11px] font-medium text-slate-900">{rowModifiers.length} applied</p>
+                                      <p className="mt-1 text-[10px] text-slate-500">{addInDelta > 0 ? `Adds ${formatCurrencySafe(addInDelta)} to this line` : 'No cost delta from conditions or modifiers'}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="rounded-[14px] bg-white px-3 py-2 ring-1 ring-slate-200/80">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Notes & Pricing</p>
+                                  <p className="mt-2 text-[11px] leading-5 text-slate-600">{row.notes || 'No notes or extraction comments on this line.'}</p>
+                                  {!isTakeoffView ? (
+                                    <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-2 text-[11px] text-slate-600">
+                                      <div className="flex items-center justify-between"><span>Total Cost</span><span className="font-semibold text-slate-900">{formatCurrencySafe(totalCost)}</span></div>
+                                      <div className="flex items-center justify-between"><span>Sell Price</span><span className="font-semibold text-slate-900">{formatCurrencySafe(row.lineTotal)}</span></div>
+                                      <div className="flex items-center justify-between"><span>Margin</span><span className="font-semibold text-slate-900">{formatNumberSafe(margin, 1)}%</span></div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
-                      </td>
-                    </tr>
-                  </React.Fragment>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-        <datalist id={`estimate-grid-categories-${viewMode}`}>
-          {categories.filter((category) => category && category !== 'all').map((category) => <option key={category} value={category} />)}
-        </datalist>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

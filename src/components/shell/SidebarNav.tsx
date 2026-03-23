@@ -16,7 +16,7 @@ export function SidebarNav() {
   const { signOut, userEmail } = useAuth();
 
   return (
-    <aside className="w-[248px] shrink-0 mr-2 md:mr-3 rounded-2xl border border-[#1d2a3d] bg-[#101a2b] text-slate-200 flex flex-col overflow-hidden shadow-[0_18px_35px_rgba(15,23,42,0.24)]">
+    <aside className="w-[220px] shrink-0 rounded-2xl border border-[#1d2a3d] bg-[#101a2b] text-slate-200 flex flex-col overflow-hidden shadow-[0_18px_35px_rgba(15,23,42,0.24)]">
       <div className="px-4 py-4 border-b border-[#23334b] flex items-center gap-2.5">
         <div className="w-8 h-8 rounded-md bg-[#dce8ff] text-[#0b3d91] grid place-items-center">
           <Wrench className="w-4 h-4" />

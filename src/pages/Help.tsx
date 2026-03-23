@@ -44,7 +44,7 @@ export function Help() {
   const navigate = useNavigate();
 
   return (
-    <div className="ui-page space-y-4">
+    <div className="ui-page space-y-4 w-full max-w-full px-0">
       <section className="overflow-hidden rounded-[30px] border border-slate-200/80 bg-[radial-gradient(circle_at_top_left,rgba(191,219,254,0.35),transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.96)_100%)] px-6 py-6 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">

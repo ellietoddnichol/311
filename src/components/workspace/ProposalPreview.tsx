@@ -4,6 +4,7 @@ import { buildProjectConditionSummaryLines } from '../../shared/utils/jobConditi
 import { buildProposalScheduleSections, splitProposalTextLines } from '../../shared/utils/proposalDocument';
 import { DEFAULT_PROPOSAL_ACCEPTANCE_LABEL, DEFAULT_PROPOSAL_CLARIFICATIONS, DEFAULT_PROPOSAL_EXCLUSIONS, DEFAULT_PROPOSAL_INTRO, DEFAULT_PROPOSAL_TERMS } from '../../shared/utils/proposalDefaults';
 import { formatCurrencySafe } from '../../utils/numberFormat';
+import { calculateWorkDuration, formatWorkWeeksLabel } from '../../shared/utils/workDuration';
 
 interface Props {
   project: ProjectRecord;
@@ -42,7 +43,7 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
   return (
     <article data-proposal-document="true" className="print-proposal proposal-document mx-auto min-h-[11in] w-full max-w-[8.5in] bg-white px-[0.6in] py-[0.65in] text-slate-900 shadow-[0_22px_56px_rgba(15,23,42,0.08)]">
       <header className="border-b border-slate-200 pb-6">
-        <div className="flex items-start justify-between gap-6">
+        <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
           <div className="flex items-start gap-4">
             {settings?.logoUrl ? (
               <img src={settings.logoUrl} alt="Company logo" className="h-14 w-14 object-contain" />
@@ -57,7 +58,7 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
               </div>
             </div>
           </div>
-          <div className="min-w-[240px] text-right text-[13px] text-slate-600">
+          <div className="text-left text-[13px] text-slate-600 md:min-w-[240px] md:text-right">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Client / Project</p>
             <div className="mt-3 space-y-1">
               <p className="text-[18px] font-semibold text-slate-950">{project.projectName}</p>
@@ -109,7 +110,7 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
                 <div className="mt-3 grid gap-2 text-[13px] text-slate-700 sm:grid-cols-2">
                   <p>Total Material Cost <span className="float-right font-semibold text-slate-950">{formatCurrencySafe(section.totalMaterialCost)}</span></p>
                   <p>Total Labor Cost <span className="float-right font-semibold text-slate-950">{formatCurrencySafe(section.totalLaborCost)}</span></p>
-                  <p>Total Estimated Time <span className="float-right font-semibold text-slate-950">{section.totalLaborHours.toFixed(1)} hrs</span></p>
+                  <p>Estimated Install Duration <span className="float-right font-semibold text-slate-950">{formatWorkWeeksLabel(calculateWorkDuration(section.totalLaborHours, project.jobConditions).durationWeeks)}</span></p>
                   <p>Section Total <span className="float-right font-semibold text-slate-950">{formatCurrencySafe(section.sectionTotal)}</span></p>
                 </div>
               </div>
@@ -144,7 +145,7 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
           <div className="grid gap-2 text-[14px] text-slate-700 sm:grid-cols-2">
             <p>Total Material <span className="float-right font-semibold text-slate-950">{formatCurrencySafe(showMaterial ? summary.materialSubtotal : 0)}</span></p>
             <p>Total Labor <span className="float-right font-semibold text-slate-950">{formatCurrencySafe(showLabor ? summary.adjustedLaborSubtotal || summary.laborSubtotal : 0)}</span></p>
-            <p>Total Estimated Time <span className="float-right font-semibold text-slate-950">{summary.totalLaborHours.toFixed(1)} hrs</span></p>
+            <p>Estimated Install Duration <span className="float-right font-semibold text-slate-950">{formatWorkWeeksLabel(summary.durationWeeks)}</span></p>
             <p>Total Proposal Amount <span className="float-right font-semibold text-slate-950">{formatCurrencySafe(summary.baseBidTotal)}</span></p>
           </div>
         </div>
@@ -177,7 +178,7 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
         </div>
       </section>
 
-      <section className="mt-12 grid grid-cols-2 gap-10 border-t border-slate-300 pt-8 text-[12px] proposal-section proposal-avoid-break">
+      <section className="mt-12 grid gap-10 border-t border-slate-300 pt-8 text-[12px] proposal-section proposal-avoid-break md:grid-cols-2">
         <div>
           <p className="mb-2 text-slate-500 uppercase tracking-[0.18em]">Acceptance</p>
           <div className="mb-2 h-12 border-b border-slate-400" />

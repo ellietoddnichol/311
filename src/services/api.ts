@@ -5,6 +5,23 @@ import { IntakeParseRequest, IntakeParseResult } from '../shared/types/intake';
 
 const API_BASE = '/api';
 
+function readDataArray<T>(payload: unknown): T[] {
+  if (payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)) {
+    return (payload as { data: T[] }).data;
+  }
+  return [];
+}
+
+function readDataObject<T>(payload: unknown, errorMessage = 'Malformed API response'): T {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    const data = (payload as { data?: T }).data;
+    if (data !== undefined && data !== null) {
+      return data;
+    }
+  }
+  throw new Error(errorMessage);
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let errorMessage = `Request failed with status ${res.status}`;
@@ -32,12 +49,12 @@ export const api = {
   async getV1Projects(): Promise<ProjectRecord[]> {
     const res = await fetch(`${API_BASE}/v1/projects`);
     const payload = await handleResponse<{ data: ProjectRecord[] }>(res);
-    return payload.data;
+    return readDataArray<ProjectRecord>(payload);
   },
   async getV1Project(id: string): Promise<ProjectRecord> {
     const res = await fetch(`${API_BASE}/v1/projects/${id}`);
     const payload = await handleResponse<{ data: ProjectRecord }>(res);
-    return payload.data;
+    return readDataObject<ProjectRecord>(payload, 'Project response was missing data.');
   },
   async createV1Project(project: Partial<ProjectRecord>): Promise<ProjectRecord> {
     const res = await fetch(`${API_BASE}/v1/projects`, {
@@ -46,7 +63,7 @@ export const api = {
       body: JSON.stringify(project),
     });
     const payload = await handleResponse<{ data: ProjectRecord }>(res);
-    return payload.data;
+    return readDataObject<ProjectRecord>(payload, 'Project creation response was missing data.');
   },
   async updateV1Project(id: string, project: Partial<ProjectRecord>): Promise<ProjectRecord> {
     const res = await fetch(`${API_BASE}/v1/projects/${id}`, {
@@ -55,7 +72,7 @@ export const api = {
       body: JSON.stringify(project),
     });
     const payload = await handleResponse<{ data: ProjectRecord }>(res);
-    return payload.data;
+    return readDataObject<ProjectRecord>(payload, 'Project update response was missing data.');
   },
   async archiveV1Project(id: string): Promise<void> {
     const res = await fetch(`${API_BASE}/v1/projects/${id}`, { method: 'DELETE' });
@@ -68,7 +85,7 @@ export const api = {
   async getV1ProjectFiles(projectId: string): Promise<ProjectFileRecord[]> {
     const res = await fetch(`${API_BASE}/v1/projects/${encodeURIComponent(projectId)}/files`);
     const payload = await handleResponse<{ data: ProjectFileRecord[] }>(res);
-    return payload.data;
+    return readDataArray<ProjectFileRecord>(payload);
   },
   async uploadV1ProjectFile(input: {
     projectId: string;
@@ -88,7 +105,7 @@ export const api = {
       }),
     });
     const payload = await handleResponse<{ data: ProjectFileRecord }>(res);
-    return payload.data;
+    return readDataObject<ProjectFileRecord>(payload, 'Project file upload response was missing data.');
   },
   getV1ProjectFileDownloadUrl(projectId: string, fileId: string): string {
     return `${API_BASE}/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/download`;
@@ -102,7 +119,7 @@ export const api = {
   async getV1Rooms(projectId: string): Promise<RoomRecord[]> {
     const res = await fetch(`${API_BASE}/v1/rooms?projectId=${encodeURIComponent(projectId)}`);
     const payload = await handleResponse<{ data: RoomRecord[] }>(res);
-    return payload.data;
+    return readDataArray<RoomRecord>(payload);
   },
   async createV1Room(input: { projectId: string; roomName: string; notes?: string }): Promise<RoomRecord> {
     const res = await fetch(`${API_BASE}/v1/rooms`, {
@@ -111,7 +128,7 @@ export const api = {
       body: JSON.stringify(input),
     });
     const payload = await handleResponse<{ data: RoomRecord }>(res);
-    return payload.data;
+    return readDataObject<RoomRecord>(payload, 'Room creation response was missing data.');
   },
   async updateV1Room(roomId: string, input: Partial<RoomRecord>): Promise<RoomRecord> {
     const res = await fetch(`${API_BASE}/v1/rooms/${roomId}`, {
@@ -120,7 +137,7 @@ export const api = {
       body: JSON.stringify(input),
     });
     const payload = await handleResponse<{ data: RoomRecord }>(res);
-    return payload.data;
+    return readDataObject<RoomRecord>(payload, 'Room update response was missing data.');
   },
   async duplicateV1Room(roomId: string): Promise<RoomRecord> {
     const res = await fetch(`${API_BASE}/v1/rooms/${roomId}/duplicate`, {
@@ -128,7 +145,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
     });
     const payload = await handleResponse<{ data: RoomRecord }>(res);
-    return payload.data;
+    return readDataObject<RoomRecord>(payload, 'Room duplication response was missing data.');
   },
   async deleteV1Room(roomId: string): Promise<void> {
     const res = await fetch(`${API_BASE}/v1/rooms/${roomId}`, { method: 'DELETE' });
@@ -139,7 +156,7 @@ export const api = {
     if (roomId) query.set('roomId', roomId);
     const res = await fetch(`${API_BASE}/v1/takeoff/lines?${query.toString()}`);
     const payload = await handleResponse<{ data: TakeoffLineRecord[] }>(res);
-    return payload.data;
+    return readDataArray<TakeoffLineRecord>(payload);
   },
   async createV1TakeoffLine(input: Partial<TakeoffLineRecord> & { projectId: string; roomId: string; description: string }): Promise<TakeoffLineRecord> {
     const res = await fetch(`${API_BASE}/v1/takeoff/lines`, {
@@ -148,7 +165,7 @@ export const api = {
       body: JSON.stringify(input),
     });
     const payload = await handleResponse<{ data: TakeoffLineRecord }>(res);
-    return payload.data;
+    return readDataObject<TakeoffLineRecord>(payload, 'Takeoff line creation response was missing data.');
   },
   async updateV1TakeoffLine(lineId: string, input: Partial<TakeoffLineRecord>): Promise<TakeoffLineRecord> {
     const res = await fetch(`${API_BASE}/v1/takeoff/lines/${lineId}`, {
@@ -157,7 +174,7 @@ export const api = {
       body: JSON.stringify(input),
     });
     const payload = await handleResponse<{ data: TakeoffLineRecord }>(res);
-    return payload.data;
+    return readDataObject<TakeoffLineRecord>(payload, 'Takeoff line update response was missing data.');
   },
   async deleteV1TakeoffLine(lineId: string): Promise<void> {
     const res = await fetch(`${API_BASE}/v1/takeoff/lines/${lineId}`, { method: 'DELETE' });
@@ -166,7 +183,7 @@ export const api = {
   async getV1Summary(projectId: string): Promise<EstimateSummary> {
     const res = await fetch(`${API_BASE}/v1/takeoff/summary/${projectId}`);
     const payload = await handleResponse<{ data: EstimateSummary }>(res);
-    return payload.data;
+    return readDataObject<EstimateSummary>(payload, 'Summary response was missing data.');
   },
   async generateV1InstallReviewEmail(projectId: string): Promise<InstallReviewEmailDraft> {
     const res = await fetch(`${API_BASE}/v1/takeoff/install-review-email/${encodeURIComponent(projectId)}`, {
@@ -174,7 +191,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
     });
     const payload = await handleResponse<{ data: InstallReviewEmailDraft }>(res);
-    return payload.data;
+    return readDataObject<InstallReviewEmailDraft>(payload, 'Install review response was missing data.');
   },
   async repriceV1ProjectTakeoff(projectId: string): Promise<TakeoffLineRecord[]> {
     const res = await fetch(`${API_BASE}/v1/takeoff/reprice/${encodeURIComponent(projectId)}`, {
@@ -182,7 +199,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
     });
     const payload = await handleResponse<{ data: TakeoffLineRecord[] }>(res);
-    return payload.data;
+    return readDataArray<TakeoffLineRecord>(payload);
   },
   async generateV1ProposalDraft(input: {
     mode: 'scope_summary' | 'proposal_text' | 'terms_and_conditions' | 'default_short';
@@ -197,7 +214,7 @@ export const api = {
       body: JSON.stringify(input),
     });
     const payload = await handleResponse<{ data: Partial<SettingsRecord> }>(res);
-    return payload.data;
+    return readDataObject<Partial<SettingsRecord>>(payload, 'Proposal draft response was missing data.');
   },
   async finalizeV1ParserLines(lines: Array<Partial<TakeoffLineRecord>>): Promise<TakeoffLineRecord[]> {
     const res = await fetch(`${API_BASE}/v1/takeoff/finalize-parser-lines`, {
@@ -206,12 +223,12 @@ export const api = {
       body: JSON.stringify({ lines }),
     });
     const payload = await handleResponse<{ data: TakeoffLineRecord[] }>(res);
-    return payload.data;
+    return readDataArray<TakeoffLineRecord>(payload);
   },
   async getV1Modifiers(): Promise<ModifierRecord[]> {
     const res = await fetch(`${API_BASE}/v1/modifiers`);
     const payload = await handleResponse<{ data: ModifierRecord[] }>(res);
-    return payload.data;
+    return readDataArray<ModifierRecord>(payload);
   },
   async getV1LineModifiers(lineId: string): Promise<Array<{
     id: string;
@@ -236,7 +253,7 @@ export const api = {
       percentLabor: number;
       createdAt: string;
     }> }>(res);
-    return payload.data;
+    return readDataArray(payload);
   },
   async applyV1ModifierToLine(lineId: string, modifierId: string): Promise<{ line: TakeoffLineRecord; modifier: any }> {
     const res = await fetch(`${API_BASE}/v1/modifiers/line/${lineId}/apply`, {
@@ -245,17 +262,17 @@ export const api = {
       body: JSON.stringify({ modifierId }),
     });
     const payload = await handleResponse<{ data: { line: TakeoffLineRecord; modifier: any } }>(res);
-    return payload.data;
+    return readDataObject<{ line: TakeoffLineRecord; modifier: any }>(payload, 'Modifier application response was missing data.');
   },
   async removeV1LineModifier(lineId: string, lineModifierId: string): Promise<{ line: TakeoffLineRecord; removed: boolean }> {
     const res = await fetch(`${API_BASE}/v1/modifiers/line/${lineId}/${lineModifierId}`, { method: 'DELETE' });
     const payload = await handleResponse<{ data: { line: TakeoffLineRecord; removed: boolean } }>(res);
-    return payload.data;
+    return readDataObject<{ line: TakeoffLineRecord; removed: boolean }>(payload, 'Modifier removal response was missing data.');
   },
   async getV1Bundles(): Promise<BundleRecord[]> {
     const res = await fetch(`${API_BASE}/v1/bundles`);
     const payload = await handleResponse<{ data: BundleRecord[] }>(res);
-    return payload.data;
+    return readDataArray<BundleRecord>(payload);
   },
   async getV1BundleItems(bundleId: string): Promise<Array<{
     id: string;
@@ -284,7 +301,7 @@ export const api = {
       sortOrder: number;
       notes: string | null;
     }> }>(res);
-    return payload.data;
+    return readDataArray(payload);
   },
   async applyV1Bundle(bundleId: string, projectId: string, roomId: string): Promise<TakeoffLineRecord[]> {
     const res = await fetch(`${API_BASE}/v1/bundles/${bundleId}/apply`, {
@@ -293,12 +310,12 @@ export const api = {
       body: JSON.stringify({ projectId, roomId }),
     });
     const payload = await handleResponse<{ data: TakeoffLineRecord[] }>(res);
-    return payload.data;
+    return readDataArray<TakeoffLineRecord>(payload);
   },
   async getV1Settings(): Promise<SettingsRecord> {
     const res = await fetch(`${API_BASE}/v1/settings`);
     const payload = await handleResponse<{ data: SettingsRecord }>(res);
-    return payload.data;
+    return readDataObject<SettingsRecord>(payload, 'Settings response was missing data.');
   },
   async updateV1Settings(input: Partial<SettingsRecord>): Promise<SettingsRecord> {
     const res = await fetch(`${API_BASE}/v1/settings`, {
@@ -307,12 +324,12 @@ export const api = {
       body: JSON.stringify(input),
     });
     const payload = await handleResponse<{ data: SettingsRecord }>(res);
-    return payload.data;
+    return readDataObject<SettingsRecord>(payload, 'Settings update response was missing data.');
   },
   async getCatalogSyncStatus(): Promise<CatalogSyncStatusRecord> {
     const res = await fetch(`${API_BASE}/v1/settings/catalog-sync-status`);
     const payload = await handleResponse<{ data: CatalogSyncStatusRecord }>(res);
-    return payload.data;
+    return readDataObject<CatalogSyncStatusRecord>(payload, 'Catalog sync status response was missing data.');
   },
   async getCatalogSyncRuns(limit = 10): Promise<Array<{
     id: string;

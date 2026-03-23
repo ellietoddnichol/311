@@ -5,7 +5,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { BundleRecord, EstimateSummary, InstallReviewEmailDraft, ModifierRecord, ProjectFileRecord, ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
+import { BundleRecord, EstimateSummary, InstallReviewEmailDraft, LineModifierRecord, ModifierRecord, ProjectFileRecord, ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
 import { CatalogItem } from '../types';
 import {
   createDefaultProjectJobConditions,
@@ -30,8 +30,14 @@ import { ItemPicker } from '../components/workspace/ItemPicker';
 import { ModifierPanel } from '../components/workspace/ModifierPanel';
 import { ProposalPreview } from '../components/workspace/ProposalPreview';
 import { BundlePickerModal } from '../components/workspace/BundlePickerModal';
+import { EstimateSelectedLineEditor } from '../components/workspace/EstimateSelectedLineEditor';
+import { EstimateRunningTotalBar } from '../components/workspace/EstimateRunningTotalBar';
+import { EstimateSidebar, WorkspaceSidebarTab } from '../components/workspace/EstimateSidebar';
+import { WorkspaceToolbar } from '../components/workspace/WorkspaceToolbar';
+import { calculateEstimateSummary } from '../shared/utils/estimateSummary';
+import { calculateWorkDuration, formatWorkWeeksLabel } from '../shared/utils/workDuration';
 import { formatCurrencySafe, formatKilobytesSafe, formatNumberSafe } from '../utils/numberFormat';
-import { OFFICE_ADDRESS, getDistanceInMiles } from '../utils/geo';
+import { getDistanceInMiles } from '../utils/geo';
 
 interface RoomCreationDraft {
   roomName: string;
@@ -42,8 +48,9 @@ interface RoomCreationDraft {
 }
 
 type WorkspaceTab = 'overview' | 'setup' | 'rooms' | 'takeoff' | 'estimate' | 'files' | 'proposal';
-type WorkspaceOrganizeMode = 'room' | 'item';
+type WorkspaceGroupMode = 'room' | 'category';
 type WorkspaceScopeMode = 'active' | 'all';
+type TakeoffMatchStatus = 'all' | 'matched' | 'unmatched';
 
 const WORKSPACE_TABS: WorkspaceTab[] = ['overview', 'setup', 'rooms', 'takeoff', 'estimate', 'files', 'proposal'];
 
@@ -92,6 +99,7 @@ export function ProjectWorkspace() {
     percentLabor: number;
     createdAt: string;
   }>>([]);
+  const [lineModifiersByLineId, setLineModifiersByLineId] = useState<Record<string, LineModifierRecord[]>>({});
 
   const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -111,12 +119,21 @@ export function ProjectWorkspace() {
   const [proposalDrafting, setProposalDrafting] = useState<null | 'scope_summary' | 'proposal_text' | 'terms_and_conditions' | 'default_short'>(null);
   const [installReviewDraft, setInstallReviewDraft] = useState<InstallReviewEmailDraft | null>(null);
   const [installReviewGenerating, setInstallReviewGenerating] = useState(false);
+  const [takeoffSidebarTab, setTakeoffSidebarTab] = useState<WorkspaceSidebarTab>('match');
+  const [estimateSidebarTab, setEstimateSidebarTab] = useState<WorkspaceSidebarTab>('summary');
+  const [estimateSidebarCollapsed, setEstimateSidebarCollapsed] = useState(false);
+  const [takeoffSearch, setTakeoffSearch] = useState('');
+  const [estimateSearch, setEstimateSearch] = useState('');
+  const [takeoffMatchStatus, setTakeoffMatchStatus] = useState<TakeoffMatchStatus>('all');
+  const [takeoffUnresolvedOnly, setTakeoffUnresolvedOnly] = useState(false);
+  const [takeoffGroupMode, setTakeoffGroupMode] = useState<WorkspaceGroupMode>('room');
+  const [estimateGroupMode, setEstimateGroupMode] = useState<WorkspaceGroupMode>('room');
+  const [estimateCompactMode, setEstimateCompactMode] = useState(false);
+  const [estimateEditorOpen, setEstimateEditorOpen] = useState(false);
+  const [setupAdvancedOpen, setSetupAdvancedOpen] = useState(false);
   const [distanceCalculating, setDistanceCalculating] = useState(false);
   const [distanceError, setDistanceError] = useState<string | null>(null);
-  const [distanceMessage, setDistanceMessage] = useState('Add a site address to calculate travel distance.');
-  const [officeAddressInput, setOfficeAddressInput] = useState(OFFICE_ADDRESS);
   const [projectDateErrors, setProjectDateErrors] = useState<Partial<Record<'bidDate' | 'proposalDate' | 'dueDate', string>>>({});
-  const [workspaceOrganizeMode, setWorkspaceOrganizeMode] = useState<WorkspaceOrganizeMode>('room');
   const [workspaceScopeMode, setWorkspaceScopeMode] = useState<WorkspaceScopeMode>('active');
   const companyWebsite = 'https://www.brightenbuildersllc.com/';
   const unifiedProjectDate = project?.bidDate || project?.proposalDate || project?.dueDate || '';
@@ -151,6 +168,346 @@ export function ProjectWorkspace() {
       };
     });
   }, [userEmail]);
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (activeTab === 'estimate') {
+      next.delete('tab');
+    } else {
+      next.set('tab', activeTab);
+    }
+
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [activeTab, searchParams, setSearchParams]);
+
+  async function loadWorkspace(projectId: string) {
+    try {
+      setLoading(true);
+      await api.repriceV1ProjectTakeoff(projectId);
+      const [projectData, roomData, lineData, catalogData, summaryData, settingsData, modifiersData, bundlesData, filesData] = await Promise.all([
+        api.getV1Project(projectId),
+        api.getV1Rooms(projectId),
+        api.getV1TakeoffLines(projectId),
+        api.getCatalog(),
+        api.getV1Summary(projectId),
+        api.getV1Settings(),
+        api.getV1Modifiers(),
+        api.getV1Bundles(),
+        api.getV1ProjectFiles(projectId),
+      ]);
+
+      setProject(projectData);
+      setRooms(roomData);
+      setLines(lineData);
+      setCatalog(catalogData);
+      setSummary(summaryData);
+      setSettings(ensureProposalDefaults(settingsData));
+      setModifiers(modifiersData);
+      setBundles(bundlesData);
+      setProjectFiles(filesData);
+
+      if (roomData[0]) setActiveRoomId(roomData[0].id);
+    } catch (error) {
+      console.error('Failed to load project workspace', error);
+      navigate('/');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshTakeoff(projectId: string) {
+    const [lineData, summaryData] = await Promise.all([
+      api.getV1TakeoffLines(projectId),
+      api.getV1Summary(projectId),
+    ]);
+    setLines(lineData);
+    setSummary(summaryData);
+  }
+
+  const activeRoomLines = useMemo(
+    () => lines.filter((line) => line.roomId === activeRoomId),
+    [lines, activeRoomId]
+  );
+
+  const selectedLine = useMemo(
+    () => lines.find((line) => line.id === selectedLineId) || null,
+    [lines, selectedLineId]
+  );
+
+  const selectedLineModifierCount = useMemo(() => {
+    if (!selectedLineId) return 0;
+    return (lineModifiersByLineId[selectedLineId] || lineModifiers).length;
+  }, [lineModifiers, lineModifiersByLineId, selectedLineId]);
+
+  useEffect(() => {
+    if (!selectedLineId) {
+      setEstimateEditorOpen(false);
+    }
+  }, [selectedLineId]);
+
+  const scopedWorkspaceLines = useMemo(
+    () => (workspaceScopeMode === 'all' ? lines : activeRoomLines),
+    [activeRoomLines, lines, workspaceScopeMode]
+  );
+
+  const takeoffFilteredLines = useMemo(() => {
+    return scopedWorkspaceLines.filter((line) => {
+      const query = takeoffSearch.trim().toLowerCase();
+      const roomLabel = rooms.find((room) => room.id === line.roomId)?.roomName || '';
+      const matchesSearch = !query || [
+        line.description,
+        line.sku || '',
+        line.category || '',
+        line.notes || '',
+        roomLabel,
+      ].some((value) => value.toLowerCase().includes(query));
+      const matched = !!line.catalogItemId;
+      const matchesStatus = takeoffMatchStatus === 'all'
+        ? true
+        : takeoffMatchStatus === 'matched'
+          ? matched
+          : !matched;
+      const matchesUnresolved = takeoffUnresolvedOnly ? !matched : true;
+      return matchesSearch && matchesStatus && matchesUnresolved;
+    });
+  }, [rooms, scopedWorkspaceLines, takeoffMatchStatus, takeoffSearch, takeoffUnresolvedOnly]);
+
+  const estimateFilteredLines = useMemo(() => {
+    return scopedWorkspaceLines.filter((line) => {
+      const query = estimateSearch.trim().toLowerCase();
+      if (!query) return true;
+
+      const roomLabel = rooms.find((room) => room.id === line.roomId)?.roomName || '';
+
+      return [
+        line.description,
+        line.sku || '',
+        line.category || '',
+        roomLabel,
+      ].some((value) => value.toLowerCase().includes(query));
+    });
+  }, [estimateSearch, rooms, scopedWorkspaceLines]);
+
+  const takeoffSubtotal = useMemo(
+    () => takeoffFilteredLines.reduce((sum, line) => sum + line.lineTotal, 0),
+    [takeoffFilteredLines]
+  );
+
+  const takeoffQuantity = useMemo(
+    () => takeoffFilteredLines.reduce((sum, line) => sum + Number(line.qty || 0), 0),
+    [takeoffFilteredLines]
+  );
+
+  const takeoffUnresolvedCount = useMemo(
+    () => takeoffFilteredLines.filter((line) => !line.catalogItemId).length,
+    [takeoffFilteredLines]
+  );
+
+  const estimateSubtotal = useMemo(
+    () => estimateFilteredLines.reduce((sum, line) => sum + line.lineTotal, 0),
+    [estimateFilteredLines]
+  );
+
+  useEffect(() => {
+    if (!selectedLineId) {
+      setLineModifiers([]);
+      return;
+    }
+
+    api.getV1LineModifiers(selectedLineId)
+      .then(setLineModifiers)
+      .catch(() => setLineModifiers([]));
+  }, [selectedLineId]);
+
+  useEffect(() => {
+    if (activeTab !== 'estimate' && activeTab !== 'takeoff') {
+      setLineModifiersByLineId({});
+      return;
+    }
+    if (lines.length === 0) {
+      setLineModifiersByLineId({});
+      return;
+    }
+
+    let cancelled = false;
+
+    Promise.all(lines.map(async (line) => [line.id, await api.getV1LineModifiers(line.id)] as const))
+      .then((entries) => {
+        if (cancelled) return;
+        setLineModifiersByLineId(Object.fromEntries(entries));
+      })
+      .catch(() => {
+        if (!cancelled) setLineModifiersByLineId({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, lines]);
+
+  const roomSubtotal = useMemo(
+    () => activeRoomLines.reduce((sum, line) => sum + line.lineTotal, 0),
+    [activeRoomLines]
+  );
+
+  const roomMetrics = useMemo(() => {
+    const byRoom: Record<string, { count: number; subtotal: number }> = {};
+    lines.forEach((line) => {
+      if (!byRoom[line.roomId]) byRoom[line.roomId] = { count: 0, subtotal: 0 };
+      byRoom[line.roomId].count += 1;
+      byRoom[line.roomId].subtotal += line.lineTotal;
+    });
+    return byRoom;
+  }, [lines]);
+
+  const pricingMode = project?.pricingMode || 'labor_and_material';
+  const showMaterial = pricingMode !== 'labor_only';
+  const showLabor = pricingMode !== 'material_only';
+  const baseLaborRatePerHour = Number(settings?.defaultLaborRatePerHour || 0);
+  const selectedScopeCategories = project?.selectedScopeCategories || [];
+  const jobConditions = useMemo(
+    () => normalizeProjectJobConditions(project?.jobConditions || createDefaultProjectJobConditions()),
+    [project?.jobConditions]
+  );
+
+  const roomNamesById = useMemo(() => {
+    const out: Record<string, string> = {};
+    rooms.forEach((room) => {
+      out[room.id] = room.roomName;
+    });
+    return out;
+  }, [rooms]);
+
+  const categories = useMemo(() => {
+    const all = new Set<string>();
+    catalog.forEach((item) => all.add(item.category));
+    return ['all', ...Array.from(all).sort()];
+  }, [catalog]);
+
+  const scopeCategoryOptions = useMemo(
+    () => categories.filter((category) => category !== 'all'),
+    [categories]
+  );
+
+  const filteredCatalog = useMemo(() => {
+    return catalog.filter((item) => {
+      const q = catalogSearch.toLowerCase();
+      const searchMatch = item.description.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q);
+      const categoryMatch = catalogCategory === 'all' || item.category === catalogCategory;
+      return searchMatch && categoryMatch;
+    });
+  }, [catalog, catalogSearch, catalogCategory]);
+
+  const proposalGroupedItemCount = useMemo(
+    () => buildProposalLineItems(lines).length,
+    [lines]
+  );
+
+  const estimateViewSummary = useMemo(() => {
+    if (!project) return null;
+    return calculateEstimateSummary(project, lines);
+  }, [project, lines]);
+  const currentProposalSummary = estimateViewSummary || summary;
+
+  const takeoffLaborMultiplier = summary?.conditionLaborMultiplier || estimateViewSummary?.conditionLaborMultiplier || 1;
+  const estimateLaborMultiplier = estimateViewSummary?.conditionLaborMultiplier || 1;
+  const takeoffEffectiveLaborRatePerHour = Number((baseLaborRatePerHour * takeoffLaborMultiplier).toFixed(2));
+  const estimateEffectiveLaborRatePerHour = Number((baseLaborRatePerHour * estimateLaborMultiplier).toFixed(2));
+  const activeProjectLaborDrivers = useMemo(() => {
+    const drivers: string[] = [];
+    if (jobConditions.prevailingWage || jobConditions.laborRateBasis === 'prevailing') drivers.push('Prevailing wage');
+    if (jobConditions.nightWork) drivers.push('After-hours / night shift');
+    if (jobConditions.restrictedAccess) drivers.push('Restricted access');
+    if (jobConditions.occupiedBuilding) drivers.push('Occupied building');
+    if (jobConditions.remoteTravel) drivers.push('Remote travel');
+    if (jobConditions.phasedWork) drivers.push('Phased work');
+    if (jobConditions.smallJobFactor) drivers.push('Small job minimum');
+    if (jobConditions.scheduleCompression) drivers.push('Schedule compression');
+    return drivers;
+  }, [jobConditions]);
+  const projectLaborDriverDetails = useMemo(() => {
+    const baseRate = baseLaborRatePerHour;
+    const rows: Array<{ key: string; label: string; dollarsPerHour: number; percent: number }> = [];
+    const pushRow = (key: string, label: string, percent: number, enabled: boolean) => {
+      if (!enabled || percent === 0) return;
+      rows.push({ key, label, percent, dollarsPerHour: Number((baseRate * percent).toFixed(2)) });
+    };
+    pushRow('prevailing', 'Prevailing wage', jobConditions.prevailingWageMultiplier, jobConditions.prevailingWage || jobConditions.laborRateBasis === 'prevailing');
+    pushRow('night', 'After-hours / night shift', jobConditions.nightWorkLaborCostMultiplier, jobConditions.nightWork);
+    pushRow('restricted', 'Restricted access', jobConditions.restrictedAccessMultiplier, jobConditions.restrictedAccess);
+    pushRow('occupied', 'Occupied building', jobConditions.occupiedBuildingMultiplier, jobConditions.occupiedBuilding);
+    pushRow('remote', 'Remote travel', jobConditions.remoteTravelMultiplier, jobConditions.remoteTravel);
+    pushRow('small', 'Small job minimum', jobConditions.smallJobMultiplier, jobConditions.smallJobFactor);
+    pushRow('phased', 'Phased work', jobConditions.phasedWorkMultiplier, jobConditions.phasedWork);
+    pushRow('schedule', 'Schedule compression', jobConditions.scheduleCompressionMultiplier, jobConditions.scheduleCompression);
+    pushRow('custom', 'Custom labor multiplier', Math.max(0, jobConditions.laborRateMultiplier - 1), jobConditions.laborRateMultiplier !== 1);
+    return rows;
+  }, [baseLaborRatePerHour, jobConditions]);
+  const projectCostAdderDetails = useMemo(() => {
+    const rows: Array<{ key: string; label: string; detail: string }> = [];
+
+    if (jobConditions.deliveryDifficulty === 'constrained') {
+      rows.push({ key: 'deliveryDifficulty', label: 'Delivery difficulty', detail: 'Constrained +5% execution impact' });
+    }
+
+    if (jobConditions.deliveryDifficulty === 'difficult') {
+      rows.push({ key: 'deliveryDifficulty', label: 'Delivery difficulty', detail: 'Difficult +10% execution impact' });
+    }
+
+    if (jobConditions.mobilizationComplexity === 'medium') {
+      rows.push({ key: 'mobilization', label: 'Mobilization', detail: 'Medium +3% execution impact' });
+    }
+
+    if (jobConditions.mobilizationComplexity === 'high') {
+      rows.push({ key: 'mobilization', label: 'Mobilization', detail: 'High +7% execution impact' });
+    }
+
+    if (jobConditions.deliveryRequired) {
+      const deliveryDetail = jobConditions.deliveryPricingMode === 'flat'
+        ? `${formatCurrencySafe(jobConditions.deliveryValue)} flat allowance`
+        : jobConditions.deliveryPricingMode === 'percent'
+          ? `${formatNumberSafe(jobConditions.deliveryValue, 2)}% of base pricing`
+          : 'Included with no separate charge';
+
+      rows.push({
+        key: 'deliveryAllowance',
+        label: 'Delivery allowance',
+        detail: `${deliveryDetail}${jobConditions.deliveryLeadDays > 0 ? ` • ${jobConditions.deliveryLeadDays} day${jobConditions.deliveryLeadDays === 1 ? '' : 's'}` : ''}`,
+      });
+    }
+
+    if (jobConditions.estimateAdderPercent !== 0) {
+      rows.push({
+        key: 'estimateAdderPercent',
+        label: 'Project adder %',
+        detail: `${formatNumberSafe(jobConditions.estimateAdderPercent, 2)}% on total estimate`,
+      });
+    }
+
+    if (jobConditions.estimateAdderAmount !== 0) {
+      rows.push({
+        key: 'estimateAdderAmount',
+        label: 'Project adder $',
+        detail: `${formatCurrencySafe(jobConditions.estimateAdderAmount)} direct add`,
+      });
+    }
+
+    return rows;
+  }, [jobConditions]);
+
+  function resolveLocalLinePricing(line: TakeoffLineRecord): TakeoffLineRecord {
+    const pricingSource = line.pricingSource === 'manual' ? 'manual' : 'auto';
+    const calculatedUnitSell = Number((line.materialCost + line.laborCost).toFixed(2));
+    const unitSell = pricingSource === 'manual' ? Number(line.unitSell || 0) : calculatedUnitSell;
+    return {
+      ...line,
+      pricingSource,
+      unitSell: Number(unitSell.toFixed(2)),
+      lineTotal: Number((unitSell * line.qty).toFixed(2)),
+    };
+  }
 
   function patchLineLocal(lineId: string, updates: Partial<TakeoffLineRecord>) {
     setLines((prev) =>
@@ -240,7 +597,7 @@ export function ProjectWorkspace() {
     }
     const normalizedJobConditions = normalizeProjectJobConditions(project.jobConditions);
     if ((project.address || '').trim() && normalizedJobConditions.travelDistanceMiles === null) {
-      const distance = await getDistanceInMiles(project.address, officeAddress);
+      const distance = await getDistanceInMiles(project.address);
       if (distance !== null) {
         normalizedJobConditions.travelDistanceMiles = distance;
         if (distance > 50) normalizedJobConditions.remoteTravel = true;
@@ -269,27 +626,21 @@ export function ProjectWorkspace() {
     }
   }
 
-  async function refreshProjectDistance(addressOverride?: string, officeOverride?: string, silentOnFailure = false): Promise<number | null> {
-    const address = String(addressOverride ?? project?.address ?? '').trim();
-    const originAddress = String(officeOverride ?? officeAddress).trim() || OFFICE_ADDRESS;
-
-    if (!address) {
+  async function refreshProjectDistance() {
+    if (!project?.address || !project.address.trim()) {
       patchJobConditions({ travelDistanceMiles: null, deliveryRequired: false, deliveryPricingMode: 'included', deliveryValue: 0, deliveryLeadDays: 0 });
       setDistanceError(null);
-      setDistanceMessage('Add a site address to calculate travel distance.');
-      return null;
+      return;
     }
 
     setDistanceCalculating(true);
     setDistanceError(null);
-    setDistanceMessage('Calculating travel...');
     try {
-      const distance = await getDistanceInMiles(address, originAddress);
+      const distance = await getDistanceInMiles(project.address);
       if (distance === null) {
         patchJobConditions({ travelDistanceMiles: null });
-        setDistanceError('Could not calculate distance');
-        setDistanceMessage('Could not calculate distance');
-        return null;
+        setDistanceError('Unable to calculate distance from the current address.');
+        return;
       }
 
       patchJobConditions({
@@ -297,16 +648,9 @@ export function ProjectWorkspace() {
         remoteTravel: distance > 50 ? true : jobConditions.remoteTravel,
       });
       applyWorkspaceDeliveryRecommendation(distance, { force: jobConditions.deliveryAutoCalculated });
-      setDistanceMessage(`${formatNumberSafe(distance, 1)} miles from office`);
-      return distance;
     } catch (error) {
       console.error('Distance lookup failed', error);
-      setDistanceError('Could not calculate distance');
-      setDistanceMessage('Could not calculate distance');
-      if (!silentOnFailure) {
-        patchJobConditions({ travelDistanceMiles: null });
-      }
-      return null;
+      setDistanceError('Distance lookup failed.');
     } finally {
       setDistanceCalculating(false);
     }
@@ -495,7 +839,7 @@ export function ProjectWorkspace() {
       const totalsRows = [
         ['Total Material Cost', formatCurrencySafe(section.totalMaterialCost)],
         ['Total Labor Cost', formatCurrencySafe(section.totalLaborCost)],
-        ['Total Estimated Time', `${formatNumberSafe(section.totalLaborHours, 1)} hrs`],
+        ['Estimated Install Duration', formatWorkWeeksLabel(calculateWorkDuration(section.totalLaborHours, project.jobConditions).durationWeeks)],
         ['Section Total', formatCurrencySafe(section.sectionTotal)],
       ];
 
@@ -553,7 +897,7 @@ export function ProjectWorkspace() {
       body: [
         ['Total Material', formatCurrencySafe(showMaterialPricing ? summary.materialSubtotal : 0)],
         ['Total Labor', formatCurrencySafe(showLaborPricing ? summary.adjustedLaborSubtotal || summary.laborSubtotal : 0)],
-        ['Total Estimated Time', `${formatNumberSafe(summary.totalLaborHours || 0, 1)} hrs`],
+        ['Estimated Install Duration', formatWorkWeeksLabel(summary.durationWeeks || 0)],
         ['Total Proposal Amount', formatCurrencySafe(summary.baseBidTotal)],
       ],
       columnStyles: {
@@ -713,6 +1057,31 @@ export function ProjectWorkspace() {
       notes: ''
     });
     setLines((prev) => [...prev, created]);
+    setSelectedLineId(created.id);
+    await refreshTakeoff(project.id);
+  }
+
+  async function addCatalogItemQuick(item: CatalogItem, qty = 1, roomId = activeRoomId) {
+    if (!project || !roomId) return;
+    const created = await api.createV1TakeoffLine({
+      projectId: project.id,
+      roomId,
+      sourceType: 'catalog',
+      sourceRef: item.sku || null,
+      description: item.description,
+      sku: item.sku,
+      category: item.category,
+      subcategory: item.subcategory || null,
+      qty,
+      unit: item.uom,
+      materialCost: item.baseMaterialCost,
+      laborMinutes: item.baseLaborMinutes,
+      laborCost: 0,
+      catalogItemId: item.id,
+      notes: '',
+    });
+    setLines((prev) => [...prev, created]);
+    setSelectedLineId(created.id);
     await refreshTakeoff(project.id);
   }
 
@@ -736,14 +1105,30 @@ export function ProjectWorkspace() {
 
   function openLineEditor(lineId: string) {
     setSelectedLineId(lineId);
-    setModifiersModalOpen(true);
+    setEstimateEditorOpen(true);
   }
 
   async function applyModifier(modifierId: string) {
     if (!project || !selectedLineId) return;
     const result = await api.applyV1ModifierToLine(selectedLineId, modifierId);
     setLines((prev) => prev.map((line) => (line.id === selectedLineId ? result.line : line)));
-    setLineModifiers(await api.getV1LineModifiers(selectedLineId));
+    const updatedModifiers = await api.getV1LineModifiers(selectedLineId);
+    setLineModifiers(updatedModifiers);
+    setLineModifiersByLineId((prev) => ({ ...prev, [selectedLineId]: updatedModifiers }));
+    await refreshTakeoff(project.id);
+  }
+
+  async function applyModifierToRoom(modifierId: string) {
+    if (!project || activeRoomLines.length === 0) return;
+
+    await Promise.all(activeRoomLines.map((line) => api.applyV1ModifierToLine(line.id, modifierId)));
+
+    if (selectedLineId && activeRoomLines.some((line) => line.id === selectedLineId)) {
+      const updatedModifiers = await api.getV1LineModifiers(selectedLineId);
+      setLineModifiers(updatedModifiers);
+      setLineModifiersByLineId((prev) => ({ ...prev, [selectedLineId]: updatedModifiers }));
+    }
+
     await refreshTakeoff(project.id);
   }
 
@@ -751,7 +1136,9 @@ export function ProjectWorkspace() {
     if (!project || !selectedLineId) return;
     const result = await api.removeV1LineModifier(selectedLineId, lineModifierId);
     setLines((prev) => prev.map((line) => (line.id === selectedLineId ? result.line : line)));
-    setLineModifiers(await api.getV1LineModifiers(selectedLineId));
+    const updatedModifiers = await api.getV1LineModifiers(selectedLineId);
+    setLineModifiers(updatedModifiers);
+    setLineModifiersByLineId((prev) => ({ ...prev, [selectedLineId]: updatedModifiers }));
     await refreshTakeoff(project.id);
   }
 
@@ -935,7 +1322,7 @@ export function ProjectWorkspace() {
     <div className="min-h-full bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]">
       <TopProjectHeader
         project={project}
-        baseBidTotal={summary?.baseBidTotal || 0}
+        baseBidTotal={estimateViewSummary?.baseBidTotal || summary?.baseBidTotal || 0}
         syncState={syncState}
         lastSavedAt={lastSavedAt}
         onSave={saveProject}
@@ -946,9 +1333,9 @@ export function ProjectWorkspace() {
         statusActionLabel={statusActionLabel}
       />
 
-      <div className="ui-page space-y-2.5">
+      <div className="ui-page space-y-2 w-full max-w-full px-0">
         <p className="ui-label px-1">Project Workflow</p>
-        <div className="ui-surface p-2 flex items-center gap-1 overflow-x-auto whitespace-nowrap shadow-sm">
+        <div className="ui-surface flex items-center gap-1 overflow-x-auto whitespace-nowrap p-1.5 shadow-sm">
           <button onClick={() => setActiveTab('overview')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'overview' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Overview</button>
           <button onClick={() => setActiveTab('setup')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'setup' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Project Setup</button>
           <button onClick={() => setActiveTab('rooms')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'rooms' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Rooms</button>
@@ -956,106 +1343,81 @@ export function ProjectWorkspace() {
           <button onClick={() => setActiveTab('estimate')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'estimate' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Estimate</button>
           <button onClick={() => setActiveTab('files')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'files' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Files</button>
           <button onClick={() => setActiveTab('proposal')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'proposal' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Proposal</button>
-          <div className="ml-auto flex items-center gap-1.5 pl-2">
+          <div className="flex items-center gap-1.5 pl-2 sm:ml-auto">
             <button onClick={() => void syncSheets()} className="ui-btn-secondary h-8 px-2.5 text-[11px] font-semibold">Sync</button>
           </div>
         </div>
 
         {activeTab === 'overview' && (
-          <div className="space-y-4">
-            <div className="ui-surface p-4 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 text-sm">
-              <div><p className="text-xs text-slate-500">Project</p><p className="font-semibold">{project.projectName}</p></div>
-              <div><p className="text-xs text-slate-500">Client</p><p className="font-semibold">{project.clientName || 'N/A'}</p></div>
-              <div><p className="text-xs text-slate-500">Pricing Basis</p><p className="font-semibold">{pricingMode === 'material_only' ? 'Material Only' : pricingMode === 'labor_only' ? 'Install Only' : 'Material + Install'}</p></div>
-              <div><p className="text-xs text-slate-500">Rooms / Areas</p><p className="font-semibold">{rooms.length}</p></div>
-              <div><p className="text-xs text-slate-500">Scope Categories</p><p className="font-semibold">{selectedScopeCategories.length || scopeCategoryOptions.length || 0}</p></div>
-              <div><p className="text-xs text-slate-500">Estimate Total</p><p className="font-semibold">{formatCurrencySafe(summary?.baseBidTotal)}</p></div>
+          <div className="space-y-3">
+            <div className="ui-surface grid grid-cols-2 gap-2 p-3 text-sm md:grid-cols-3 xl:grid-cols-6">
+              <div><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Project</p><p className="mt-1 font-semibold text-slate-900">{project.projectName}</p></div>
+              <div><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Client</p><p className="mt-1 font-semibold text-slate-900">{project.clientName || 'N/A'}</p></div>
+              <div><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Pricing</p><p className="mt-1 font-semibold text-slate-900">{pricingMode === 'material_only' ? 'Material Only' : pricingMode === 'labor_only' ? 'Install Only' : 'Material + Install'}</p></div>
+              <div><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Rooms</p><p className="mt-1 font-semibold text-slate-900">{rooms.length}</p></div>
+              <div><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Scope</p><p className="mt-1 font-semibold text-slate-900">{selectedScopeCategories.length || scopeCategoryOptions.length || 0} categories</p></div>
+              <div><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Live Estimate</p><p className="mt-1 font-semibold text-slate-900">{formatCurrencySafe(estimateViewSummary?.baseBidTotal || summary?.baseBidTotal || 0)}</p></div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_1fr_320px] gap-4 items-start">
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-4 space-y-4">
-                <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-semibold">Setup Snapshot</p>
-                  <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Estimator Assumptions</h2>
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+              <section className="rounded-2xl border border-slate-200/80 bg-white/92 p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Project Snapshot</p>
+                    <h2 className="mt-1 text-base font-semibold tracking-tight text-slate-900">Estimator assumptions at a glance</h2>
+                  </div>
+                  <button onClick={() => setActiveTab('setup')} className="ui-btn-secondary h-8 px-3 text-[11px] font-semibold">Open Project Setup</button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Install Labor Basis</p>
-                    <p className="font-semibold text-slate-900 mt-1">{jobConditions.laborRateBasis === 'prevailing' ? 'Prevailing wage premium' : 'Union baseline labor'}</p>
-                    <p className="text-xs text-slate-500 mt-1">Base rate {formatCurrencySafe(baseLaborRatePerHour)}/hr</p>
-                    <p className="text-xs text-slate-500 mt-1">Base multiplier x{formatNumberSafe(jobConditions.laborRateMultiplier, 2)}</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Install Labor Basis</p>
+                    <p className="mt-1 font-semibold text-slate-900">{jobConditions.laborRateBasis === 'prevailing' ? 'Prevailing wage premium' : 'Union baseline labor'}</p>
+                    <p className="mt-1 text-[11px] text-slate-500">Base {formatCurrencySafe(baseLaborRatePerHour)}/hr • Multiplier x{formatNumberSafe(jobConditions.laborRateMultiplier, 2)}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Delivery</p>
-                    <p className="font-semibold text-slate-900 mt-1">{jobConditions.deliveryRequired ? 'Included in scope' : 'Not included'}</p>
-                    <p className="text-xs text-slate-500 mt-1">{jobConditions.deliveryRequired ? `${jobConditions.deliveryPricingMode === 'flat' ? formatCurrencySafe(jobConditions.deliveryValue) : jobConditions.deliveryPricingMode === 'percent' ? `${formatNumberSafe(jobConditions.deliveryValue, 2)}% of base` : 'No separate adder'} · ${jobConditions.deliveryLeadDays} business day${jobConditions.deliveryLeadDays === 1 ? '' : 's'}` : 'No delivery allowance applied'}</p>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Delivery + Project Adders</p>
+                    <p className="mt-1 font-semibold text-slate-900">{jobConditions.deliveryRequired ? 'Delivery included in pricing' : 'No delivery allowance active'}</p>
+                    <p className="mt-1 text-[11px] text-slate-500">{jobConditions.estimateAdderPercent ? `${formatNumberSafe(jobConditions.estimateAdderPercent, 2)}% adder` : '0% adder'} • {jobConditions.estimateAdderAmount ? `${formatCurrencySafe(jobConditions.estimateAdderAmount)} flat adder` : 'No flat adder'}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 md:col-span-2">
-                    <p className="text-xs text-slate-500">Included Scope Categories</p>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 md:col-span-2">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Included Scope</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      {(selectedScopeCategories.length > 0 ? selectedScopeCategories : scopeCategoryOptions).slice(0, 12).map((category) => (
-                        <span key={category} className="px-2 py-1 rounded-full bg-white text-slate-700 text-[11px] border border-slate-200">{category}</span>
+                      {(selectedScopeCategories.length > 0 ? selectedScopeCategories : scopeCategoryOptions).slice(0, 10).map((category) => (
+                        <span key={category} className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700">{category}</span>
                       ))}
-                      {selectedScopeCategories.length === 0 && scopeCategoryOptions.length === 0 ? <span className="text-xs text-slate-500">No catalog categories loaded yet.</span> : null}
+                      {selectedScopeCategories.length === 0 && scopeCategoryOptions.length === 0 ? <span className="text-[11px] text-slate-500">No catalog categories loaded yet.</span> : null}
                     </div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 md:col-span-2">
-                    <p className="text-xs text-slate-500">Rooms / Areas</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {rooms.slice(0, 10).map((room) => (
-                        <span key={room.id} className="px-2 py-1 rounded-full bg-white text-slate-700 text-[11px] border border-slate-200">{room.roomName}</span>
-                      ))}
-                    </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 md:col-span-2">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Special Notes</p>
+                    <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{project.specialNotes?.trim() || 'No project-wide special notes yet.'}</p>
                   </div>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-4 space-y-4">
-                <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-semibold">Project-Wide Adders</p>
-                  <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Pricing Impact Summary</h2>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Condition Labor Multiplier</p>
-                    <p className="font-semibold text-slate-900 mt-1">x{formatNumberSafe(summary?.conditionLaborMultiplier || 1, 2)}</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Condition Adjustment</p>
-                    <p className="font-semibold text-slate-900 mt-1">{formatCurrencySafe(summary?.conditionAdjustmentAmount)}</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Project Adder %</p>
-                    <p className="font-semibold text-slate-900 mt-1">{formatNumberSafe(jobConditions.estimateAdderPercent, 2)}%</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Project Adder $</p>
-                    <p className="font-semibold text-slate-900 mt-1">{formatCurrencySafe(jobConditions.estimateAdderAmount)}</p>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Special Notes</p>
-                  <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{project.specialNotes?.trim() || 'No project-wide special notes yet.'}</p>
                 </div>
               </section>
 
               <aside className="space-y-3">
-                <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Active Assumptions</p>
+                <section className="rounded-2xl border border-slate-200/80 bg-white/92 p-3.5 shadow-sm">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Live Pricing Impact</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5"><p className="text-slate-500">Labor Multiplier</p><p className="font-semibold text-slate-900">x{formatNumberSafe(summary?.conditionLaborMultiplier || 1, 2)}</p></div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5"><p className="text-slate-500">Condition Adj.</p><p className="font-semibold text-slate-900">{formatCurrencySafe(summary?.conditionAdjustmentAmount)}</p></div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 col-span-2"><p className="text-slate-500">Estimate Total</p><p className="font-semibold text-slate-900">{formatCurrencySafe(estimateViewSummary?.baseBidTotal || summary?.baseBidTotal || 0)}</p></div>
+                  </div>
+                </section>
+                <section className="rounded-2xl border border-slate-200/80 bg-white/92 p-3.5 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active Assumptions</p>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">{(summary?.conditionAssumptions || []).length}</span>
+                  </div>
                   {(summary?.conditionAssumptions || []).length > 0 ? (
-                    <div className="mt-2 space-y-1.5 max-h-64 overflow-auto pr-1">
-                      {(summary?.conditionAssumptions || []).slice(0, 12).map((assumption) => (
-                        <p key={assumption} className="text-xs text-slate-700 leading-4">- {assumption}</p>
+                    <div className="mt-2 space-y-1.5 max-h-52 overflow-auto pr-1">
+                      {(summary?.conditionAssumptions || []).slice(0, 8).map((assumption) => (
+                        <p key={assumption} className="text-[11px] leading-4 text-slate-700">- {assumption}</p>
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-2 text-xs text-slate-500">No project-level assumptions are active.</p>
+                    <p className="mt-2 text-[11px] text-slate-500">No project-level assumptions are active.</p>
                   )}
-                </section>
-                <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5 space-y-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Next Best Action</p>
-                  <p className="text-xs text-slate-600">Use Project Setup to confirm pricing basis, included categories, delivery, and job-wide adders before finalizing estimate pricing.</p>
-                  <button onClick={() => setActiveTab('setup')} className="ui-btn-secondary h-8 px-3 text-[11px] font-semibold">Open Project Setup</button>
                 </section>
               </aside>
             </div>
@@ -1063,15 +1425,17 @@ export function ProjectWorkspace() {
         )}
 
         {activeTab === 'setup' && (
-          <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4 items-start">
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1fr_280px] items-start">
             <section className="rounded-2xl border border-slate-200/70 bg-white/85 backdrop-blur-sm shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-200/80 bg-gradient-to-r from-slate-50 to-white">
+              <div className="border-b border-slate-200/80 bg-gradient-to-r from-slate-50 to-white px-4 py-3">
                 <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-semibold">Estimating Control Center</p>
-                <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Project Setup</h2>
-                <p className="mt-1 text-xs text-slate-600 max-w-2xl">Confirm project identity, pricing basis, included scope, and project-wide conditions before you price line items. Item modifiers remain line-specific in the estimate workspace.</p>
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold tracking-tight text-slate-900">Project Setup</h2>
+                  <p className="max-w-2xl text-[11px] text-slate-600">Core pricing inputs stay visible. Advanced project conditions are collapsed until needed.</p>
+                </div>
               </div>
 
-              <div className="px-5 py-4 space-y-5">
+              <div className="space-y-4 px-4 py-4">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-slate-900">Project Identity</h3>
@@ -1087,7 +1451,7 @@ export function ProjectWorkspace() {
                   </div>
                 </div>
 
-                <div className="border-t border-slate-200/80 pt-5 space-y-3">
+                <div className="border-t border-slate-200/80 pt-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-slate-900">Pricing Basis</h3>
                     <span className="text-[10px] uppercase tracking-wide text-slate-500">Material / Install / Rates</span>
@@ -1150,7 +1514,7 @@ export function ProjectWorkspace() {
                   </div>
                 </div>
 
-                <div className="border-t border-slate-200/80 pt-5 space-y-3">
+                <div className="border-t border-slate-200/80 pt-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-slate-900">Rooms / Included Scope</h3>
                     <span className="text-[10px] uppercase tracking-wide text-slate-500">Scope Definition</span>
@@ -1183,11 +1547,20 @@ export function ProjectWorkspace() {
                   </div>
                 </div>
 
-                <div className="border-t border-slate-200/80 pt-5 space-y-3">
+                <div className="border-t border-slate-200/80 pt-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-slate-900">Project-Wide Adders + Conditions</h3>
-                    <span className="text-[10px] uppercase tracking-wide text-slate-500">Execution Reality</span>
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">Advanced Project Conditions</h3>
+                      <p className="mt-1 text-[11px] text-slate-500">Project-wide labor drivers, delivery rules, and execution adders.</p>
+                    </div>
+                    <button type="button" onClick={() => setSetupAdvancedOpen((value) => !value)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50">{setupAdvancedOpen ? 'Hide Advanced' : 'Show Advanced'}</button>
                   </div>
+                  {!setupAdvancedOpen ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-[11px] text-slate-600">
+                      <span className="font-semibold text-slate-900">Currently active:</span> {activeProjectLaborDrivers.length} labor driver{activeProjectLaborDrivers.length === 1 ? '' : 's'} • {projectCostAdderDetails.length} cost adder{projectCostAdderDetails.length === 1 ? '' : 's'}
+                    </div>
+                  ) : (
+                  <>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <label className="text-[11px] font-medium text-slate-700">Floors<input type="number" min={1} className="ui-input mt-1 h-9" value={jobConditions.floors} onChange={(e) => patchJobConditions({ floors: Number(e.target.value) || 1 })} /></label>
                     <label className="text-[11px] font-medium text-slate-700">Floor Labor Add / Floor<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.floorMultiplierPerFloor} onChange={(e) => patchJobConditions({ floorMultiplierPerFloor: Number(e.target.value) || 0 })} /></label>
@@ -1260,9 +1633,9 @@ export function ProjectWorkspace() {
                       <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.remoteTravelMultiplier} onChange={(e) => patchJobConditions({ remoteTravelMultiplier: Number(e.target.value) || 0 })} /></label>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.nightWork} onChange={(e) => patchJobConditions({ nightWork: e.target.checked })} />Night Work</label>
+                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.nightWork} onChange={(e) => patchJobConditions({ nightWork: e.target.checked, afterHoursWork: e.target.checked })} />Night Work</label>
                       <p className="text-[11px] text-slate-500">Applies automatically across all scoped install items.</p>
-                      <label className="text-[11px] font-medium text-slate-700">Labor Cost Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.nightWorkLaborCostMultiplier} onChange={(e) => patchJobConditions({ nightWorkLaborCostMultiplier: Number(e.target.value) || 0 })} /></label>
+                      <label className="text-[11px] font-medium text-slate-700">Labor Cost Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.nightWorkLaborCostMultiplier} onChange={(e) => patchJobConditions({ nightWorkLaborCostMultiplier: Number(e.target.value) || 0, afterHoursMultiplier: Number(e.target.value) || 0 })} /></label>
                       <label className="text-[11px] font-medium text-slate-700">Labor Hours Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.nightWorkLaborMinutesMultiplier} onChange={(e) => patchJobConditions({ nightWorkLaborMinutesMultiplier: Number(e.target.value) || 0 })} /></label>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
@@ -1278,9 +1651,11 @@ export function ProjectWorkspace() {
                       <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.scheduleCompressionMultiplier} onChange={(e) => patchJobConditions({ scheduleCompressionMultiplier: Number(e.target.value) || 0 })} /></label>
                     </div>
                   </div>
+                  </>
+                  )}
                 </div>
 
-                <div className="border-t border-slate-200/80 pt-5 space-y-3">
+                <div className="border-t border-slate-200/80 pt-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-slate-900">Special Notes</h3>
                     <span className="text-[10px] uppercase tracking-wide text-slate-500">Clarify Scope</span>
@@ -1293,100 +1668,72 @@ export function ProjectWorkspace() {
             </section>
 
             <aside className="space-y-3 xl:sticky xl:top-[88px]">
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Estimate Drivers</p>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <section className="rounded-2xl border border-slate-200/80 bg-white/92 shadow-sm p-3.5">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Setup Impact Summary</p>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+                    <p className="text-slate-500">Installers</p>
+                    <p className="font-semibold text-slate-900">{jobConditions.installerCount}</p>
+                  </div>
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
                     <p className="text-slate-500">Distance</p>
                     <p className="font-semibold text-slate-900">{jobConditions.travelDistanceMiles !== null ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} mi` : 'n/a'}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
-                    <p className="text-slate-500">Crew Size</p>
-                    <p className="font-semibold text-slate-900">{formatNumberSafe(jobConditions.installerCount, 0)}</p>
+                    <p className="text-slate-500">Delivery Lead</p>
+                    <p className="font-semibold text-slate-900">{jobConditions.deliveryLeadDays || 0} day{jobConditions.deliveryLeadDays === 1 ? '' : 's'}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
-                    <p className="text-slate-500">Night Work</p>
-                    <p className="font-semibold text-slate-900">{jobConditions.nightWork ? 'Active' : 'Standard Hours'}</p>
+                    <p className="text-slate-500">Labor Multiplier</p>
+                    <p className="font-semibold text-slate-900">x{formatNumberSafe(summary?.conditionLaborMultiplier || 1, 2)}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
-                    <p className="text-slate-500">Delivery</p>
-                    <p className="font-semibold text-slate-900">{jobConditions.deliveryRequired ? 'Required' : 'Not Required'}</p>
+                    <p className="text-slate-500">Condition Adj.</p>
+                    <p className="font-semibold text-slate-900">{formatCurrencySafe(summary?.conditionAdjustmentAmount)}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 col-span-2">
-                    <p className="text-slate-500">Labor Basis</p>
-                    <p className="font-semibold text-slate-900">Union wage baseline{jobConditions.prevailingWage ? ' + prevailing premium' : ''}</p>
+                    <p className="text-slate-500">Adjusted Labor Subtotal</p>
+                    <p className="font-semibold text-slate-900">{formatCurrencySafe(summary?.adjustedLaborSubtotal)}</p>
                   </div>
                 </div>
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-600">
-                  <p className="font-semibold text-slate-900">Travel status</p>
-                  <p className="mt-1">{travelStatusMessage}</p>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Active Assumptions</p>
                 {(summary?.conditionAssumptions || []).length > 0 ? (
-                  <div className="mt-2 space-y-1.5 max-h-48 overflow-auto pr-1">
+                  <div className="mt-3 border-t border-slate-200 pt-3">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Active Assumptions</p>
+                    <div className="mt-2 space-y-1.5 max-h-40 overflow-auto pr-1">
                     {(summary?.conditionAssumptions || []).slice(0, 12).map((assumption) => (
                       <p key={assumption} className="text-xs text-slate-700 leading-4">- {assumption}</p>
                     ))}
+                    </div>
                   </div>
                 ) : (
-                  <p className="mt-2 text-xs text-slate-500">No project-level assumptions are active.</p>
+                  <p className="mt-3 text-xs text-slate-500">No project-level assumptions are active.</p>
                 )}
               </section>
 
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Key Job Conditions</p>
-                {estimateDriverTags.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {estimateDriverTags.map((tag) => (
-                      <span key={tag} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700">{tag}</span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-slate-500">No special job conditions are active yet.</p>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5 space-y-2">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Scope Included</p>
+              <section className="rounded-2xl border border-slate-200/80 bg-white/92 shadow-sm p-3.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Scope + Navigation</p>
+                  <button onClick={() => setActiveTab('rooms')} className="text-[11px] font-medium text-blue-700 hover:text-blue-800">Open Rooms</button>
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedScopeCategories.length > 0 ? selectedScopeCategories.map((category) => (
                     <span key={category} className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] border border-slate-200">{category}</span>
                   )) : <p className="text-xs text-slate-500">No categories selected yet.</p>}
                 </div>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Proposal Notes Preview</p>
-                  <button onClick={() => setActiveTab('proposal')} className="text-[11px] font-medium text-blue-700 hover:text-blue-800">Open</button>
-                </div>
-                <p className="text-xs text-slate-600">Prevailing wage, night work, phased work, and special access conditions are available for proposal assumptions and install review notes.</p>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Rooms Snapshot</p>
-                    <p className="text-xs text-slate-600 mt-1">Rooms are managed primarily in the Rooms tab.</p>
-                  </div>
-                  <button onClick={() => setActiveTab('rooms')} className="ui-btn-secondary h-7 px-2 text-[11px]">Open Rooms</button>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className="mt-2 flex flex-wrap gap-1.5 border-t border-slate-200 pt-2">
                   {rooms.slice(0, 6).map((room) => (
                     <span key={room.id} className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] border border-slate-200">{room.roomName}</span>
                   ))}
                   {rooms.length > 6 && <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-500 text-[11px] border border-slate-200">+{rooms.length - 6} more</span>}
                 </div>
+                <button onClick={() => setActiveTab('proposal')} className="ui-btn-secondary mt-1 h-8 px-3 text-[11px] font-semibold">Open Proposal</button>
               </section>
             </aside>
           </div>
         )}
 
         {activeTab === 'rooms' && (
-          <div className="grid grid-cols-[320px_1fr] gap-4">
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
             <RoomManager
               rooms={rooms}
               activeRoomId={activeRoomId}
@@ -1396,282 +1743,394 @@ export function ProjectWorkspace() {
               onDuplicateRoom={(room) => void duplicateRoom(room)}
               onDeleteRoom={(room) => void deleteRoom(room)}
             />
-            <div className="bg-white border border-slate-200 rounded-lg p-4">
-              <h3 className="text-sm font-semibold text-slate-800 mb-2">Room Summary</h3>
-              <p className="text-sm text-slate-600">Select a room to manage and verify room-level totals and lines.</p>
-            </div>
+
+            <section className="space-y-3 rounded-[22px] border border-slate-200/80 bg-white/94 p-3 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Rooms</p>
+                  <h3 className="mt-0.5 text-base font-semibold tracking-tight text-slate-950">{roomNamesById[activeRoomId] || 'Select a room'}</h3>
+                  <p className="mt-1 text-[11px] text-slate-600">Keep room organization simple here, then do most item and add-in work in Takeoff and Estimate.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                  <button onClick={() => setActiveTab('takeoff')} className="rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 hover:bg-slate-50">Open Takeoff</button>
+                  <button onClick={() => setActiveTab('estimate')} className="rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 hover:bg-slate-50">Open Estimate</button>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-4">
+                <div className="rounded-[16px] border border-slate-200 bg-slate-50/80 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Rooms</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{rooms.length}</p>
+                </div>
+                <div className="rounded-[16px] border border-slate-200 bg-slate-50/80 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Active Room Lines</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{activeRoomLines.length}</p>
+                </div>
+                <div className="rounded-[16px] border border-slate-200 bg-slate-50/80 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Room Subtotal</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{formatCurrencySafe(roomSubtotal)}</p>
+                </div>
+                <div className="rounded-[16px] border border-slate-200 bg-slate-50/80 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Room Qty</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{activeRoomLines.reduce((sum, line) => sum + Number(line.qty || 0), 0)}</p>
+                </div>
+              </div>
+
+              <div className="rounded-[18px] border border-slate-200/80 bg-slate-50/60 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold text-slate-900">Active Room Lines</p>
+                  <span className="text-[10px] text-slate-500">Preview</span>
+                </div>
+                {activeRoomLines.length > 0 ? (
+                  <div className="mt-2 divide-y divide-slate-200/80 overflow-hidden rounded-[14px] border border-slate-200 bg-white">
+                    {activeRoomLines.slice(0, 8).map((line) => (
+                      <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-[11px]">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-slate-900">{line.description}</p>
+                          <p className="mt-0.5 text-[10px] text-slate-500">{line.category || 'Uncategorized'} • Qty {line.qty} {line.unit}</p>
+                        </div>
+                        <span className="font-semibold text-slate-900">{formatCurrencySafe(line.lineTotal)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-2 rounded-[14px] border border-dashed border-slate-300 bg-white px-3 py-5 text-[11px] text-slate-500">Select or create a room, then add lines from Takeoff or Estimate.</div>
+                )}
+                {activeRoomLines.length > 8 ? <p className="mt-2 text-[10px] text-slate-500">Showing 8 of {activeRoomLines.length} lines in this room.</p> : null}
+              </div>
+            </section>
           </div>
         )}
 
         {activeTab === 'takeoff' && (
-          <div className="space-y-3 min-w-0">
-              <div className="rounded-[22px] border border-amber-200/70 bg-[linear-gradient(180deg,rgba(255,252,245,0.98)_0%,rgba(255,255,255,0.98)_100%)] p-4 shadow-[0_14px_32px_rgba(180,131,27,0.08)]">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="ui-chip-soft">Takeoff workspace</span>
-                      <span className="ui-chip-soft">{workspaceOrganizeMode === 'item' ? 'Organized by item' : 'Organized by room'}</span>
-                      <span className="ui-chip-soft">{workspaceScopeMode === 'all' ? 'All rooms combined' : roomNamesById[activeRoomId] || 'Active room'}</span>
+          <div className="min-w-0 rounded-[28px] bg-[linear-gradient(180deg,#fff8ee_0%,#fdf8f2_100%)] p-2.5 shadow-[0_16px_36px_rgba(15,23,42,0.06)] ring-1 ring-amber-200/80 sm:p-3">
+            <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <section className="min-w-0 space-y-3">
+                <WorkspaceToolbar
+                  tone="takeoff"
+                  eyebrow="Takeoff"
+                  title="Quantity, Match, and Scope Review"
+                  description="Use this workspace to review extracted lines, confirm quantities, clean up unresolved items, and apply room or project conditions before pricing review."
+                  actions={(
+                    <>
+                      <button onClick={() => setTakeoffRoomsModalOpen(true)} className="inline-flex h-8 items-center rounded-full border border-amber-200 bg-white px-3 text-[10px] font-semibold text-slate-700">Rooms</button>
+                      <button onClick={() => setCatalogOpen(true)} className="inline-flex h-8 items-center rounded-full bg-[linear-gradient(135deg,#b7791f_0%,#8d5b12_100%)] px-3 text-[10px] font-semibold text-white shadow-[0_10px_22px_rgba(183,121,31,0.18)]">Catalog Match</button>
+                    </>
+                  )}
+                  controls={(
+                    <div className="grid gap-2 lg:grid-cols-[1.2fr_repeat(5,minmax(0,auto))]">
+                      <label className="text-[11px] font-medium text-slate-700">Search item or SKU
+                        <input value={takeoffSearch} onChange={(event) => setTakeoffSearch(event.target.value)} className="ui-input mt-1 h-9 rounded-xl border-amber-200" placeholder="Search item, SKU, room, or notes" />
+                      </label>
+                      <label className="text-[11px] font-medium text-slate-700">Room scope
+                        <select value={activeRoomId} onChange={(event) => setActiveRoomId(event.target.value)} className="ui-input mt-1 h-9 rounded-xl">
+                          {rooms.map((room) => <option key={room.id} value={room.id}>{room.roomName}</option>)}
+                        </select>
+                      </label>
+                      <label className="text-[11px] font-medium text-slate-700">View scope
+                        <select value={workspaceScopeMode} onChange={(event) => setWorkspaceScopeMode(event.target.value as WorkspaceScopeMode)} className="ui-input mt-1 h-9 rounded-xl">
+                          <option value="active">Active room</option>
+                          <option value="all">All rooms</option>
+                        </select>
+                      </label>
+                      <label className="text-[11px] font-medium text-slate-700">Group by
+                        <select value={takeoffGroupMode} onChange={(event) => setTakeoffGroupMode(event.target.value as WorkspaceGroupMode)} className="ui-input mt-1 h-9 rounded-xl">
+                          <option value="room">Room</option>
+                          <option value="category">Category</option>
+                        </select>
+                      </label>
+                      <label className="text-[11px] font-medium text-slate-700">Match status
+                        <select value={takeoffMatchStatus} onChange={(event) => setTakeoffMatchStatus(event.target.value as TakeoffMatchStatus)} className="ui-input mt-1 h-9 rounded-xl">
+                          <option value="all">All lines</option>
+                          <option value="matched">Matched only</option>
+                          <option value="unmatched">Unmatched only</option>
+                        </select>
+                      </label>
+                      <label className="mt-6 inline-flex items-center gap-2 rounded-[14px] border border-amber-200 bg-amber-50/60 px-3 py-2 text-[11px] font-medium text-slate-700">
+                        <input type="checkbox" checked={takeoffUnresolvedOnly} onChange={(event) => setTakeoffUnresolvedOnly(event.target.checked)} />
+                        Show unresolved only
+                      </label>
                     </div>
-                    <h3 className="mt-2 text-[20px] font-semibold tracking-[-0.03em] text-slate-950">Cleanup and scope control</h3>
-                    <p className="mt-1 text-[12px] text-slate-600">Trim parser noise, combine rooms when needed, and inspect the takeoff by room or by item before pricing.</p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="rounded-full bg-white p-1 shadow-sm ring-1 ring-amber-200/70">
-                      <button onClick={() => setWorkspaceOrganizeMode('room')} className={`h-8 rounded-full px-3 text-[11px] font-semibold ${workspaceOrganizeMode === 'room' ? 'bg-amber-600 text-white' : 'text-slate-600 hover:bg-amber-50'}`}>By Room</button>
-                      <button onClick={() => { setWorkspaceOrganizeMode('item'); setWorkspaceScopeMode('all'); }} className={`h-8 rounded-full px-3 text-[11px] font-semibold ${workspaceOrganizeMode === 'item' ? 'bg-amber-600 text-white' : 'text-slate-600 hover:bg-amber-50'}`}>By Item</button>
+                  )}
+                  summaryBar={(
+                    <div className="rounded-[16px] bg-amber-50/70 px-3 py-2 text-[11px] text-slate-700 ring-1 ring-amber-200/70">
+                      Base labor {formatCurrencySafe(baseLaborRatePerHour)}/hr · Effective {formatCurrencySafe(takeoffEffectiveLaborRatePerHour)}/hr · {activeProjectLaborDrivers.length} labor drivers · {projectCostAdderDetails.length} cost adders · {takeoffFilteredLines.length} visible lines · {formatNumberSafe(takeoffQuantity, 2)} total qty · subtotal {formatCurrencySafe(takeoffSubtotal)} · {takeoffUnresolvedCount} unresolved
                     </div>
-                    <div className="rounded-full bg-white p-1 shadow-sm ring-1 ring-amber-200/70">
-                      <button onClick={() => setWorkspaceScopeMode('active')} className={`h-8 rounded-full px-3 text-[11px] font-semibold ${workspaceScopeMode === 'active' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Active Room</button>
-                      <button onClick={() => setWorkspaceScopeMode('all')} className={`h-8 rounded-full px-3 text-[11px] font-semibold ${workspaceScopeMode === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>All Rooms</button>
-                    </div>
-                    <button onClick={() => void addManualLine()} className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[linear-gradient(135deg,#b7791f_0%,#8d5b12_100%)] px-4 text-[11px] font-semibold text-white shadow-[0_12px_24px_rgba(183,121,31,0.22)] hover:brightness-[1.03]">
-                      <Sparkles className="h-3.5 w-3.5" /> Add Manual Line
-                    </button>
-                  </div>
-                </div>
-              </div>
+                  )}
+                />
 
-              <div className="space-y-4 rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(255,251,244,0.96)_100%)] p-4 shadow-[0_18px_40px_rgba(15,23,42,0.05)] ring-1 ring-amber-200/60">
-                <div className="flex flex-wrap items-center gap-2 justify-between">
-                  <div>
-                    <p className="text-[13px] font-semibold tracking-[-0.02em] text-slate-900">Scope review workflow</p>
-                    <p className="mt-1 text-[12px] text-slate-500">Keep room assignment, source cleanup, and catalog matching close at hand.</p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={() => setCatalogOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,var(--brand-strong)_100%)] px-4 text-[11px] font-semibold text-white shadow-[0_12px_24px_rgba(11,61,145,0.22)] hover:brightness-[1.03]">Catalog Match</button>
-                    <button onClick={() => setBundleModalOpen(true)} className="ui-btn-secondary h-10 rounded-full px-4 text-[11px]">Scope Bundles</button>
-                    <button onClick={() => setTakeoffRoomsModalOpen(true)} className="ui-ghost-btn h-10 px-2 text-[11px]">Manage Rooms</button>
-                  </div>
-                </div>
-
-                <div className="rounded-[24px] bg-[linear-gradient(180deg,rgba(255,248,230,0.72)_0%,rgba(255,255,255,0.96)_100%)] p-3 ring-1 ring-amber-200/70">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[12px] font-semibold text-slate-900">Rooms</p>
-                      <p className="mt-1 text-[11px] text-slate-500">Pick a room focus fast, or switch to all rooms and combine by product.</p>
+                <div className="rounded-[16px] bg-white/92 px-3 py-2 ring-1 ring-amber-200/70 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <div className="min-w-0 text-slate-600">
+                      <span className="font-semibold text-slate-900">Review focus:</span>{' '}
+                      <span className="truncate">{selectedLine ? `${selectedLine.description} · ${roomNamesById[selectedLine.roomId] || 'Unassigned room'}` : `${workspaceScopeMode === 'all' ? 'All visible rooms' : roomNamesById[activeRoomId] || 'Active room'} · quantity review`}</span>
                     </div>
-                    <div className="rounded-2xl bg-white px-3 py-2 text-right shadow-sm ring-1 ring-amber-200/70">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-700">Visible scope total</p>
-                      <p className="mt-1 text-[16px] font-semibold tracking-[-0.03em] text-slate-900">{formatCurrencySafe(workspaceSubtotal)}</p>
+                    <div className="flex items-center gap-2">
+                      {selectedLine ? <span className="text-slate-500">Qty {selectedLine.qty} · {(lineModifiersByLineId[selectedLine.id] || []).length} conditions</span> : <span className="text-slate-500">Select a line to inspect source and match context</span>}
+                      {selectedLine ? <button onClick={() => setSelectedLineId(null)} className="rounded-full border border-amber-200 bg-white px-3 py-1 text-[10px] font-semibold text-slate-700">Clear</button> : null}
                     </div>
-                  </div>
-                  <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
-                    {rooms.map((room) => {
-                      const active = room.id === activeRoomId;
-                      const metric = roomMetrics[room.id] || { count: 0, subtotal: 0 };
-                      return (
-                        <button
-                          key={room.id}
-                          onClick={() => setActiveRoomId(room.id)}
-                          title={`${metric.count} lines · ${formatCurrencySafe(metric.subtotal)}`}
-                          className={`shrink-0 rounded-[20px] px-3 py-2 text-left transition-all ${active ? 'bg-[linear-gradient(135deg,#b7791f_0%,#8d5b12_100%)] text-white shadow-[0_12px_28px_rgba(183,121,31,0.22)]' : 'bg-white/92 text-slate-700 shadow-sm ring-1 ring-amber-200/70 hover:-translate-y-0.5 hover:bg-white'}`}
-                        >
-                          <div className="min-w-[148px]">
-                            <div className={`text-[11px] font-semibold ${active ? 'text-white' : 'text-slate-800'}`}>{room.roomName}</div>
-                            <div className={`mt-1 flex items-center justify-between text-[10px] ${active ? 'text-amber-100' : 'text-slate-500'}`}>
-                              <span>{metric.count} lines</span>
-                              <span>{formatCurrencySafe(metric.subtotal)}</span>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                  <div className="rounded-[24px] bg-[linear-gradient(180deg,#fff8e6_0%,#fff1cb_100%)] p-4 shadow-sm ring-1 ring-amber-200/80"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-amber-700">View Focus</p><Layers3 className="h-4 w-4 text-amber-700" /></div><p className="mt-3 truncate text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{workspaceScopeMode === 'all' ? 'All Rooms' : roomNamesById[activeRoomId] || 'Unassigned'}</p><p className="mt-1 text-[11px] text-slate-600">{workspaceOrganizeMode === 'item' ? 'Grouped by product' : 'Room-first cleanup lane'}</p></div>
-                  <div className="rounded-[24px] bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">Visible Lines</p><Calculator className="h-4 w-4 text-slate-400" /></div><p className="mt-3 text-[24px] font-semibold tracking-[-0.04em] text-slate-950">{scopedWorkspaceLines.length}</p><p className="mt-1 text-[11px] text-slate-500">In the current view</p></div>
-                  <div className="rounded-[24px] bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">Rooms</p><CalendarClock className="h-4 w-4 text-slate-400" /></div><p className="mt-3 text-[24px] font-semibold tracking-[-0.04em] text-slate-950">{rooms.length}</p><p className="mt-1 text-[11px] text-slate-500">Across the project</p></div>
-                  <div className="rounded-[24px] bg-[linear-gradient(180deg,#10284f_0%,#0a224d_100%)] p-4 text-white shadow-[0_18px_40px_rgba(10,34,77,0.18)]"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-300">Visible Total</p><Wallet className="h-4 w-4 text-blue-200" /></div><p className="mt-3 text-[24px] font-semibold tracking-[-0.05em]">{formatCurrencySafe(workspaceSubtotal)}</p><p className="mt-1 text-[11px] text-slate-300">{workspaceQuantity} total units in view</p></div>
+                <div className="rounded-[20px] border border-amber-200/80 bg-white/98 p-1 shadow-sm">
+                  <EstimateGrid
+                    lines={takeoffFilteredLines}
+                    rooms={rooms}
+                    categories={categories}
+                    roomNamesById={roomNamesById}
+                    pricingMode={pricingMode}
+                    viewMode="takeoff"
+                    organizeBy={takeoffGroupMode}
+                    laborMultiplier={summary?.conditionLaborMultiplier || 1}
+                    lineModifiersByLineId={lineModifiersByLineId}
+                    selectedLineId={selectedLineId}
+                    onSelectLine={setSelectedLineId}
+                    onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
+                    onDeleteLine={(lineId) => void deleteLine(lineId)}
+                  />
                 </div>
+              </section>
 
-              <EstimateGrid
-                lines={scopedWorkspaceLines}
+              <EstimateSidebar
+                mode="takeoff"
+                activeTab={takeoffSidebarTab}
+                onTabChange={setTakeoffSidebarTab}
                 rooms={rooms}
+                activeRoomId={activeRoomId}
+                activeRoomName={roomNamesById[activeRoomId] || 'Active room'}
+                activeRoomLineCount={activeRoomLines.length}
+                bundles={bundles}
                 categories={categories}
+                filteredCatalog={filteredCatalog}
+                catalogSearch={catalogSearch}
+                catalogCategory={catalogCategory}
+                selectedLine={selectedLine}
+                modifiers={modifiers}
+                activeLineModifiers={selectedLineId ? (lineModifiersByLineId[selectedLineId] || lineModifiers) : []}
+                jobConditions={jobConditions}
+                baseLaborRatePerHour={baseLaborRatePerHour}
+                effectiveLaborRatePerHour={takeoffEffectiveLaborRatePerHour}
+                projectLaborMultiplier={takeoffLaborMultiplier}
                 roomNamesById={roomNamesById}
-                pricingMode={pricingMode}
-                viewMode="takeoff"
-                organizeBy={workspaceOrganizeMode}
-                laborMultiplier={summary?.conditionLaborMultiplier || 1}
+                unresolvedLines={takeoffFilteredLines}
                 selectedLineId={selectedLineId}
-                onSelectLine={openLineEditor}
-                onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
-                onDeleteLine={(lineId) => void deleteLine(lineId)}
+                summary={estimateViewSummary}
+                currentScopeLabel={workspaceScopeMode === 'all' ? 'all rooms' : roomNamesById[activeRoomId] || 'active room'}
+                onCatalogSearch={setCatalogSearch}
+                onCatalogCategory={setCatalogCategory}
+                onAddCatalogItem={(item, qty, roomId) => void addCatalogItemQuick(item, qty, roomId)}
+                onAddBundle={(bundleId, roomId) => void applyBundle(bundleId, roomId)}
+                onAddManualLine={() => void addManualLine()}
+                onApplyLineModifier={(modifierId) => void applyModifier(modifierId)}
+                onApplyRoomModifier={(modifierId) => void applyModifierToRoom(modifierId)}
+                onRemoveLineModifier={(lineModifierId) => void removeModifier(lineModifierId)}
+                onPatchJobConditions={patchJobConditions}
+                onSelectLine={setSelectedLineId}
               />
             </div>
           </div>
         )}
 
         {activeTab === 'estimate' && (
-          <div className="space-y-2 min-w-0">
-              <div className="rounded-[22px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(248,250,252,0.98)_0%,rgba(255,255,255,0.98)_100%)] p-4 shadow-[0_16px_36px_rgba(15,23,42,0.08)]">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="ui-chip-soft">Estimate workspace</span>
-                      <span className="ui-chip-soft">{pricingMode.replaceAll('_', ' ')}</span>
-                      <span className="ui-chip-soft">{workspaceOrganizeMode === 'item' ? 'Organized by item' : 'Organized by room'}</span>
-                    </div>
-                    <h3 className="mt-2 text-[20px] font-semibold tracking-[-0.03em] text-slate-950">Pricing and rollup view</h3>
-                    <p className="mt-1 text-[12px] text-slate-600">Price the active room or switch to all rooms and roll the estimate up by product totals.</p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="rounded-full bg-white p-1 shadow-sm ring-1 ring-slate-200/80">
-                      <button onClick={() => setWorkspaceOrganizeMode('room')} className={`h-8 rounded-full px-3 text-[11px] font-semibold ${workspaceOrganizeMode === 'room' ? 'bg-[var(--brand)] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>By Room</button>
-                      <button onClick={() => { setWorkspaceOrganizeMode('item'); setWorkspaceScopeMode('all'); }} className={`h-8 rounded-full px-3 text-[11px] font-semibold ${workspaceOrganizeMode === 'item' ? 'bg-[var(--brand)] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>By Item</button>
-                    </div>
-                    <div className="rounded-full bg-white p-1 shadow-sm ring-1 ring-slate-200/80">
-                      <button onClick={() => setWorkspaceScopeMode('active')} className={`h-8 rounded-full px-3 text-[11px] font-semibold ${workspaceScopeMode === 'active' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Active Room</button>
-                      <button onClick={() => setWorkspaceScopeMode('all')} className={`h-8 rounded-full px-3 text-[11px] font-semibold ${workspaceScopeMode === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>All Rooms</button>
-                    </div>
-                  </div>
-                </div>
+          <div className="w-full h-[calc(100vh-56px)] flex flex-col bg-white p-0 m-0 min-w-0 max-w-full">
+            {/* Toolbar/Header */}
+            <div className="flex-none w-full min-w-0 max-w-full border-b border-slate-200 bg-white px-4 py-2 flex items-center gap-2" style={{height:56}}>
+              <span className="rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">Estimate</span>
+              <div className="flex flex-1 gap-2 items-center min-w-0">
+                <label className="sr-only" htmlFor="estimate-group-mode">Group by</label>
+                <select
+                  id="estimate-group-mode"
+                  value={estimateGroupMode}
+                  onChange={(event) => setEstimateGroupMode(event.target.value as WorkspaceGroupMode)}
+                  className="ui-input h-10 min-w-[140px] rounded-lg text-[14px] font-semibold border-2 border-blue-700 bg-white text-blue-900 shadow-sm focus:ring-2 focus:ring-blue-200"
+                >
+                  <option value="room">Group: Room</option>
+                  <option value="category">Group: Category</option>
+                </select>
+                <input
+                  value={estimateSearch}
+                  onChange={(event) => setEstimateSearch(event.target.value)}
+                  className="ui-input h-9 rounded-lg text-[13px] flex-1 min-w-[180px]"
+                  placeholder="Search item, SKU, room"
+                  aria-label="Search items"
+                />
               </div>
+              {selectedLine && (
+                <button onClick={() => setEstimateEditorOpen((value) => !value)} className="ml-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-white">
+                  {estimateEditorOpen ? 'Hide Edit' : 'Edit'}
+                </button>
+              )}
+            </div>
 
-              <div className="space-y-4 rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(248,250,252,0.96)_100%)] p-4 shadow-[0_18px_40px_rgba(15,23,42,0.05)] ring-1 ring-slate-200/70">
-                <div className="flex flex-wrap items-center gap-2 justify-between">
-                  <div>
-                    <p className="text-[13px] font-semibold tracking-[-0.02em] text-slate-900">Pricing workspace</p>
-                    <p className="mt-1 text-[12px] text-slate-500">Focused actions, room-based scope navigation, and a live view of the estimate.</p>
-                  </div>
+            {/* Summary Bar */}
+            <div className="flex-none w-full min-w-0 max-w-full border-b border-slate-200 bg-slate-50/92 px-4 py-1.5 flex items-center text-[11px] text-slate-700 shadow-sm">
+              <span className="font-semibold text-slate-900">Material:</span> {formatCurrencySafe(estimateViewSummary?.materialSubtotal || 0)}
+              <span className="font-semibold text-slate-900 ml-2">Labor:</span> {formatCurrencySafe(estimateViewSummary?.adjustedLaborSubtotal || estimateViewSummary?.laborSubtotal || 0)}
+              <span className="font-semibold text-slate-900 ml-2">Sell:</span> {formatCurrencySafe(estimateViewSummary?.baseBidTotal || 0)}
+              <span className="font-semibold text-slate-900 ml-2">Lines:</span> {estimateFilteredLines.length}
+            </div>
+
+            {/* Main Content Split */}
+            <div className="flex-1 min-h-0 min-w-0 max-w-full flex flex-row overflow-hidden" style={{height:'auto'}}>
+              {/* Main Table/Editor Area */}
+              <section className="flex-1 min-w-0 min-h-0 flex flex-col space-y-2 overflow-hidden">
+                <div className="flex-none w-full min-w-0 max-w-full border-b border-slate-200 bg-white/94 px-4 py-1.5 text-[11px] text-slate-700 shadow-sm">
                   <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={() => setCatalogOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,var(--brand-strong)_100%)] px-4 text-[11px] font-semibold text-white shadow-[0_12px_24px_rgba(11,61,145,0.22)] hover:brightness-[1.03]">
-                      <Sparkles className="h-3.5 w-3.5" /> Bulk Add Items
-                    </button>
-                    <button onClick={() => setBundleModalOpen(true)} className="ui-btn-secondary h-10 rounded-full px-4 text-[11px]">Add Bundle</button>
-                    <button onClick={() => setModifiersModalOpen(true)} disabled={!selectedLine} className="ui-btn-secondary h-10 rounded-full px-4 text-[11px] disabled:opacity-50">Edit Line</button>
-                    <button onClick={() => setTakeoffRoomsModalOpen(true)} className="ui-ghost-btn h-10 px-2 text-[11px]">Manage Rooms</button>
-                    <button onClick={() => setActiveTab('proposal')} className="ui-ghost-btn h-10 px-2 text-[11px] inline-flex items-center gap-1.5">Proposal <ArrowRight className="h-3.5 w-3.5" /></button>
+                    <span className="font-semibold text-slate-950">Selected:</span>
+                    <span className="min-w-0 flex-1 truncate">{selectedLine ? selectedLine.description : `${workspaceScopeMode === 'all' ? 'All visible rooms' : roomNamesById[activeRoomId] || 'Active room'} · pricing review`}</span>
+                    <span className="text-slate-500">{selectedLine ? (roomNamesById[selectedLine.roomId] || 'Unassigned room') : `${activeProjectLaborDrivers.length} labor drivers`}</span>
+                    <span className="text-slate-500">{selectedLine ? `${selectedLineModifierCount} conditions` : `${projectCostAdderDetails.length} cost adders`}</span>
+                    {selectedLine ? <button onClick={() => setEstimateEditorOpen((value) => !value)} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-semibold text-slate-700 transition hover:bg-white">{estimateEditorOpen ? 'Hide Edit' : 'Edit'}</button> : null}
+                    {selectedLine ? <button onClick={() => setSelectedLineId(null)} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] font-semibold text-slate-700 transition hover:bg-slate-50">Clear</button> : null}
                   </div>
                 </div>
 
-                <div className="rounded-[24px] bg-[linear-gradient(180deg,rgba(242,246,251,0.9)_0%,rgba(255,255,255,0.96)_100%)] p-3 ring-1 ring-slate-200/70">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[12px] font-semibold text-slate-900">Rooms</p>
-                      <p className="mt-1 text-[11px] text-slate-500">Switch rooms quickly, or flip to all rooms for project-wide pricing and totals.</p>
-                    </div>
-                    <div className="rounded-2xl bg-white px-3 py-2 text-right shadow-sm ring-1 ring-slate-200/70">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Visible Scope Total</p>
-                      <p className="mt-1 text-[16px] font-semibold tracking-[-0.03em] text-slate-900">{formatCurrencySafe(workspaceSubtotal)}</p>
-                    </div>
+                {selectedLine && estimateEditorOpen ? (
+                  <div className="flex-none w-full min-w-0 max-w-full">
+                    <EstimateSelectedLineEditor
+                      line={selectedLine}
+                      rooms={rooms}
+                      roomNamesById={roomNamesById}
+                      showMaterial={showMaterial}
+                      showLabor={showLabor}
+                      projectLaborMultiplier={estimateViewSummary?.conditionLaborMultiplier || 1}
+                      activeModifiers={selectedLineId ? (lineModifiersByLineId[selectedLineId] || lineModifiers) : []}
+                      onPatchLine={patchLineLocal}
+                      onPersistLine={(lineId) => void persistLine(lineId)}
+                      onResetLinePrice={(lineId) => void resetLineToCalculatedPrice(lineId)}
+                      onClearSelection={() => setSelectedLineId(null)}
+                    />
                   </div>
-                  <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
-                    {rooms.map((room) => {
-                      const active = room.id === activeRoomId;
-                      const metric = roomMetrics[room.id] || { count: 0, subtotal: 0 };
-                      return (
-                        <button
-                          key={room.id}
-                          onClick={() => setActiveRoomId(room.id)}
-                          title={`${metric.count} lines · ${formatCurrencySafe(metric.subtotal)}`}
-                          className={`shrink-0 rounded-[20px] px-3 py-2 text-left transition-all ${active ? 'bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)]' : 'bg-white/92 text-slate-700 shadow-sm ring-1 ring-slate-200/80 hover:-translate-y-0.5 hover:bg-white'}`}
-                        >
-                          <div className="min-w-[148px]">
-                            <div className={`text-[11px] font-semibold ${active ? 'text-white' : 'text-slate-800'}`}>{room.roomName}</div>
-                            <div className={`mt-1 flex items-center justify-between text-[10px] ${active ? 'text-blue-100' : 'text-slate-500'}`}>
-                              <span>{metric.count} lines</span>
-                              <span>{formatCurrencySafe(metric.subtotal)}</span>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
+                ) : null}
+
+                <div className="flex-1 min-h-0 min-w-0 max-w-full overflow-hidden">
+                  <div className="rounded-[14px] border border-slate-200/80 bg-white/98 p-0.5 shadow-sm h-full min-h-0 min-w-0 max-w-full overflow-hidden flex flex-col">
+                    <EstimateGrid
+                      lines={estimateFilteredLines}
+                      rooms={rooms}
+                      categories={categories}
+                      roomNamesById={roomNamesById}
+                      pricingMode={pricingMode}
+                      viewMode="estimate"
+                      organizeBy={estimateGroupMode}
+                      laborMultiplier={estimateViewSummary?.conditionLaborMultiplier || 1}
+                      lineModifiersByLineId={lineModifiersByLineId}
+                      compactMode={estimateCompactMode}
+                      selectedLineId={selectedLineId}
+                      onSelectLine={setSelectedLineId}
+                      onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
+                      onDeleteLine={(lineId) => void deleteLine(lineId)}
+                    />
                   </div>
                 </div>
+              </section>
 
-                <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
-                  <div className={`rounded-[24px] p-4 shadow-sm ring-1 ${showMaterial ? 'bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] ring-slate-200/80' : 'bg-slate-50 opacity-50 ring-slate-200/80'}`}><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">Material</p><Wallet className="h-4 w-4 text-slate-400" /></div><p className="mt-3 text-[26px] font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe(summary?.materialSubtotal)}</p><p className="mt-1 text-[11px] text-slate-500">Installed material value</p></div>
-                  <div className={`rounded-[24px] p-4 shadow-sm ring-1 ${showLabor ? 'bg-[linear-gradient(180deg,#ffffff_0%,#eef8f6_100%)] ring-emerald-200/80' : 'bg-slate-50 opacity-50 ring-slate-200/80'}`}><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">Labor</p><Hammer className="h-4 w-4 text-emerald-600" /></div><p className="mt-3 text-[26px] font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe(summary?.adjustedLaborSubtotal || summary?.laborSubtotal)}</p><p className="mt-1 text-[11px] text-slate-500">Adjusted by project conditions</p></div>
-                  <div className="rounded-[24px] bg-[linear-gradient(180deg,#ffffff_0%,#fff8eb_100%)] p-4 shadow-sm ring-1 ring-amber-200/80"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">Markup + Tax</p><Sparkles className="h-4 w-4 text-amber-600" /></div><p className="mt-3 text-[26px] font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe((summary?.taxAmount || 0) + (summary?.overheadAmount || 0) + (summary?.profitAmount || 0) + (summary?.burdenAmount || 0))}</p><p className="mt-1 text-[11px] text-slate-500">Burden, overhead, profit, and tax</p></div>
-                  <div className="rounded-[24px] bg-[linear-gradient(180deg,#ffffff_0%,#f4f8ff_100%)] p-4 shadow-sm ring-1 ring-blue-200/80"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">Total Hours</p><Clock3 className="h-4 w-4 text-blue-700" /></div><p className="mt-3 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">{formatNumberSafe(summary?.totalLaborHours || 0, 1)}</p><p className="mt-1 text-[11px] text-slate-500">Crew planning metric</p></div>
-                  <div className="rounded-[24px] bg-[linear-gradient(180deg,#ffffff_0%,#f7f8fb_100%)] p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">Duration</p><CalendarClock className="h-4 w-4 text-slate-500" /></div><p className="mt-3 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">{formatNumberSafe(summary?.durationDays || 0, 0)}</p><p className="mt-1 text-[11px] text-slate-500">Estimated field days</p></div>
-                  <div className="rounded-[24px] bg-[linear-gradient(180deg,#10284f_0%,#0a224d_100%)] p-4 text-white shadow-[0_18px_40px_rgba(10,34,77,0.2)]"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-300">Grand Total</p><Calculator className="h-4 w-4 text-blue-200" /></div><p className="mt-3 text-[30px] font-semibold tracking-[-0.05em]">{formatCurrencySafe(summary?.baseBidTotal)}</p><p className="mt-1 text-[11px] text-slate-300">Visible scope {formatCurrencySafe(workspaceSubtotal)}</p></div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                  <span className="rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80">{scopedWorkspaceLines.length} line items in the current view</span>
-                  <span className="rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80">{workspaceQuantity} total units visible</span>
-                  <span className="rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80">{selectedScopeCategories.length || categories.filter((category) => category !== 'all').length} scope categories active</span>
-                  {selectedLine ? <span className="rounded-full bg-[var(--brand-soft)] px-3 py-1.5 text-blue-800 shadow-sm ring-1 ring-blue-200/80">Line in review: {selectedLine.description}</span> : <span className="rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80">Click any row to open the line editor</span>}
-                  {(summary?.conditionAssumptions?.length || 0) > 0 ? <span className="rounded-full bg-[var(--accent-teal-soft)] px-3 py-1.5 text-teal-800 shadow-sm ring-1 ring-teal-200/70 inline-flex items-center gap-1"><Layers3 className="h-3.5 w-3.5" /> {summary?.conditionAssumptions?.length} active assumptions</span> : null}
-                </div>
+              {/* Utility/Sidebar Panel */}
+              <div className={`flex-none min-h-0 max-h-full min-w-0 ${estimateSidebarCollapsed ? 'w-[52px]' : 'w-[320px]'} transition-all duration-200`} style={{overflow:'hidden'}}>
+                <EstimateSidebar
+                  mode="estimate"
+                  collapsed={estimateSidebarCollapsed}
+                  onToggleCollapse={() => setEstimateSidebarCollapsed((value) => !value)}
+                  activeTab={estimateSidebarTab}
+                  onTabChange={setEstimateSidebarTab}
+                  rooms={rooms}
+                  activeRoomId={activeRoomId}
+                  activeRoomName={roomNamesById[activeRoomId] || 'Active room'}
+                  activeRoomLineCount={activeRoomLines.length}
+                  bundles={bundles}
+                  categories={categories}
+                  filteredCatalog={filteredCatalog}
+                  catalogSearch={catalogSearch}
+                  catalogCategory={catalogCategory}
+                  selectedLine={selectedLine}
+                  modifiers={modifiers}
+                  activeLineModifiers={selectedLineId ? (lineModifiersByLineId[selectedLineId] || lineModifiers) : []}
+                  jobConditions={jobConditions}
+                  baseLaborRatePerHour={baseLaborRatePerHour}
+                  effectiveLaborRatePerHour={estimateEffectiveLaborRatePerHour}
+                  projectLaborMultiplier={estimateLaborMultiplier}
+                  roomNamesById={roomNamesById}
+                  unresolvedLines={estimateFilteredLines}
+                  selectedLineId={selectedLineId}
+                  summary={estimateViewSummary}
+                  currentScopeLabel={workspaceScopeMode === 'all' ? 'all rooms' : roomNamesById[activeRoomId] || 'active room'}
+                  onCatalogSearch={setCatalogSearch}
+                  onCatalogCategory={setCatalogCategory}
+                  onAddCatalogItem={(item, qty, roomId) => void addCatalogItemQuick(item, qty, roomId)}
+                  onAddBundle={(bundleId, roomId) => void applyBundle(bundleId, roomId)}
+                  onAddManualLine={() => void addManualLine()}
+                  onApplyLineModifier={(modifierId) => void applyModifier(modifierId)}
+                  onApplyRoomModifier={(modifierId) => void applyModifierToRoom(modifierId)}
+                  onRemoveLineModifier={(lineModifierId) => void removeModifier(lineModifierId)}
+                  onPatchJobConditions={patchJobConditions}
+                  onSelectLine={setSelectedLineId}
+                />
               </div>
+            </div>
 
-              <EstimateGrid
-                lines={scopedWorkspaceLines}
-                rooms={rooms}
-                categories={categories}
-                roomNamesById={roomNamesById}
-                pricingMode={pricingMode}
-                viewMode="estimate"
-                organizeBy={workspaceOrganizeMode}
-                laborMultiplier={summary?.conditionLaborMultiplier || 1}
-                selectedLineId={selectedLineId}
-                onSelectLine={openLineEditor}
-                onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
-                onDeleteLine={(lineId) => void deleteLine(lineId)}
+            {/* Sticky Running Total Bar */}
+            <div className="flex-none w-full min-w-0 max-w-full">
+              <EstimateRunningTotalBar
+                summary={estimateViewSummary}
+                lines={estimateFilteredLines}
+                currentViewLabel={workspaceScopeMode === 'all' ? 'All Rooms In View' : roomNamesById[activeRoomId] || 'Active Room'}
+                currentViewTotal={estimateSubtotal}
               />
+            </div>
           </div>
         )}
 
         {activeTab === 'files' && (
-          <div className="space-y-4">
-            <section className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f6f9fd_55%,#eef4ff_100%)] p-5 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-3">
+            <section className="rounded-[22px] border border-slate-200/80 bg-white/94 p-3 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="max-w-3xl">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Project File Locker</p>
-                  <h3 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">Keep takeoff sheets, drawings, and scope docs attached to the job</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">Store source files with the estimate so imports, proposal drafting, and future revisions always have the same reference set.</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Project Files</p>
+                  <h3 className="mt-0.5 text-base font-semibold tracking-tight text-slate-950">Keep source files attached to the estimate</h3>
+                  <p className="mt-1 text-[11px] text-slate-600">Use this as the single reference set for imports, proposal support, and future revisions.</p>
                 </div>
-                <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-5 text-[11px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03]">
+                <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-4 text-[10px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03]">
                   <FileUp className="h-4 w-4" />
                   {fileUploading ? 'Uploading...' : 'Upload File'}
                   <input type="file" className="hidden" onChange={(e) => void uploadProjectFile(e.target.files?.[0])} disabled={fileUploading} />
                 </label>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-[22px] bg-white/90 p-4 shadow-sm ring-1 ring-slate-200/80">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Files Stored</p>
-                  <p className="mt-2 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">{projectFiles.length}</p>
-                  <p className="mt-1 text-[11px] text-slate-500">Project-level reference set</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-[16px] border border-slate-200 bg-slate-50/80 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Files Stored</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{projectFiles.length}</p>
                 </div>
-                <div className="rounded-[22px] bg-[var(--brand-soft)] p-4 shadow-sm ring-1 ring-blue-200/80">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-800">Latest Upload</p>
-                  <p className="mt-2 truncate text-sm font-semibold text-slate-950">{projectFiles[0]?.fileName || 'No uploads yet'}</p>
-                  <p className="mt-1 text-[11px] text-slate-600">{projectFiles[0] ? new Date(projectFiles[0].createdAt).toLocaleString() : 'Add your first source file to start building the project record.'}</p>
+                <div className="rounded-[16px] border border-blue-200 bg-[var(--brand-soft)] px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-blue-800">Latest Upload</p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-950">{projectFiles[0]?.fileName || 'No uploads yet'}</p>
                 </div>
-                <div className="rounded-[22px] bg-amber-50/80 p-4 shadow-sm ring-1 ring-amber-200/80">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-700">Suggested Use</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-950">Import source + proposal backup</p>
-                  <p className="mt-1 text-[11px] text-slate-600">Keep parser inputs, markups, and client-facing support files in one place.</p>
+                <div className="rounded-[16px] border border-amber-200 bg-amber-50/80 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-amber-700">Use</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-950">Import + proposal backup</p>
                 </div>
               </div>
             </section>
 
-            <section className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/90 shadow-sm">
+            <section className="overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/90 shadow-sm">
               {projectFiles.length === 0 ? (
-                <div className="px-6 py-10 text-center">
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+                <div className="px-6 py-9 text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
                     <Paperclip className="h-6 w-6" />
                   </div>
-                  <h4 className="mt-4 text-base font-semibold text-slate-900">No project files yet</h4>
-                  <p className="mt-2 text-sm text-slate-500">Upload takeoff sheets, reference drawings, scope docs, or proposal support material to keep this estimate self-contained.</p>
+                  <h4 className="mt-3 text-base font-semibold text-slate-900">No project files yet</h4>
+                  <p className="mt-2 text-sm text-slate-500">Upload takeoff sheets, reference drawings, scope docs, or proposal support material to keep the estimate self-contained.</p>
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
                   {projectFiles.map((file) => (
-                    <div key={file.id} className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50/70">
+                    <div key={file.id} className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50/70">
                       <div className="min-w-0 flex-1">
                         <div className="inline-flex max-w-full items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-medium text-slate-600">
                           <Paperclip className="h-3.5 w-3.5" />
                           <span className="truncate">{file.fileName}</span>
                         </div>
-                        <div className="mt-3 grid gap-2 text-[11px] text-slate-500 sm:grid-cols-3">
+                        <div className="mt-2 grid gap-2 text-[11px] text-slate-500 sm:grid-cols-3">
                           <span>Type: {file.mimeType}</span>
                           <span>Size: {formatKilobytesSafe(file.sizeBytes)}</span>
                           <span>Uploaded: {new Date(file.createdAt).toLocaleString()}</span>
@@ -1680,14 +2139,14 @@ export function ProjectWorkspace() {
                       <div className="flex items-center gap-2">
                         <a
                           href={api.getV1ProjectFileDownloadUrl(project.id, file.id)}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
                         >
                           <Download className="h-3.5 w-3.5" />
                           Download
                         </a>
                         <button
                           onClick={() => void removeProjectFile(file.id)}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3.5 text-[11px] font-semibold text-red-700 shadow-sm hover:bg-red-100"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 text-[10px] font-semibold text-red-700 shadow-sm hover:bg-red-100"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           Delete
@@ -1703,88 +2162,92 @@ export function ProjectWorkspace() {
 
         {activeTab === 'proposal' && (
           <div className="space-y-4">
-            <section className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f8fbff_60%,#eef4ff_100%)] p-5 shadow-sm">
+            <section className="overflow-hidden rounded-[24px] border border-slate-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f8fbff_60%,#eef4ff_100%)] p-4 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="max-w-3xl">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Proposal Studio</p>
-                  <h3 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">Draft, tune, and export the client-facing proposal from the live estimate</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">Use AI to jump-start wording, edit the final language directly, and preview the exact document before export.</p>
+                  <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">Client proposal synced to the live estimate</h3>
+                  <p className="mt-1 text-[12px] leading-5 text-slate-600">Edit wording, generate install review notes, and preview the export layout without disconnecting from estimate totals.</p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => void generateProposalDraft('scope_summary')}
-                    disabled={proposalDrafting !== null}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    {proposalDrafting === 'scope_summary' ? 'Generating Scope Summary...' : 'AI Scope Summary'}
-                  </button>
-                  <button
-                    onClick={() => void generateProposalDraft('default_short')}
-                    disabled={proposalDrafting !== null}
-                    className="inline-flex h-10 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-4 text-[11px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03] disabled:opacity-50"
-                  >
-                    {proposalDrafting === 'default_short' ? 'Drafting Short Proposal...' : 'Use Short Proposal Default'}
-                  </button>
-                  <button
-                    onClick={() => void generateProposalDraft('terms_and_conditions')}
-                    disabled={proposalDrafting !== null}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    {proposalDrafting === 'terms_and_conditions' ? 'Refreshing Terms...' : 'Refresh Terms Only'}
-                  </button>
-                  <button
-                    onClick={() => void generateInstallReviewEmail()}
-                    disabled={installReviewGenerating}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-blue-200 bg-blue-50 px-4 text-[11px] font-semibold text-blue-700 shadow-sm hover:bg-blue-100 disabled:opacity-50"
-                  >
-                    {installReviewGenerating ? 'Generating Install Review...' : 'Generate Install Review Email'}
-                  </button>
-                  <button
-                    onClick={() => void saveProposalWording()}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-4 text-[11px] font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100"
-                  >
-                    Save Proposal Edits
-                  </button>
-                  <button
-                    onClick={() => resetProposalDefaults('all')}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-[11px] font-semibold text-slate-600 shadow-sm hover:bg-slate-50"
-                  >
-                    Reset To Defaults
-                  </button>
-                  <button onClick={() => void printProposalDocument()} className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Print</button>
-                  <button onClick={exportProposal} className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-4 text-[11px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03]"><Download className="h-3.5 w-3.5" />Export PDF</button>
+                <div className="flex w-full max-w-full flex-col gap-2 lg:w-auto lg:items-end">
+                  <div className="flex max-w-full flex-wrap items-center gap-2 lg:justify-end">
+                    <button
+                      onClick={() => void generateProposalDraft('scope_summary')}
+                      disabled={proposalDrafting !== null}
+                      className="inline-flex h-8 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {proposalDrafting === 'scope_summary' ? 'Generating Scope Summary...' : 'AI Scope Summary'}
+                    </button>
+                    <button
+                      onClick={() => void generateProposalDraft('default_short')}
+                      disabled={proposalDrafting !== null}
+                      className="inline-flex h-8 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-3 text-[10px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03] disabled:opacity-50"
+                    >
+                      {proposalDrafting === 'default_short' ? 'Drafting Short Proposal...' : 'Use Short Proposal Default'}
+                    </button>
+                    <button
+                      onClick={() => void generateProposalDraft('terms_and_conditions')}
+                      disabled={proposalDrafting !== null}
+                      className="inline-flex h-8 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {proposalDrafting === 'terms_and_conditions' ? 'Refreshing Terms...' : 'Refresh Terms Only'}
+                    </button>
+                    <button
+                      onClick={() => void generateInstallReviewEmail()}
+                      disabled={installReviewGenerating}
+                      className="inline-flex h-8 items-center justify-center rounded-full border border-blue-200 bg-blue-50 px-3 text-[10px] font-semibold text-blue-700 shadow-sm hover:bg-blue-100 disabled:opacity-50"
+                    >
+                      {installReviewGenerating ? 'Generating Install Review...' : 'Generate Install Review Email'}
+                    </button>
+                  </div>
+                  <div className="flex max-w-full flex-wrap items-center gap-2 lg:justify-end">
+                    <button
+                      onClick={() => void saveProposalWording()}
+                      className="inline-flex h-8 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-3 text-[10px] font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100"
+                    >
+                      Save Proposal Edits
+                    </button>
+                    <button
+                      onClick={() => resetProposalDefaults('all')}
+                      className="inline-flex h-8 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-[10px] font-semibold text-slate-600 shadow-sm hover:bg-slate-50"
+                    >
+                      Reset To Defaults
+                    </button>
+                    <button onClick={() => void printProposalDocument()} className="inline-flex h-8 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Print</button>
+                    <button onClick={exportProposal} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-3 text-[10px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03]"><Download className="h-3.5 w-3.5" />Export PDF</button>
+                  </div>
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-[22px] bg-white/90 p-4 shadow-sm ring-1 ring-slate-200/80">
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-[18px] bg-white/90 p-3 shadow-sm ring-1 ring-slate-200/80">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Proposal Value</p>
-                  <p className="mt-2 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe(summary?.baseBidTotal)}</p>
-                  <p className="mt-1 text-[11px] text-slate-500">Bound to the current estimate output</p>
+                  <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe(currentProposalSummary?.baseBidTotal)}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">Live estimate total</p>
                 </div>
-                <div className="rounded-[22px] bg-[var(--brand-soft)] p-4 shadow-sm ring-1 ring-blue-200/80">
+                <div className="rounded-[18px] bg-[var(--brand-soft)] p-3 shadow-sm ring-1 ring-blue-200/80">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-800">Grouped Products</p>
-                  <p className="mt-2 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">{proposalGroupedItemCount}</p>
-                  <p className="mt-1 text-[11px] text-slate-600">Proposal scope combines matching products across all rooms.</p>
+                  <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{proposalGroupedItemCount}</p>
+                  <p className="mt-1 text-[11px] text-slate-600">Grouped from current estimate lines.</p>
                 </div>
-                <div className="rounded-[22px] bg-amber-50/80 p-4 shadow-sm ring-1 ring-amber-200/80">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-700">Draft Source</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-950">Defaults + AI assist</p>
-                  <p className="mt-1 text-[11px] text-slate-600">AI drafting is optional and never overwrites existing wording without confirmation.</p>
+                <div className="rounded-[18px] bg-amber-50/80 p-3 shadow-sm ring-1 ring-amber-200/80">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-700">Sync State</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-950">Proposal preview follows the live estimate</p>
+                  <p className="mt-1 text-[11px] text-slate-600">Export and print use the same preview layout shown below.</p>
                 </div>
               </div>
             </section>
 
             <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)] items-start">
               <section className="space-y-4">
-                <div className="rounded-[28px] border border-slate-200/80 bg-white/90 p-4 shadow-sm">
+                <div className="rounded-[24px] border border-slate-200/80 bg-white/90 p-3.5 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Internal Install Review</p>
                       <h4 className="mt-1 text-base font-semibold tracking-tight text-slate-900">Estimator to install handoff email</h4>
                       <p className="mt-1 text-[12px] text-slate-500">Generate an internal install review email from the live estimate, current project conditions, and grouped scope summary.</p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                       <button
                         onClick={() => void generateInstallReviewEmail()}
                         disabled={installReviewGenerating}
@@ -1802,29 +2265,29 @@ export function ProjectWorkspace() {
                     </div>
                   </div>
                   {installReviewDraft ? (
-                    <div className="mt-4 space-y-3">
-                      <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
+                    <div className="mt-3 space-y-3">
+                      <div className="rounded-[18px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
                         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Subject</p>
                         <p className="mt-1 text-sm font-semibold text-slate-900">{installReviewDraft.subject}</p>
                       </div>
                       <div className="grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
+                        <div className="rounded-[18px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Crew</p>
                           <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{installReviewDraft.summary.crewSize ?? 'TBD'}</p>
                         </div>
-                        <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Hours</p>
-                          <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{formatNumberSafe(installReviewDraft.summary.estimatedHours || 0, 1)}</p>
+                        <div className="rounded-[18px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Work Weeks</p>
+                          <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{formatNumberSafe(installReviewDraft.summary.estimatedWeeks || 0, 1)}</p>
                         </div>
-                        <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Days</p>
-                          <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{formatNumberSafe(installReviewDraft.summary.estimatedDays || 0, 1)}</p>
+                        <div className="rounded-[18px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Days On Site</p>
+                          <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{formatNumberSafe(installReviewDraft.summary.estimatedDays || 0, 0)}</p>
                         </div>
                       </div>
                       <textarea
                         readOnly
                         rows={20}
-                        className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-sm leading-6 text-slate-700 outline-none"
+                        className="w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-700 outline-none"
                         value={installReviewDraft.body}
                       />
                     </div>
@@ -1835,72 +2298,72 @@ export function ProjectWorkspace() {
                   )}
                 </div>
 
-                <div className="rounded-[28px] border border-slate-200/80 bg-white/90 p-4 shadow-sm">
-                  <div className="mb-4">
+                <div className="rounded-[24px] border border-slate-200/80 bg-white/90 p-3.5 shadow-sm">
+                  <div className="mb-3">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Editable Proposal Copy</p>
-                    <h4 className="mt-1 text-base font-semibold tracking-tight text-slate-900">Control the language block by block</h4>
+                    <h4 className="mt-1 text-base font-semibold tracking-tight text-slate-900">Edit only the blocks that need custom wording</h4>
                   </div>
 
                   <div className="space-y-3">
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
+                    <label className="block rounded-[18px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
                       <span className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-slate-700">Scope Summary / Intro</span>
                         <button type="button" onClick={() => resetProposalDefaults('intro')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
                       </span>
                       <textarea
                         rows={6}
-                        className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                        className="mt-2 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                         value={settings?.proposalIntro || ''}
                         onChange={(e) => settings && setSettings({ ...settings, proposalIntro: e.target.value })}
                       />
                     </label>
 
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
+                    <label className="block rounded-[18px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
                       <span className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-slate-700">Terms</span>
                         <button type="button" onClick={() => resetProposalDefaults('terms')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
                       </span>
                       <textarea
                         rows={5}
-                        className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                        className="mt-2 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                         value={settings?.proposalTerms || ''}
                         onChange={(e) => settings && setSettings({ ...settings, proposalTerms: e.target.value })}
                       />
                     </label>
 
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
+                    <label className="block rounded-[18px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
                       <span className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-slate-700">Exclusions</span>
                         <button type="button" onClick={() => resetProposalDefaults('exclusions')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
                       </span>
                       <textarea
                         rows={5}
-                        className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                        className="mt-2 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                         value={settings?.proposalExclusions || ''}
                         onChange={(e) => settings && setSettings({ ...settings, proposalExclusions: e.target.value })}
                       />
                     </label>
 
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
+                    <label className="block rounded-[18px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
                       <span className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-slate-700">Clarifications</span>
                         <button type="button" onClick={() => resetProposalDefaults('clarifications')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
                       </span>
                       <textarea
                         rows={5}
-                        className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                        className="mt-2 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                         value={settings?.proposalClarifications || ''}
                         onChange={(e) => settings && setSettings({ ...settings, proposalClarifications: e.target.value })}
                       />
                     </label>
 
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
+                    <label className="block rounded-[18px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
                       <span className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-slate-700">Acceptance Label</span>
                         <button type="button" onClick={() => resetProposalDefaults('acceptance')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
                       </span>
                       <input
-                        className="mt-2 h-10 w-full rounded-[16px] border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                        className="mt-2 h-9 w-full rounded-[14px] border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                         value={settings?.proposalAcceptanceLabel || ''}
                         onChange={(e) => settings && setSettings({ ...settings, proposalAcceptanceLabel: e.target.value })}
                       />
@@ -1910,7 +2373,7 @@ export function ProjectWorkspace() {
               </section>
 
               <div className="space-y-4">
-                <section className="rounded-[24px] border border-slate-200/80 bg-white/90 p-4 shadow-sm">
+                <section className="rounded-[20px] border border-slate-200/80 bg-white/90 p-3 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Live Preview</p>
@@ -1925,7 +2388,7 @@ export function ProjectWorkspace() {
                   settings={settings}
                   website={companyWebsite}
                   lines={lines}
-                  summary={summary}
+                  summary={currentProposalSummary}
                 />
               </div>
             </div>

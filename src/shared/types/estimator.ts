@@ -22,7 +22,7 @@ export interface ProjectJobConditions {
   unionWageMultiplier: number;
   prevailingWage: boolean;
   prevailingWageMultiplier: number;
-  laborRateBasis: 'union' | 'prevailing';
+  laborRateBasis: 'standard' | 'union' | 'prevailing';
   laborRateMultiplier: number;
   floors: number;
   floorMultiplierPerFloor: number;
@@ -202,6 +202,7 @@ export interface EstimateSummary {
   adjustedLaborSubtotal: number;
   totalLaborHours: number;
   durationDays: number;
+  durationWeeks: number;
   lineSubtotal: number;
   conditionAdjustmentAmount: number;
   conditionLaborMultiplier: number;
@@ -224,6 +225,7 @@ export interface InstallReviewEmailDraft {
     crewSize?: number | null;
     estimatedHours?: number | null;
     estimatedDays?: number | null;
+    estimatedWeeks?: number | null;
     materialTotal: number;
     laborTotal: number;
     proposalTotal: number;

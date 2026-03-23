@@ -270,7 +270,7 @@ export function Catalog() {
   const lastSynced = syncStatus?.lastSuccessAt || syncStatus?.lastAttemptAt;
 
   return (
-    <div className="ui-page space-y-3">
+    <div className="ui-page space-y-3 w-full max-w-full px-0">
       <section className="ui-surface p-3 space-y-3">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>

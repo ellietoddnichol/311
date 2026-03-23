@@ -12,6 +12,7 @@ interface ProposalDraftInput {
     adjustedLaborSubtotal: number;
     totalLaborHours: number;
     durationDays: number;
+    durationWeeks: number;
     lineSubtotal: number;
     conditionAdjustmentAmount: number;
     conditionLaborMultiplier: number;
@@ -82,7 +83,7 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
     `Address: ${input.project.address || ''}`,
     `Pricing Mode: ${input.project.pricingMode || 'labor_and_material'}`,
     `Base Bid Total: ${input.summary?.baseBidTotal || 0}`,
-    `Total Labor Hours: ${input.summary?.totalLaborHours || 0}`,
+    `Estimated Work Weeks: ${input.summary?.durationWeeks || 0}`,
     `Duration Days: ${input.summary?.durationDays || 0}`,
     assumptions.length ? `Project Assumptions: ${assumptions.join('; ')}` : 'Project Assumptions: none stated',
     `Current Proposal Intro: ${asText(input.settings?.proposalIntro)}`,

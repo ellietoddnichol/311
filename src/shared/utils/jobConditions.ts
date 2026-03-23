@@ -7,7 +7,7 @@ const DEFAULT_JOB_CONDITIONS: ProjectJobConditions = {
   installerCount: 1,
   locationTaxPercent: null,
   unionWage: false,
-  unionWageMultiplier: 0,
+  unionWageMultiplier: 0.18,
   prevailingWage: false,
   prevailingWageMultiplier: 0.15,
   laborRateBasis: 'union',
@@ -20,7 +20,7 @@ const DEFAULT_JOB_CONDITIONS: ProjectJobConditions = {
   restrictedAccess: false,
   restrictedAccessMultiplier: 0.1,
   afterHoursWork: false,
-  afterHoursMultiplier: 0,
+  afterHoursMultiplier: 0.12,
   nightWork: false,
   nightWorkLaborCostMultiplier: 0.18,
   nightWorkLaborMinutesMultiplier: 0.12,
@@ -87,13 +87,13 @@ export function normalizeProjectJobConditions(input?: Partial<ProjectJobConditio
     locationTaxPercent: locationTaxPercent !== null && Number.isFinite(locationTaxPercent)
       ? locationTaxPercent
       : null,
-    unionWageMultiplier: 0,
+    unionWageMultiplier: numeric(merged.unionWageMultiplier, DEFAULT_JOB_CONDITIONS.unionWageMultiplier),
     prevailingWageMultiplier: numeric(merged.prevailingWageMultiplier, DEFAULT_JOB_CONDITIONS.prevailingWageMultiplier),
     floorMultiplierPerFloor: numeric(merged.floorMultiplierPerFloor, DEFAULT_JOB_CONDITIONS.floorMultiplierPerFloor),
     occupiedBuildingMultiplier: numeric(merged.occupiedBuildingMultiplier, DEFAULT_JOB_CONDITIONS.occupiedBuildingMultiplier),
     restrictedAccessMultiplier: numeric(merged.restrictedAccessMultiplier, DEFAULT_JOB_CONDITIONS.restrictedAccessMultiplier),
     afterHoursWork: false,
-    afterHoursMultiplier: 0,
+    afterHoursMultiplier: numeric(merged.afterHoursMultiplier, DEFAULT_JOB_CONDITIONS.afterHoursMultiplier),
     nightWork,
     nightWorkLaborCostMultiplier: numeric(
       (merged as Partial<ProjectJobConditions>).nightWorkLaborCostMultiplier ?? merged.afterHoursMultiplier,

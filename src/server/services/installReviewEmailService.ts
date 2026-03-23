@@ -2,6 +2,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { EstimateSummary, InstallReviewEmailDraft, ProjectRecord, TakeoffLineRecord } from '../../shared/types/estimator.ts';
 import { buildProposalLineItems } from '../../shared/utils/proposalDocument.ts';
 import { buildProjectConditionSummaryLines, getProjectConditions } from '../../shared/utils/jobConditions.ts';
+import { formatWorkWeeksLabel } from '../../shared/utils/workDuration.ts';
 import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat.ts';
 
 interface InstallReviewInsights {
@@ -134,7 +135,7 @@ async function generateGeminiInsights(input: InstallReviewEmailInput): Promise<I
 		`Location: ${summarizeLocation(input.project)}`,
 		`Bid Due Date: ${input.project.bidDate || input.project.proposalDate || input.project.dueDate || 'Not provided'}`,
 		`Crew Size: ${input.project.jobConditions.installerCount}`,
-		`Estimated Install Hours: ${formatNumberSafe(input.summary.totalLaborHours || 0, 1)}`,
+		`Estimated Work Weeks: ${formatWorkWeeksLabel(input.summary.durationWeeks || 0)}`,
 		`Estimated Days On Site: ${formatNumberSafe(input.summary.durationDays || 0, 1)}`,
 		`Material Total: ${formatCurrencySafe(input.summary.materialSubtotal || 0)}`,
 		`Labor Total: ${formatCurrencySafe(input.summary.adjustedLaborSubtotal || input.summary.laborSubtotal || 0)}`,
@@ -200,7 +201,7 @@ export async function generateInstallReviewEmailDraft(input: InstallReviewEmailI
 		`Total Estimated Price: ${formatCurrencySafe(input.summary.baseBidTotal || 0)}`,
 	];
 	const laborScheduleLines = [
-		`Total estimated install hours: ${formatNumberSafe(input.summary.totalLaborHours || 0, 1)}`,
+		`Estimated install duration: ${formatWorkWeeksLabel(input.summary.durationWeeks || 0)}`,
 		`Estimated days on site: ${formatNumberSafe(input.summary.durationDays || 0, 1)}`,
 		`Suggested crew size: ${crewSize ?? 'TBD'}`,
 		`Timing assumptions: ${input.project.bidDate || input.project.proposalDate || input.project.dueDate || 'Verify schedule window with field conditions.'}`,
@@ -209,7 +210,7 @@ export async function generateInstallReviewEmailDraft(input: InstallReviewEmailI
 		`Project Name: ${input.project.projectName}`,
 		`Location: ${location}`,
 		`Expected Project Timing / Start Date: ${input.project.bidDate || input.project.proposalDate || input.project.dueDate || 'Not provided'}`,
-		`Estimated Install Duration: ${formatNumberSafe(input.summary.durationDays || 0, 1)} day${Number(input.summary.durationDays || 0) === 1 ? '' : 's'}`,
+		`Estimated Install Duration: ${formatWorkWeeksLabel(input.summary.durationWeeks || 0)}`,
 		`Suggested Crew Size: ${crewSize ?? 'TBD'}`,
 	];
 	const projectModifierLines = [
@@ -236,6 +237,7 @@ export async function generateInstallReviewEmailDraft(input: InstallReviewEmailI
 			crewSize,
 			estimatedHours: Number(input.summary.totalLaborHours || 0),
 			estimatedDays: Number(input.summary.durationDays || 0),
+			estimatedWeeks: Number(input.summary.durationWeeks || 0),
 			materialTotal: Number(input.summary.materialSubtotal || 0),
 			laborTotal: Number(input.summary.adjustedLaborSubtotal || input.summary.laborSubtotal || 0),
 			proposalTotal: Number(input.summary.baseBidTotal || 0),

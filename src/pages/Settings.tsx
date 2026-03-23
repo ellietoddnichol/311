@@ -111,7 +111,7 @@ export function Settings() {
   if (!settings) return <div className="p-6 text-sm text-slate-500">Loading settings...</div>;
 
   return (
-    <div className="ui-page-narrow space-y-4">
+    <div className="ui-page-narrow space-y-4 w-full max-w-full px-0">
       <div className="ui-surface p-4 md:p-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="ui-label">System Configuration</p>

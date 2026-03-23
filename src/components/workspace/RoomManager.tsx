@@ -22,23 +22,23 @@ export function RoomManager({
   onDeleteRoom,
 }: Props) {
   return (
-    <section className="bg-gradient-to-b from-white to-slate-50/30 border border-slate-200 rounded-xl p-2 h-[calc(100vh-170px)] flex flex-col shadow-sm">
-      <div className="flex items-center justify-between mb-2">
+    <section className="flex h-[calc(100vh-150px)] flex-col rounded-[18px] border border-slate-200 bg-gradient-to-b from-white to-slate-50/30 p-1.5 shadow-sm">
+      <div className="mb-1.5 flex items-center justify-between px-1">
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Rooms / Areas</h3>
         <span className="text-[10px] text-slate-400">{rooms.length}</span>
       </div>
 
-      <div className="space-y-1 mb-2 overflow-y-auto pr-0.5 flex-1 min-h-0">
+      <div className="mb-1.5 min-h-0 flex-1 space-y-1 overflow-y-auto pr-0.5">
         {rooms.map((room) => (
           <div
             key={room.id}
-            className={`group rounded-lg border transition-colors ${
+            className={`group rounded-[12px] border transition-colors ${
               activeRoomId === room.id
                 ? 'border-blue-300 bg-blue-50/70 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.08)]'
                 : 'border-slate-200/80 bg-white hover:border-slate-300'
             }`}
           >
-            <div className="h-8 px-2 flex items-center justify-between gap-1">
+            <div className="flex h-8 items-center justify-between gap-1 px-2">
               <button onClick={() => onSelectRoom(room.id)} className={`text-[12px] text-left truncate flex-1 pr-1 ${activeRoomId === room.id ? 'font-semibold text-blue-800' : 'font-medium text-slate-700'}`} title={room.roomName}>
                 {room.roomName}
               </button>
@@ -52,11 +52,11 @@ export function RoomManager({
         ))}
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white/90 p-2">
-        <button onClick={onOpenCreateRoom} className="h-8 w-full rounded-md bg-blue-700 text-white text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-blue-800 shadow-sm">
+      <div className="rounded-[14px] border border-slate-200 bg-white/90 p-2">
+        <button onClick={onOpenCreateRoom} className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-[10px] bg-blue-700 text-[11px] font-semibold text-white shadow-sm hover:bg-blue-800">
           <Plus className="w-3.5 h-3.5" /> Add Room
         </button>
-        <p className="mt-2 text-[10px] leading-4 text-slate-500">Name the room first, then optionally drop in a starter line item during creation.</p>
+        <p className="mt-1.5 text-[10px] leading-4 text-slate-500">Create the room first, then add starter lines from Takeoff or Estimate.</p>
       </div>
     </section>
   );
