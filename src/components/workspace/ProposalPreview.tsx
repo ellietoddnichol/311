@@ -110,63 +110,47 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
       <section className="mt-10 proposal-section">
         <h2 className={sectionHeadingClass}>Scope &amp; pricing</h2>
         <p className="mt-4 max-w-[42rem] text-[13px] leading-relaxed text-slate-500">
-          Each line lists a description, quantity, and{' '}
-          {showMaterial && showLabor ? 'material and labor amounts' : showLabor ? 'labor amount' : 'material amount'}.
+          Quantities and descriptions are listed by scope. Dollar amounts appear only as scope rollups and in the investment summary — not per line item.
         </p>
-        <div className="mt-8 space-y-12">
+        <div className="mt-8 space-y-10">
           {proposalSections.map((section) => (
             <div key={section.section} className="proposal-section proposal-avoid-break">
-              <h3 className="border-b border-slate-300 pb-2 text-[15px] font-semibold tracking-tight text-slate-950">{section.section}</h3>
-              <div className="divide-y divide-slate-100">
+              <div className="flex flex-col gap-1 border-b border-slate-300 pb-2 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+                <h3 className="text-[15px] font-semibold tracking-tight text-slate-950">{section.section}</h3>
+                <p className="text-[13px] font-semibold tabular-nums text-slate-800 sm:text-right">
+                  Scope total{' '}
+                  <span className="text-[16px] text-slate-950">{formatCurrencySafe(section.sectionTotal)}</span>
+                </p>
+              </div>
+              <div className="mt-1 text-[13px]">
+                <div className="mt-3 grid grid-cols-[1fr_auto] gap-x-6 border-b border-slate-100 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  <span>Item</span>
+                  <span className="text-right">Qty</span>
+                </div>
                 {section.items.map((item) => (
-                  <div key={item.id} className="proposal-line-item py-4 first:pt-3">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-8">
-                      <p className="min-w-0 flex-1 text-[14px] leading-relaxed text-slate-800">{item.description}</p>
-                      <div className="flex w-full shrink-0 flex-col gap-1.5 text-[13px] tabular-nums sm:w-auto sm:min-w-[11.5rem] sm:text-right">
-                        <p>
-                          <span className="text-slate-400">Qty </span>
-                          <span className="font-medium text-slate-800">
-                            {formatNumberSafe(item.quantity, 2)} {item.unit}
-                          </span>
-                        </p>
-                        {showMaterial ? (
-                          <p className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 sm:flex-col sm:items-end sm:gap-1.5 sm:text-right">
-                            <span className="text-slate-500">Material</span>
-                            <span className="font-medium text-slate-900 tabular-nums">{formatCurrencySafe(item.materialCost)}</span>
-                          </p>
-                        ) : null}
-                        {showLabor ? (
-                          <p className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 sm:flex-col sm:items-end sm:gap-1.5 sm:text-right">
-                            <span className="text-slate-500">Labor</span>
-                            <span className="font-medium text-slate-900 tabular-nums">{formatCurrencySafe(item.laborCost)}</span>
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
+                  <div key={item.id} className="proposal-line-item grid grid-cols-[1fr_auto] gap-x-6 border-b border-slate-100 py-2.5">
+                    <p className="min-w-0 pr-2 leading-snug text-slate-800">{item.description}</p>
+                    <p className="shrink-0 self-start text-right tabular-nums text-slate-700">
+                      <span className="font-medium text-slate-900">{formatNumberSafe(item.quantity, 2)}</span>
+                      <span className="text-slate-500"> {item.unit}</span>
+                    </p>
                   </div>
                 ))}
               </div>
-              <div className="mt-5 border-t border-slate-200 pt-4">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">Subtotal — {section.section}</p>
-                <div className="mt-3 max-w-sm space-y-1.5 text-[13px] text-slate-700 sm:ml-auto">
-                  {showMaterial ? (
-                    <div className="flex justify-between gap-8 border-b border-transparent pb-1">
-                      <span className="text-slate-500">Material</span>
-                      <span className="tabular-nums font-medium text-slate-900">{formatCurrencySafe(section.totalMaterialCost)}</span>
-                    </div>
+              {(showMaterial && section.totalMaterialCost > 0) || (showLabor && section.totalLaborCost > 0) ? (
+                <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 border-t border-slate-200 pt-3 text-[11px] text-slate-500">
+                  {showMaterial && section.totalMaterialCost > 0 ? (
+                    <span>
+                      Scope material: <span className="font-medium tabular-nums text-slate-800">{formatCurrencySafe(section.totalMaterialCost)}</span>
+                    </span>
                   ) : null}
-                  {showLabor ? (
-                    <div className="flex justify-between gap-8 border-b border-transparent pb-1">
-                      <span className="text-slate-500">Labor</span>
-                      <span className="tabular-nums font-medium text-slate-900">{formatCurrencySafe(section.totalLaborCost)}</span>
-                    </div>
+                  {showLabor && section.totalLaborCost > 0 ? (
+                    <span>
+                      Scope labor: <span className="font-medium tabular-nums text-slate-800">{formatCurrencySafe(section.totalLaborCost)}</span>
+                    </span>
                   ) : null}
-                  <div className="flex justify-between gap-8 border-t border-slate-200 pt-2 text-[14px] font-semibold text-slate-950">
-                    <span>Section total</span>
-                    <span className="tabular-nums">{formatCurrencySafe(section.sectionTotal)}</span>
-                  </div>
                 </div>
-              </div>
+              ) : null}
             </div>
           ))}
         </div>

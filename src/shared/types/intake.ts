@@ -97,6 +97,8 @@ export interface ExtractedPdfDocument {
   pages: ExtractedPdfPage[];
   documentText: string;
   extractionWarnings: string[];
+  /** Populated when using pdf.js-based extraction (e.g. pdf-parse). */
+  pdfFileInfo?: Record<string, unknown>;
 }
 
 export interface PdfExtractionProvider {
