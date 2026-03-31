@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import type { IntakeProjectAssumption, IntakeProposalAssist } from '../../shared/types/intake.ts';
+import { isPlausibleProjectTitle } from '../../shared/utils/intakeTextGuards.ts';
 import { intakeGeminiResponseSchema, INTAKE_GEMINI_MODEL } from './structuredExtractionSchemas.ts';
 
 export interface GeminiExtractionLine {
@@ -91,8 +92,10 @@ function sanitizeResult(value: any): GeminiExtractionResult {
 
   const pricingBasis = asText(value?.pricingBasis).toLowerCase();
 
+  const rawProjectName = asText(value?.projectName);
+
   return {
-    projectName: asText(value?.projectName),
+    projectName: isPlausibleProjectTitle(rawProjectName) ? rawProjectName : '',
     projectNumber: asText(value?.projectNumber),
     bidPackage: asText(value?.bidPackage),
     client: asText(value?.client),
@@ -152,6 +155,7 @@ export async function extractIntakeFromGemini(input: ExtractInput): Promise<Gemi
     'Extract project metadata and takeoff lines into strict JSON.',
     'Before emitting parsedLines, classify each source row or chunk as one of: project_metadata, header_row, section_header, actual_scope_line, or ignore.',
     'Only actual_scope_line content may appear in parsedLines.',
+    'Merge sentence fragments into a single parsedLines row per distinct scope or schedule line; do not emit one row per short phrase.',
     'Project metadata rows must populate project fields and must never appear in parsedLines.',
     'Header rows such as room/category/item/description/quantity/unit/labor/material/notes define structure only and must never appear in parsedLines.',
     'Section headers such as Toilet Accessories, Visual Display Boards, or Wall Protection may inform category context but must never appear in parsedLines unless a real scoped item is present.',

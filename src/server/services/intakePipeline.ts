@@ -19,7 +19,12 @@ import { detectSpreadsheetHeaderRow, extractSpreadsheetPreludeText } from './spr
 import { INTAKE_GEMINI_MODEL } from './structuredExtractionSchemas.ts';
 import { classifyIntakeSourceType, deriveDocumentSourceKind } from './fileClassifierService.ts';
 import { extractDocumentWithGemini, extractSpreadsheetWithGemini } from './geminiExtractionService.ts';
-import { mergeResolvedMetadata as mergeResolvedMetadataFromService, extractMetadataFromText as extractMetadataFromTextFromService, normalizeDateValue as normalizeDateValueFromService } from './metadataExtractorService.ts';
+import { coerceSafeProjectName, isPlausibleProjectTitle } from '../../shared/utils/intakeTextGuards.ts';
+import {
+  mergeResolvedMetadata as mergeResolvedMetadataFromService,
+  extractMetadataFromText as extractMetadataFromTextFromService,
+  normalizeDateValue as normalizeDateValueFromService,
+} from './metadataExtractorService.ts';
 import { buildRoomCandidates as buildRoomCandidatesFromService, toReviewLines as toReviewLinesFromService } from './matchPreparationService.ts';
 import { prepareCatalogMatch } from './catalogMatchService.ts';
 import { classifyParsedChunk as classifyParsedChunkFromService, normalizeExtractedCategory as normalizeExtractedCategoryFromService, shouldKeepNormalizedLine as shouldKeepNormalizedLineFromService } from './rowClassifierService.ts';
@@ -208,8 +213,9 @@ function extractMetadataFromCells(cells: string[]): Partial<IntakeProjectMetadat
   const compactCells = cells.map((cell) => asText(cell)).filter(Boolean);
   const assignValue = (label: string, value: string) => {
     if (!value) return;
-    if (/^(project|project name|job|job name)$/.test(label)) output.projectName = output.projectName || value;
-    else if (/^(project number|project no|job number|bid package|package|pkg)$/.test(label)) output.projectNumber = output.projectNumber || value;
+    if (/^(project|project name|job|job name)$/.test(label)) {
+      if (!output.projectName && isPlausibleProjectTitle(value)) output.projectName = value;
+    } else if (/^(project number|project no|job number|bid package|package|pkg)$/.test(label)) output.projectNumber = output.projectNumber || value;
     else if (/^(client|owner)$/.test(label)) output.client = output.client || value;
     else if (/^(gc|general contractor)$/.test(label)) output.generalContractor = output.generalContractor || value;
     else if (/^(client gc|client general contractor|client contractor|client owner gc)$/.test(label)) {
@@ -234,7 +240,10 @@ function extractMetadataFromCells(cells: string[]): Partial<IntakeProjectMetadat
   const lineText = compactCells.join(' ');
   if (!hasProjectMetadataValue(output)) {
     output = mergeMetadataHint(output, {
-      projectName: detectLabeledValue([lineText], [/^project(?:\s+name)?\s*[:\-]?/i, /^job(?:\s+name)?\s*[:\-]?/i]),
+      projectName: (() => {
+        const candidate = detectLabeledValue([lineText], [/^project(?:\s+name)?\s*[:\-]?/i, /^job(?:\s+name)?\s*[:\-]?/i]);
+        return candidate && isPlausibleProjectTitle(candidate) ? candidate : '';
+      })(),
       projectNumber: detectLabeledValue([lineText], [/^project\s*(?:#|number)\s*[:\-]?/i, /^job\s*(?:#|number)\s*[:\-]?/i, /^bid\s*(?:package|pkg)\s*[:\-]?/i]),
       client: detectLabeledValue([lineText], [/^client\s*[:\-]?/i, /^owner\s*[:\-]?/i]),
       generalContractor: detectLabeledValue([lineText], [/^gc\s*[:\-]?/i, /^general contractor\s*[:\-]?/i]),
@@ -486,7 +495,8 @@ function extractTextFromPdfBuffer(buffer: Buffer): string {
     .map((token) => token.slice(1, -1))
     .map((token) => token.replace(/\\[rn]/g, ' '))
     .join('\n');
-  return extracted || latin;
+  // Never return raw `latin` (entire file as Latin-1) — that becomes mojibake "project names" and fake lines.
+  return extracted.trim();
 }
 
 function decodeDocumentText(dataBase64: string, fileName: string, mimeType: string): string {
@@ -589,7 +599,7 @@ function parseSpreadsheetRows(rows: Array<Array<string | number | boolean | null
     const classification = classifyParsedChunk(row, index);
     return classification.kind === 'project_metadata' ? mergeMetadataHint(metadata, classification.metadata) : metadata;
   }, { sourceFiles: [], assumptions: [], pricingBasis: '' });
-  const preludeMetadata = mergeMetadataHint(extractMetadataFromText(preludeText), classifiedMetadata);
+  const preludeMetadata = mergeMetadataHint(extractMetadataFromTextFromService(preludeText), classifiedMetadata);
 
   if (sourceKind === 'spreadsheet-unstructured') return null;
 
@@ -751,41 +761,9 @@ function detectLabeledValue(lines: string[], patterns: RegExp[]): string {
   return '';
 }
 
-function detectProjectName(lines: string[]): string {
-  const labeled = detectLabeledValue(lines, [/^project(?:\s+name)?\s*[:\-]?/i, /^job(?:\s+name)?\s*[:\-]?/i]);
-  if (labeled) return labeled;
-
-  return (
-    lines.slice(0, 18).find((line) => {
-      const text = asText(line);
-      if (text.length < 6 || text.length > 96) return false;
-      if (/^(client|gc|general contractor|address|location|site|date|bid date|project number|job number|scope of work|proposal|invitation to bid|section|division)\b/i.test(text)) return false;
-      if (looksLikeDate(text) || /^\d+$/.test(text)) return false;
-      return tokenize(text).length >= 2;
-    }) || ''
-  );
-}
-
-function extractMetadataFromText(text: string): Partial<IntakeProjectMetadata> {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 120);
-  return {
-    projectName: detectProjectName(lines),
-    projectNumber: detectLabeledValue(lines, [/^project\s*(?:#|number)\s*[:\-]?/i, /^job\s*(?:#|number)\s*[:\-]?/i, /^bid\s*(?:package|pkg)\s*[:\-]?/i]),
-    client: detectLabeledValue(lines, [/^client\s*[:\-]?/i, /^owner\s*[:\-]?/i]),
-    generalContractor: detectLabeledValue(lines, [/^gc\s*[:\-]?/i, /^general contractor\s*[:\-]?/i]),
-    address: detectAddress(lines),
-    bidDate: normalizeDate(detectLabeledValue(lines, [/^bid\s*date\s*[:\-]?/i, /^proposal\s*date\s*[:\-]?/i, /^due\s*date\s*[:\-]?/i, /^date\s*[:\-]?/i])),
-    proposalDate: normalizeDate(detectLabeledValue(lines, [/^proposal\s*date\s*[:\-]?/i, /^date\s*[:\-]?/i])),
-    estimator: detectLabeledValue(lines, [/^estimator\s*[:\-]?/i, /^prepared by\s*[:\-]?/i]),
-    sourceFiles: [],
-    assumptions: extractAssumptionsFromText(text),
-    pricingBasis: inferPricingBasis(text, []),
-  };
-}
-
 function detectScopeLinesFromText(text: string, sourceReference: string): NormalizedIntakeLine[] {
   const rawLines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 2).slice(0, 240);
-  const knownMetadata = extractMetadataFromText(text);
+  const knownMetadata = extractMetadataFromTextFromService(text);
   let currentSection = '';
 
   return rawLines.flatMap((line, index) => {
@@ -838,7 +816,7 @@ function filterSpreadsheetGeminiWarnings(warnings: string[]): string[] {
 }
 
 function mergeMetadata(primary: Partial<IntakeProjectMetadata>, secondary: Partial<IntakeProjectMetadata>, sources: string[]): IntakeProjectMetadata {
-  const projectName = primary.projectName || secondary.projectName || 'Imported Project';
+  const projectName = coerceSafeProjectName(primary.projectName || secondary.projectName || '', 'Imported Project');
   const projectNumber = primary.projectNumber || secondary.projectNumber || '';
   const client = primary.client || secondary.client || '';
   const generalContractor = primary.generalContractor || secondary.generalContractor || '';

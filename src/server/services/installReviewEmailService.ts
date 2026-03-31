@@ -3,6 +3,7 @@ import { EstimateSummary, InstallReviewEmailDraft, ProjectRecord, TakeoffLineRec
 import { buildProposalLineItems } from '../../shared/utils/proposalDocument.ts';
 import { buildProjectConditionSummaryLines, getProjectConditions } from '../../shared/utils/jobConditions.ts';
 import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat.ts';
+import { isPlausibleProposalScopeSnippet } from '../../shared/utils/intakeTextGuards.ts';
 import { buildGeminiSummaryPrompt } from './geminiSummaryPrompt.ts';
 
 interface InstallReviewInsights {
@@ -25,7 +26,7 @@ function summarizeLocation(project: ProjectRecord): string {
 }
 
 function buildScopeLines(lines: TakeoffLineRecord[]): string[] {
-	const grouped = buildProposalLineItems(lines);
+	const grouped = buildProposalLineItems(lines).filter((line) => isPlausibleProposalScopeSnippet(line.description || ''));
 	const visible = grouped.slice(0, 20).map((line) => {
 		const quantity = Number.isInteger(line.quantity) ? String(line.quantity) : formatNumberSafe(line.quantity, 2);
 		return `${line.description}: ${quantity} ${line.unit}`;
@@ -132,7 +133,9 @@ async function generateGeminiInsights(input: InstallReviewEmailInput): Promise<I
 		totalLaborHours: formatNumberSafe(input.summary.totalLaborHours || 0, 1),
 		totalDays: formatNumberSafe(input.summary.durationDays || 0, 1),
 		materialTotal: formatCurrencySafe(input.summary.materialSubtotal || 0),
-		laborTotal: formatCurrencySafe(input.summary.adjustedLaborSubtotal || input.summary.laborSubtotal || 0),
+		laborTotal: formatCurrencySafe(
+			input.summary.laborLoadedSubtotal ?? input.summary.adjustedLaborSubtotal ?? input.summary.laborSubtotal ?? 0
+		),
 		proposalTotal: formatCurrencySafe(input.summary.baseBidTotal || 0),
 		assumptions: buildProjectConditionSummaryLines(input.project.jobConditions),
 		scopeLines: buildScopeLines(input.lines),
@@ -187,7 +190,7 @@ export async function generateInstallReviewEmailDraft(input: InstallReviewEmailI
 	const insights = (await generateGeminiInsights(input)) || buildFallbackInsights(input);
 	const pricingLines = [
 		`Material Cost: ${formatCurrencySafe(input.summary.materialSubtotal || 0)}`,
-		`Labor Cost: ${formatCurrencySafe(input.summary.adjustedLaborSubtotal || input.summary.laborSubtotal || 0)}`,
+		`Labor Cost: ${formatCurrencySafe(input.summary.laborLoadedSubtotal ?? input.summary.adjustedLaborSubtotal ?? input.summary.laborSubtotal ?? 0)}`,
 		`Total Estimated Price: ${formatCurrencySafe(input.summary.baseBidTotal || 0)}`,
 	];
 	const laborScheduleLines = [
@@ -229,7 +232,7 @@ export async function generateInstallReviewEmailDraft(input: InstallReviewEmailI
 			estimatedHours: Number(input.summary.totalLaborHours || 0),
 			estimatedDays: Number(input.summary.durationDays || 0),
 			materialTotal: Number(input.summary.materialSubtotal || 0),
-			laborTotal: Number(input.summary.adjustedLaborSubtotal || input.summary.laborSubtotal || 0),
+			laborTotal: Number(input.summary.laborLoadedSubtotal ?? input.summary.adjustedLaborSubtotal ?? input.summary.laborSubtotal ?? 0),
 			proposalTotal: Number(input.summary.baseBidTotal || 0),
 			projectConditions: projectModifierLines,
 		},

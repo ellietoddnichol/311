@@ -9,12 +9,16 @@ test('stripIntakeControlCharacters removes C0 controls but keeps newlines', () =
 
 test('isPlausibleProjectTitle rejects PDF mojibake-like strings', () => {
   assert.equal(isPlausibleProjectTitle('F¼Æ"%1Ð½zÎÔ¹ùÝkfWp·+P$nWà`Ó'), false);
-  assert.equal(isPlausibleProjectTitle('\x00\x01\x02garbage'), false);
+  // Fewer “suspicious” punctuation but same Latin-1 fraction mojibake — still reject
+  assert.equal(isPlausibleProjectTitle('F¼Æ"%1Ð½zÎÔ¹ùÝkfWp·+P$nWàÓ'), false);
+  // Control chars strip away; remaining symbols must not become a fake “title”
+  assert.equal(isPlausibleProjectTitle('\u0000\u009F!!##$$%%'), false);
 });
 
 test('isPlausibleProjectTitle accepts normal job names', () => {
   assert.equal(isPlausibleProjectTitle('Civic Center Refresh'), true);
   assert.equal(isPlausibleProjectTitle('FedEx Sort KCMO'), true);
+  assert.equal(isPlausibleProjectTitle('Black & McDonald Warehouse'), true);
 });
 
 test('extractMetadataFromText does not use mojibake as project name', () => {

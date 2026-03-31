@@ -9,7 +9,7 @@ import {
 } from '../../shared/utils/proposalDefaults.ts';
 
 export function initEstimatorSchema() {
-  const defaultLaborRatePerHour = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 85);
+  const defaultLaborRatePerHour = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 100);
 
   estimatorDb.exec(`
     CREATE TABLE IF NOT EXISTS projects_v1 (
@@ -93,7 +93,7 @@ export function initEstimatorSchema() {
       company_phone TEXT NOT NULL,
       company_email TEXT NOT NULL,
       logo_url TEXT NOT NULL,
-      default_labor_rate_per_hour REAL NOT NULL DEFAULT 85,
+      default_labor_rate_per_hour REAL NOT NULL DEFAULT 100,
       default_overhead_percent REAL NOT NULL DEFAULT 0,
       default_profit_percent REAL NOT NULL DEFAULT 0,
       default_tax_percent REAL NOT NULL DEFAULT 0,
@@ -253,6 +253,28 @@ export function initEstimatorSchema() {
   const hasProposalDate = projectColumns.some((column) => column.name === 'proposal_date');
   if (!hasProposalDate) {
     estimatorDb.exec('ALTER TABLE projects_v1 ADD COLUMN proposal_date TEXT');
+  }
+
+  const hasLaborOverheadPercent = projectColumns.some((column) => column.name === 'labor_overhead_percent');
+  if (!hasLaborOverheadPercent) {
+    estimatorDb.exec('ALTER TABLE projects_v1 ADD COLUMN labor_overhead_percent REAL NOT NULL DEFAULT 15');
+    estimatorDb.exec('UPDATE projects_v1 SET labor_overhead_percent = overhead_percent');
+  }
+
+  const hasLaborProfitPercent = projectColumns.some((column) => column.name === 'labor_profit_percent');
+  if (!hasLaborProfitPercent) {
+    estimatorDb.exec('ALTER TABLE projects_v1 ADD COLUMN labor_profit_percent REAL NOT NULL DEFAULT 10');
+    estimatorDb.exec('UPDATE projects_v1 SET labor_profit_percent = profit_percent');
+  }
+
+  const hasSubLaborFeeEnabled = projectColumns.some((column) => column.name === 'sub_labor_management_fee_enabled');
+  if (!hasSubLaborFeeEnabled) {
+    estimatorDb.exec('ALTER TABLE projects_v1 ADD COLUMN sub_labor_management_fee_enabled INTEGER NOT NULL DEFAULT 0');
+  }
+
+  const hasSubLaborFeePercent = projectColumns.some((column) => column.name === 'sub_labor_management_fee_percent');
+  if (!hasSubLaborFeePercent) {
+    estimatorDb.exec('ALTER TABLE projects_v1 ADD COLUMN sub_labor_management_fee_percent REAL NOT NULL DEFAULT 5');
   }
 
   estimatorDb.exec("UPDATE projects_v1 SET job_conditions_json = '{}' WHERE job_conditions_json IS NULL OR trim(job_conditions_json) = ''");

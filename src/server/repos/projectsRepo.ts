@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { estimatorDb } from '../db/connection.ts';
 import { ProjectRecord } from '../../shared/types/estimator.ts';
+import { coerceSafeProjectName } from '../../shared/utils/intakeTextGuards.ts';
 import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../../shared/utils/jobConditions.ts';
 
 function mapProjectRow(row: any): ProjectRecord {
@@ -24,7 +25,7 @@ function mapProjectRow(row: any): ProjectRecord {
   return {
     id: row.id,
     projectNumber: row.project_number,
-    projectName: row.project_name,
+    projectName: coerceSafeProjectName(String(row.project_name || ''), 'Untitled Project'),
     clientName: row.client_name,
     generalContractor: row.general_contractor,
     estimator: row.estimator,
@@ -42,6 +43,10 @@ function mapProjectRow(row: any): ProjectRecord {
     laborBurdenPercent: row.labor_burden_percent,
     overheadPercent: row.overhead_percent,
     profitPercent: row.profit_percent,
+    laborOverheadPercent: Number(row.labor_overhead_percent ?? row.overhead_percent ?? 15),
+    laborProfitPercent: Number(row.labor_profit_percent ?? row.profit_percent ?? 10),
+    subLaborManagementFeeEnabled: Boolean(Number(row.sub_labor_management_fee_enabled ?? 0)),
+    subLaborManagementFeePercent: Number(row.sub_labor_management_fee_percent ?? 5),
     taxPercent: row.tax_percent,
     pricingMode: row.pricing_mode || 'labor_and_material',
     selectedScopeCategories,
@@ -69,7 +74,7 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
   const project: ProjectRecord = {
     id: input.id ?? randomUUID(),
     projectNumber: input.projectNumber ?? null,
-    projectName: input.projectName ?? 'Untitled Project',
+    projectName: coerceSafeProjectName(String(input.projectName ?? ''), 'Untitled Project'),
     clientName: input.clientName ?? null,
     generalContractor: input.generalContractor ?? null,
     estimator: input.estimator ?? null,
@@ -87,6 +92,10 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     laborBurdenPercent: input.laborBurdenPercent ?? 25,
     overheadPercent: input.overheadPercent ?? 15,
     profitPercent: input.profitPercent ?? 10,
+    laborOverheadPercent: input.laborOverheadPercent ?? input.overheadPercent ?? 15,
+    laborProfitPercent: input.laborProfitPercent ?? input.profitPercent ?? 10,
+    subLaborManagementFeeEnabled: input.subLaborManagementFeeEnabled ?? false,
+    subLaborManagementFeePercent: input.subLaborManagementFeePercent ?? 5,
     taxPercent: input.taxPercent ?? 8.25,
     pricingMode: input.pricingMode ?? 'labor_and_material',
     selectedScopeCategories: Array.isArray(input.selectedScopeCategories)
@@ -104,8 +113,10 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     INSERT INTO projects_v1 (
       id, project_number, project_name, client_name, general_contractor, estimator, bid_date, proposal_date, due_date, address, project_type,
       project_size, floor_level, access_difficulty, install_height, material_handling, wall_substrate,
-      labor_burden_percent, overhead_percent, profit_percent, tax_percent, pricing_mode, scope_categories_json, job_conditions_json, status, notes, special_notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      labor_burden_percent, overhead_percent, profit_percent, labor_overhead_percent, labor_profit_percent,
+      sub_labor_management_fee_enabled, sub_labor_management_fee_percent,
+      tax_percent, pricing_mode, scope_categories_json, job_conditions_json, status, notes, special_notes, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     project.id,
     project.projectNumber,
@@ -127,6 +138,10 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     project.laborBurdenPercent,
     project.overheadPercent,
     project.profitPercent,
+    project.laborOverheadPercent,
+    project.laborProfitPercent,
+    project.subLaborManagementFeeEnabled ? 1 : 0,
+    project.subLaborManagementFeePercent,
     project.taxPercent,
     project.pricingMode,
     JSON.stringify(project.selectedScopeCategories),
@@ -156,12 +171,16 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
     updatedAt: new Date().toISOString()
   };
 
+  next.projectName = coerceSafeProjectName(next.projectName, 'Untitled Project');
+
   estimatorDb.prepare(`
     UPDATE projects_v1 SET
       project_number = ?, project_name = ?, client_name = ?, general_contractor = ?, estimator = ?, bid_date = ?, proposal_date = ?, due_date = ?,
       address = ?, project_type = ?, project_size = ?, floor_level = ?, access_difficulty = ?, install_height = ?,
       material_handling = ?, wall_substrate = ?, labor_burden_percent = ?, overhead_percent = ?,
-      profit_percent = ?, tax_percent = ?, pricing_mode = ?, scope_categories_json = ?, job_conditions_json = ?, status = ?, notes = ?, special_notes = ?, updated_at = ?
+      profit_percent = ?, labor_overhead_percent = ?, labor_profit_percent = ?,
+      sub_labor_management_fee_enabled = ?, sub_labor_management_fee_percent = ?,
+      tax_percent = ?, pricing_mode = ?, scope_categories_json = ?, job_conditions_json = ?, status = ?, notes = ?, special_notes = ?, updated_at = ?
     WHERE id = ?
   `).run(
     next.projectNumber,
@@ -183,6 +202,10 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
     next.laborBurdenPercent,
     next.overheadPercent,
     next.profitPercent,
+    next.laborOverheadPercent,
+    next.laborProfitPercent,
+    next.subLaborManagementFeeEnabled ? 1 : 0,
+    next.subLaborManagementFeePercent,
     next.taxPercent,
     next.pricingMode,
     JSON.stringify(next.selectedScopeCategories),

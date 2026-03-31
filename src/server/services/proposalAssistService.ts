@@ -1,4 +1,8 @@
 import type { IntakeProjectAssumption, IntakeProjectMetadata, IntakeProposalAssist } from '../../shared/types/intake.ts';
+import {
+  isPlausibleCustomerFacingProposalText,
+  isPlausibleProposalScopeSnippet,
+} from '../../shared/utils/intakeTextGuards.ts';
 
 function asText(value: unknown): string {
   return String(value ?? '').trim();
@@ -64,13 +68,30 @@ export function buildProposalAssist(input: {
   lineDescriptions: string[];
   geminiAssist?: Partial<IntakeProposalAssist> | null;
 }): IntakeProposalAssist {
-  const scopeLines = input.lineDescriptions.filter(Boolean).slice(0, 6);
-  const scopeSummaryDraft = asText(input.geminiAssist?.scopeSummaryDraft) || (scopeLines.length > 0 ? `Scope appears to include ${scopeLines.join('; ')}.` : '');
-  const introDraft = asText(input.geminiAssist?.introDraft) || [
+  const scopeLines = input.lineDescriptions
+    .filter(Boolean)
+    .filter((d) => isPlausibleProposalScopeSnippet(d))
+    .slice(0, 6);
+
+  const geminiScope = asText(input.geminiAssist?.scopeSummaryDraft);
+  const safeGeminiScope = geminiScope && isPlausibleCustomerFacingProposalText(geminiScope) ? geminiScope : '';
+
+  const mechanicalScope =
+    scopeLines.length > 0 ? `Scope appears to include ${scopeLines.join('; ')}.` : '';
+  const scopeSummaryDraft = safeGeminiScope || mechanicalScope;
+
+  const geminiIntro = asText(input.geminiAssist?.introDraft);
+  const safeGeminiIntro = geminiIntro && isPlausibleCustomerFacingProposalText(geminiIntro) ? geminiIntro : '';
+
+  const fallbackIntro = [
     input.metadata.projectName ? `Proposal for ${input.metadata.projectName}.` : '',
     input.metadata.client ? `Prepared for ${input.metadata.client}.` : '',
     scopeSummaryDraft,
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const introDraft = safeGeminiIntro || fallbackIntro;
 
   const clarificationsDraft = asText(input.geminiAssist?.clarificationsDraft) || input.assumptions
     .filter((assumption) => assumption.kind === 'clarification' || assumption.kind === 'site_visit')

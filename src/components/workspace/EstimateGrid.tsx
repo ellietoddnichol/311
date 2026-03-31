@@ -61,7 +61,7 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
   const showMaterial = pricingMode !== 'labor_only';
   const showLabor = pricingMode !== 'material_only';
   const isTakeoffView = viewMode === 'takeoff';
-  const columnCount = isTakeoffView ? 8 : 9 + (showLabor ? 2 : 0) + (showMaterial ? 1 : 0);
+  const columnCount = isTakeoffView ? 3 : 8 + (showLabor ? 2 : 0) + (showMaterial ? 1 : 0);
 
   const bundleMeta = useMemo(() => {
     const byBundle: Record<string, { count: number; subtotal: number; name: string }> = {};
@@ -206,13 +206,21 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
         <table className="w-full table-fixed text-sm">
           <thead className={`sticky top-0 z-10 border-b ${isTakeoffView ? 'border-amber-200/70 bg-amber-50/80' : 'border-slate-200/70 bg-slate-100'}`}>
             <tr>
-              <th className={`px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${isTakeoffView ? 'w-36' : 'w-30'}`}>Room</th>
-              <th className={`px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${isTakeoffView ? 'w-26' : 'w-24'}`}>Category</th>
-              <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Item / description</th>
-              <th className="px-3 py-3 w-16 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Qty</th>
-              <th className="px-3 py-3 w-14 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Unit</th>
-              {isTakeoffView ? <th className="px-3 py-3 w-36 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Notes</th> : null}
-              {isTakeoffView ? <th className="px-3 py-3 w-36 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Match / source</th> : null}
+              {isTakeoffView ? (
+                <>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Item</th>
+                  <th className="px-3 py-3 w-28 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                  <th className="px-3 py-3 w-28 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">Actions</th>
+                </>
+              ) : (
+                <>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 w-30">Room</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 w-24">Category</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Item / description</th>
+                  <th className="px-3 py-3 w-16 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                  <th className="px-3 py-3 w-14 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Unit</th>
+                </>
+              )}
               {!isTakeoffView && showLabor ? (
                 <th className="px-3 py-3 w-[7.5rem] text-left text-xs font-semibold uppercase tracking-wide text-slate-600" title="Labor minutes × qty per line (before project schedule multipliers; see Labor time card for adjusted totals)">
                   Install time
@@ -226,8 +234,7 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
               {!isTakeoffView && showMaterial ? <th className="px-3 py-3 w-24 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">Material</th> : null}
               {!isTakeoffView ? <th className="px-3 py-3 w-24 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">Unit sell</th> : null}
               {!isTakeoffView ? <th className="px-3 py-3 w-24 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">Total</th> : null}
-              {!isTakeoffView ? <th className="px-3 py-3 w-28 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Notes</th> : null}
-              <th className="px-3 py-3 w-28 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">Actions</th>
+              {!isTakeoffView ? <th className="px-3 py-3 w-28 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -277,6 +284,44 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                       onClick={() => onSelectLine(row.lineId)}
                       className={`cursor-pointer border-b border-slate-100/90 border-l-2 ${sourceLine ? rowAccentClass(sourceLine) : 'border-l-slate-200'} ${selected ? (isTakeoffView ? 'bg-amber-50/90 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.18)]' : 'bg-blue-50/70 shadow-[inset_0_0_0_1px_rgba(11,61,145,0.12)]') : stripe ? 'bg-white' : isTakeoffView ? 'bg-amber-50/10' : 'bg-slate-50/[0.55]'} hover:bg-slate-50 transition-colors`}
                     >
+                      {isTakeoffView ? (
+                        <>
+                          <td className="px-3 py-3 align-top min-w-0">
+                            <div
+                              className="text-sm font-semibold leading-snug text-slate-900"
+                              title={[
+                                row.description,
+                                row.category || '',
+                                row.sku ? `SKU ${row.sku}` : '',
+                                row.notes || '',
+                                row.matched ? 'Matched to catalog' : 'Not matched',
+                                row.sourceRef || '',
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')}
+                            >
+                              {row.description || '—'}
+                            </div>
+                            {row.category ? (
+                              <div className="mt-1 text-xs text-slate-500">{row.category}</div>
+                            ) : null}
+                            {organizeBy === 'item' && (row.roomHint || row.roomLabel) ? (
+                              <div className="mt-1 text-xs text-slate-500">{row.roomHint || row.roomLabel}</div>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-3 align-top text-sm font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                            <span>{formatNumberSafe(row.qty, row.qty % 1 === 0 ? 0 : 2)}</span>
+                            <span className="ml-1 text-sm font-medium text-slate-600">{row.unit}</span>
+                          </td>
+                          <td className="px-3 py-3 text-right" onClick={stopRowEvent}>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button type="button" onClick={() => onSelectLine(row.lineId)} className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${selected ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>{selected ? <span className="inline-flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" /> Open</span> : organizeBy === 'item' ? 'Inspect' : 'Edit'}</button>
+                              {row.canDelete ? <button type="button" onClick={(e) => { e.stopPropagation(); onDeleteLine(row.lineId); }} className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700" aria-label="Delete line">×</button> : null}
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
                       <td className="px-3 py-3 align-top">
                         <div className="truncate text-sm font-semibold text-slate-800" title={row.roomHint || row.roomLabel}>
                           {row.roomLabel}
@@ -312,33 +357,6 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                           ) : null}
                         </td>
                       ) : null}
-                      {isTakeoffView ? (
-                        <td className="px-3 py-3 align-top">
-                          <div className="line-clamp-2 text-sm text-slate-600" title={row.notes || undefined}>
-                            {row.notes || (organizeBy === 'item' ? 'Combined across matching items' : 'No notes')}
-                          </div>
-                        </td>
-                      ) : null}
-                      {isTakeoffView ? (
-                        <td className="px-3 py-3 align-top">
-                          <div className="space-y-1.5">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${row.matched ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                                {row.matched ? 'Matched' : 'Unmatched'}
-                              </span>
-                              {row.bundleId ? <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">Bundle</span> : null}
-                              {organizeBy === 'item' ? <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">Combined</span> : null}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
-                              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-medium ${sourceBadgeClass(row.sourceType)}`} title={row.sourceType}>
-                                {row.sourceType || 'line'}
-                              </span>
-                              {row.sourceRef ? <span className="truncate max-w-[140px]" title={row.sourceRef}>{row.sourceRef}</span> : null}
-                            </div>
-                            <div className="truncate text-xs text-slate-500" title={row.sku || undefined}>{row.sku || 'No SKU'}</div>
-                          </div>
-                        </td>
-                      ) : null}
                       {!isTakeoffView && showLabor ? (
                         <td className="border-l border-slate-200/80 px-3 py-3 pl-4 align-top text-right text-sm font-medium text-slate-800 tabular-nums">
                           <div>{formatCurrencySafe(effectiveLaborCost)}</div>
@@ -356,19 +374,14 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                         </td>
                       ) : null}
                       {!isTakeoffView ? <td className="px-3 py-3 align-top text-right text-base font-semibold text-slate-900 tabular-nums">{formatCurrencySafe(row.lineTotal)}</td> : null}
-                      {!isTakeoffView ? (
-                        <td className="px-3 py-3 align-top">
-                          <div className="line-clamp-2 text-sm text-slate-600" title={row.notes || undefined}>
-                            {row.notes || (organizeBy === 'item' ? 'Combined across matching items' : 'No notes')}
-                          </div>
-                        </td>
-                      ) : null}
                       <td className="px-3 py-3 text-right" onClick={stopRowEvent}>
                         <div className="flex items-center justify-end gap-1.5">
                           <button type="button" onClick={() => onSelectLine(row.lineId)} className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${selected ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>{selected ? <span className="inline-flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" /> Open</span> : organizeBy === 'item' ? 'Inspect' : 'Edit'}</button>
                           {row.canDelete ? <button type="button" onClick={(e) => { e.stopPropagation(); onDeleteLine(row.lineId); }} className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700" aria-label="Delete line">×</button> : null}
                         </div>
                       </td>
+                        </>
+                      )}
                     </tr>
                   </React.Fragment>
                 );

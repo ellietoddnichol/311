@@ -248,10 +248,12 @@ export function Settings() {
         <section className="ui-surface p-4 space-y-4">
           <div>
             <h2 className="ui-label">Estimate Defaults</h2>
-            <p className="mt-1 text-xs text-slate-500">These defaults drive the starting estimate values used across the app. The base labor rate is the starting hourly labor cost before project-specific multipliers are applied.</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Defaults for new projects. The subcontractor billing rate ($/hr) is used when lines have install minutes but no labor dollars (typical for material-only takeoffs). Default is $100/hr; job conditions and line modifiers change labor minutes or labor cost only — not material.
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs text-slate-600 block">Base Labor Rate / Hr
+            <label className="text-xs text-slate-600 block">Subcontractor rate ($/hr)
               <input type="number" className="ui-input mt-1" value={settings.defaultLaborRatePerHour} onChange={(e) => setSettings({ ...settings, defaultLaborRatePerHour: Number(e.target.value) || 0 })} />
             </label>
             <label className="text-xs text-slate-600 block">Default Tax %

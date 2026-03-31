@@ -14,7 +14,8 @@ import {
 } from '../shared/utils/jobConditions';
 import { collectPastProjectDateErrors, mapProjectDateErrors } from '../shared/utils/projectDateValidation';
 import { OFFICE_ADDRESS, getDistanceInMiles } from '../utils/geo';
-import { formatNumberSafe } from '../utils/numberFormat';
+import { coerceSafeProjectName, isPlausibleProjectTitle, plausibleTitleFromFileName } from '../shared/utils/intakeTextGuards';
+import { formatCurrencySafe, formatNumberSafe } from '../utils/numberFormat';
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
 type IntakeStep = 1 | 2 | 3 | 4 | 5;
@@ -520,18 +521,22 @@ function parseDocumentMetadata(text: string): Partial<ProjectRecord> {
     return null;
   };
 
-  const inferredProjectLine = lines
-    .slice(0, 16)
-    .find((line) => {
+  const labeledProject = findValue(/project\s*name|job\s*name|project\b/i);
+  const labeledProjectSafe =
+    labeledProject && isPlausibleProjectTitle(labeledProject) ? labeledProject : null;
+
+  const inferredProjectLine =
+    lines.slice(0, 16).find((line) => {
       if (line.length < 6 || line.length > 96) return false;
       if (/^(client|gc|general contractor|address|location|site|date|bid date|project number|job number|scope of work|proposal|invitation to bid)\b/i.test(line)) return false;
       if (/^(section|division)\b/i.test(line)) return false;
       if (looksLikeDate(line) || /^\d+$/.test(line)) return false;
+      if (!isPlausibleProjectTitle(line)) return false;
       return tokenizeText(line).length >= 2;
     }) || null;
 
   return {
-    projectName: findValue(/project\s*name|job\s*name|project\b/i) ?? inferredProjectLine ?? 'Imported Project',
+    projectName: labeledProjectSafe ?? inferredProjectLine ?? 'Imported Project',
     projectNumber: findValue(/project\s*#|project\s*number|bid\s*package/i) ?? null,
     clientName: findValue(/client|gc|general\s*contractor/i) ?? null,
     address: findValue(/address|location|site/i) ?? null,
@@ -924,7 +929,34 @@ function buildIntakeWarnings(result: IntakeParseResult): string[] {
     );
   }
 
-  return Array.from(new Set([...result.warnings, ...result.diagnostics.warnings, ...summaryWarnings].filter(Boolean)));
+  const merged = [...result.warnings, ...result.diagnostics.warnings, ...summaryWarnings].filter(Boolean);
+  return Array.from(new Set(collapseStalePdfRoomWarnings(merged)));
+}
+
+/** Older server builds emitted one warning per PDF page for room assignment; collapse for a sane UI. */
+function collapseStalePdfRoomWarnings(warnings: string[]): string[] {
+  const roomSpam = warnings.filter(
+    (w) =>
+      /no room assignment/i.test(w) &&
+      /multiple rooms/i.test(w) &&
+      /page\s+\d+/i.test(w)
+  );
+  const rest = warnings.filter(
+    (w) =>
+      !(
+        /no room assignment/i.test(w) &&
+        /multiple rooms/i.test(w) &&
+        /page\s+\d+/i.test(w)
+      )
+  );
+  if (roomSpam.length > 2) {
+    rest.push(
+      `${roomSpam.length} PDF room-assignment notices were collapsed (older parser). All imported lines use "General"; split rooms in the workspace if needed.`
+    );
+  } else {
+    rest.push(...roomSpam);
+  }
+  return rest;
 }
 
 function normalizeWarningGroupKey(warning: string): string {
@@ -1049,6 +1081,10 @@ function createInitialProjectDraft(settings?: SettingsRecord | null): Partial<Pr
     laborBurdenPercent: settings?.defaultLaborBurdenPercent ?? 25,
     overheadPercent: settings?.defaultOverheadPercent ?? 15,
     profitPercent: settings?.defaultProfitPercent ?? 10,
+    laborOverheadPercent: settings?.defaultOverheadPercent ?? 15,
+    laborProfitPercent: settings?.defaultProfitPercent ?? 10,
+    subLaborManagementFeeEnabled: false,
+    subLaborManagementFeePercent: 5,
     taxPercent: settings?.defaultTaxPercent ?? 8.25,
     pricingMode: 'labor_and_material',
     selectedScopeCategories: [],
@@ -1140,6 +1176,10 @@ export function ProjectIntake() {
         laborBurdenPercent: prev.laborBurdenPercent ?? defaults.laborBurdenPercent,
         overheadPercent: prev.overheadPercent ?? defaults.overheadPercent,
         profitPercent: prev.profitPercent ?? defaults.profitPercent,
+        laborOverheadPercent: prev.laborOverheadPercent ?? defaults.laborOverheadPercent,
+        laborProfitPercent: prev.laborProfitPercent ?? defaults.laborProfitPercent,
+        subLaborManagementFeeEnabled: prev.subLaborManagementFeeEnabled ?? defaults.subLaborManagementFeeEnabled,
+        subLaborManagementFeePercent: prev.subLaborManagementFeePercent ?? defaults.subLaborManagementFeePercent,
         taxPercent: prev.taxPercent ?? defaults.taxPercent,
         selectedScopeCategories: Array.isArray(prev.selectedScopeCategories) ? prev.selectedScopeCategories : defaults.selectedScopeCategories,
         jobConditions: normalizeProjectJobConditions({
@@ -1338,7 +1378,9 @@ export function ProjectIntake() {
     const assumptionNotes = summarizeAssumptions(result);
     setProjectDraft((prev) => ({
       ...prev,
-      projectName: prev.projectName || result.projectMetadata.projectName || prev.projectName,
+      projectName: prev.projectName?.trim()
+        ? prev.projectName
+        : coerceSafeProjectName(result.projectMetadata.projectName || '', '') || 'Imported Project',
       projectNumber: prev.projectNumber || result.projectMetadata.projectNumber || prev.projectNumber,
       clientName: prev.clientName || result.projectMetadata.client || prev.clientName,
       generalContractor: prev.generalContractor || result.projectMetadata.generalContractor || prev.generalContractor,
@@ -1584,7 +1626,11 @@ export function ProjectIntake() {
 
       setProjectDraft((prev) => ({
         ...prev,
-        projectName: prev.projectName || documentMetadata.projectName || (takeoffFileName ? takeoffFileName.replace(/\.[^/.]+$/, '') : 'Takeoff Imported Project'),
+        projectName:
+          prev.projectName ||
+          documentMetadata.projectName ||
+          plausibleTitleFromFileName(takeoffFileName || '') ||
+          'Takeoff Imported Project',
         projectNumber: prev.projectNumber || documentMetadata.projectNumber || prev.projectNumber,
         clientName: prev.clientName || documentMetadata.clientName || prev.clientName,
         address: prev.address || documentMetadata.address || prev.address,
@@ -1674,7 +1720,7 @@ export function ProjectIntake() {
       applyIntakeParseToReview(result, file.name);
       setTakeoffParsedFromServer(true);
       setTakeoffStructuredLines(result.reviewLines.map((line) => buildIntakeParsedImportLine(line, file.name)));
-      setTakeoffStructuredProjectName(result.projectMetadata.projectName || '');
+      setTakeoffStructuredProjectName(coerceSafeProjectName(result.projectMetadata.projectName || '', '') || '');
       setTakeoffStructuredKind(mapIntakeSourceKind(result.sourceKind));
       setTakeoffHasRoomColumn(result.rooms.length > 0 || result.reviewLines.some((line) => !!line.roomName));
       setTakeoffFileText('');
@@ -1754,7 +1800,8 @@ export function ProjectIntake() {
     const metadata = adaptive.metadata;
     setProjectDraft((prev) => ({
       ...prev,
-      projectName: metadata.projectName || prev.projectName,
+      projectName:
+        coerceSafeProjectName(metadata.projectName || '', '') || prev.projectName || 'Imported Project',
       projectNumber: metadata.projectNumber || prev.projectNumber,
       clientName: metadata.clientName || prev.clientName,
       address: metadata.address || prev.address,
@@ -2085,6 +2132,14 @@ export function ProjectIntake() {
         laborBurdenPercent: Number(projectDraft.laborBurdenPercent ?? settingsDefaults?.defaultLaborBurdenPercent ?? 25),
         overheadPercent: Number(projectDraft.overheadPercent ?? settingsDefaults?.defaultOverheadPercent ?? 15),
         profitPercent: Number(projectDraft.profitPercent ?? settingsDefaults?.defaultProfitPercent ?? 10),
+        laborOverheadPercent: Number(
+          projectDraft.laborOverheadPercent ?? projectDraft.overheadPercent ?? settingsDefaults?.defaultOverheadPercent ?? 15
+        ),
+        laborProfitPercent: Number(
+          projectDraft.laborProfitPercent ?? projectDraft.profitPercent ?? settingsDefaults?.defaultProfitPercent ?? 10
+        ),
+        subLaborManagementFeeEnabled: Boolean(projectDraft.subLaborManagementFeeEnabled),
+        subLaborManagementFeePercent: Number(projectDraft.subLaborManagementFeePercent ?? 5),
         taxPercent: Number(projectDraft.taxPercent ?? settingsDefaults?.defaultTaxPercent ?? 8.25),
         pricingMode: (projectDraft.pricingMode as PricingMode) || 'labor_and_material',
         selectedScopeCategories: projectDraft.selectedScopeCategories || [],
@@ -2452,7 +2507,9 @@ export function ProjectIntake() {
                     <label className="text-xs text-slate-600">Burden %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.laborBurdenPercent ?? ''} onChange={(e) => patchProjectDraft({ laborBurdenPercent: Number(e.target.value) || 0 })} /></label>
                     <label className="text-xs text-slate-600">Overhead %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.overheadPercent ?? ''} onChange={(e) => patchProjectDraft({ overheadPercent: Number(e.target.value) || 0 })} /></label>
                     <label className="text-xs text-slate-600">Profit %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.profitPercent ?? ''} onChange={(e) => patchProjectDraft({ profitPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-xs text-slate-600">Tax %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.taxPercent ?? ''} onChange={(e) => patchProjectDraft({ taxPercent: Number(e.target.value) || 0 })} /></label>
+                    {(projectDraft.pricingMode as PricingMode) !== 'labor_only' ? (
+                      <label className="text-xs text-slate-600">Material tax %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.taxPercent ?? ''} onChange={(e) => patchProjectDraft({ taxPercent: Number(e.target.value) || 0 })} /></label>
+                    ) : null}
                     <label className="text-xs text-slate-600">Labor Factor<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).laborRateMultiplier} onChange={(e) => patchDraftJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })} /></label>
                     <label className="text-xs text-slate-600">Adder %<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderPercent} onChange={(e) => patchDraftJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} /></label>
                     <label className="text-xs text-slate-600">Adder $<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderAmount} onChange={(e) => patchDraftJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} /></label>
@@ -2627,7 +2684,11 @@ export function ProjectIntake() {
 
                             if (key === 'deliveryRequired') {
                               if (active) {
-                                patchDraftJobConditions({ deliveryRequired: false, deliveryAutoCalculated: false });
+                                patchDraftJobConditions({
+                                  deliveryRequired: false,
+                                  deliveryAutoCalculated: false,
+                                  deliveryQuotedSeparately: false,
+                                });
                                 return;
                               }
 
@@ -2658,7 +2719,21 @@ export function ProjectIntake() {
                     <label className="text-xs text-slate-600">Delivery Lead Time (business days)<input type="number" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).deliveryLeadDays} onChange={(e) => patchDraftJobConditions({ deliveryLeadDays: Number(e.target.value) || 0, deliveryAutoCalculated: false })} /></label>
                     <div className="rounded-2xl bg-slate-50 px-3 py-3 text-xs text-slate-600 ring-1 ring-slate-200">
                       <p className="font-medium text-slate-900">Delivery recommendation</p>
-                      <p className="mt-1">{normalizeProjectJobConditions(projectDraft.jobConditions).deliveryRequired ? `${formatNumberSafe(normalizeProjectJobConditions(projectDraft.jobConditions).travelDistanceMiles || 0, 1)} miles mapped to ${normalizeProjectJobConditions(projectDraft.jobConditions).deliveryLeadDays} business day${normalizeProjectJobConditions(projectDraft.jobConditions).deliveryLeadDays === 1 ? '' : 's'} and ${normalizeProjectJobConditions(projectDraft.jobConditions).deliveryPricingMode === 'flat' ? formatNumberSafe(normalizeProjectJobConditions(projectDraft.jobConditions).deliveryValue, 2) : normalizeProjectJobConditions(projectDraft.jobConditions).deliveryPricingMode}.` : 'Import or add the job address to auto-fill delivery cost and lead time.'}</p>
+                      <p className="mt-1 text-slate-500">
+                        Auto rule: under 50 mi — no delivery fee; 50–100 mi — $100 flat; over 100 mi — travel/delivery priced separately (not in estimate total).
+                      </p>
+                      <p className="mt-1">
+                        {(() => {
+                          const jc = normalizeProjectJobConditions(projectDraft.jobConditions);
+                          if (!jc.deliveryRequired) {
+                            return 'Import or add the job address to auto-fill delivery from distance.';
+                          }
+                          if (jc.deliveryQuotedSeparately) {
+                            return `${formatNumberSafe(jc.travelDistanceMiles || 0, 1)} miles: delivery and travel will be quoted separately — not included in the estimate total. Lead time ${jc.deliveryLeadDays} business day${jc.deliveryLeadDays === 1 ? '' : 's'}.`;
+                          }
+                          return `${formatNumberSafe(jc.travelDistanceMiles || 0, 1)} miles → ${jc.deliveryLeadDays} business day${jc.deliveryLeadDays === 1 ? '' : 's'} lead; ${jc.deliveryPricingMode === 'flat' ? `${formatCurrencySafe(jc.deliveryValue)} flat` : jc.deliveryPricingMode}.`;
+                        })()}
+                      </p>
                     </div>
                   </div>
 

@@ -1,8 +1,37 @@
+/**
+ * PDF intake path (hybrid router): `parsePdfUpload` → text chunks (~2.2k chars, split by page) → this module.
+ *
+ * - **Deterministic (lenient):** every non-noise line becomes a row unless treated as a room/header (Word PDFs → huge counts).
+ * - **Gemini:** runs on the **first 12 chunks only**; often emits one row per short phrase (~30/chunk → ~360 fake “items”).
+ * - **Guard:** compare LLM rows to deterministic rows on that **same 12-chunk window**, and detect **high lines/chunk**.
+ *   If LLM looks inflated, we use **strict** deterministic parsing on the **full document** (qty / numbered / unit / long phrase / modifiers).
+ */
 import type { ExtractedSpreadsheetRow, IntakeProjectMetadata, NormalizedIntakeItem } from '../../../shared/types/intake.ts';
+import { looksLikePdfExtractionNoiseLine, looksLikePdfProposalBoilerplateLine } from '../../../shared/utils/intakeTextGuards.ts';
 import { extractDocumentWithGemini } from '../geminiExtractionService.ts';
 import { intakeAsText, normalizeComparableText } from '../metadataExtractorService.ts';
 import { inferCategoryFromText, normalizeExtractedCategory } from '../rowClassifierService.ts';
 import type { PdfChunk } from './pdfParser.ts';
+
+const PDF_LLM_CHUNK_LIMIT = 12;
+
+/** After noise/header handling: keep only lines that plausibly belong on a schedule (drops sentence-per-line Word garbage). */
+function pdfDeterministicLineQualifiesForScopeRow(
+  rawLine: string,
+  quantity: number | null,
+  description: string,
+  inferredItemType: string | null
+): boolean {
+  if (quantity != null && quantity > 0) return true;
+  if (inferredItemType === 'modifier' && description.replace(/\s+/g, ' ').trim().length >= 14) return true;
+  const t = rawLine.trim();
+  if (/^\(?\d{1,4}[\.\)]\s+\S/.test(t)) return true;
+  // Require a real word or common 2-letter unit after qty — avoids "6 lt qa f" PDF operators.
+  if (/\b\d{1,6}\s+[xX-]?\s*(?:[A-Za-z]{3,}\b|[A-Z]{2}\b)/.test(t)) return true;
+  if (/\b(EA|SF|LF|SY|CY|LS|BOX|SET|PR|GAL|QT|SHT|ROLL|PKG)\b/i.test(t)) return true;
+  const desc = description.replace(/\s+/g, ' ').trim();
+  return desc.length >= 36;
+}
 
 function parseQuantityPrefix(text: string): { quantity: number | null; description: string } {
   const matched = text.trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*[xX-]?\s+(.*)$/);
@@ -111,14 +140,21 @@ export function normalizeSpreadsheetRows(input: {
   });
 }
 
-function normalizePdfLinesDeterministically(input: { fileName: string; chunks: PdfChunk[] }): NormalizedIntakeItem[] {
+export function normalizePdfLinesDeterministically(
+  input: { fileName: string; chunks: PdfChunk[] },
+  options?: { scopeRowFilter?: 'lenient' | 'strict' }
+): NormalizedIntakeItem[] {
   const items: NormalizedIntakeItem[] = [];
+  /** Carry room headers across pages/chunks so PDF takeoffs are not all "un-roomed" per chunk. */
+  let currentRoom: string | null = null;
+  const strict = options?.scopeRowFilter === 'strict';
 
   input.chunks.forEach((chunk) => {
-    let currentRoom: string | null = null;
     chunk.text.split(/\r?\n/).forEach((rawLine) => {
       const line = intakeAsText(rawLine);
       if (!line) return;
+      if (looksLikePdfExtractionNoiseLine(line)) return;
+      if (looksLikePdfProposalBoilerplateLine(line)) return;
       if (/^(project|client|owner|gc|general contractor|address|site|bid date|proposal date|estimator|prepared by)\b/i.test(line)) return;
 
       const inferredItemType = detectItemType(line);
@@ -139,6 +175,9 @@ function normalizePdfLinesDeterministically(input: { fileName: string; chunks: P
 
       const { quantity, description } = parseQuantityPrefix(line);
       if (!description) return;
+      if (strict && !pdfDeterministicLineQualifiesForScopeRow(line, quantity, description, inferredItemType)) {
+        return;
+      }
       const labeled = extractManufacturerModelFinish(description);
       const category = normalizeExtractedCategory('', description) || inferCategoryFromText(description) || null;
       const itemType = detectItemType(description);
@@ -177,13 +216,15 @@ export async function normalizePdfChunks(input: {
   chunks: PdfChunk[];
 }): Promise<NormalizedIntakeItem[]> {
   const deterministicItems = normalizePdfLinesDeterministically(input);
+  const llmChunks = input.chunks.slice(0, PDF_LLM_CHUNK_LIMIT);
+  const detWindowItems = normalizePdfLinesDeterministically({ fileName: input.fileName, chunks: llmChunks });
   const llmEnabled = String(process.env.UPLOAD_LLM_NORMALIZATION || 'true').toLowerCase() !== 'false';
   if (!llmEnabled || input.chunks.length === 0) {
     return deterministicItems;
   }
 
   const llmItems: NormalizedIntakeItem[] = [];
-  for (const chunk of input.chunks.slice(0, 12)) {
+  for (const chunk of llmChunks) {
     try {
       const result = await extractDocumentWithGemini({
         fileName: `${input.fileName}#${chunk.chunkId}`,
@@ -194,7 +235,7 @@ export async function normalizePdfChunks(input: {
 
       result.parsedLines.forEach((line) => {
         const text = intakeAsText(line.description || line.itemName);
-        if (!text) return;
+        if (!text || looksLikePdfExtractionNoiseLine(text) || looksLikePdfProposalBoilerplateLine(text)) return;
         const labeled = extractManufacturerModelFinish(`${line.itemName} ${line.description} ${line.notes}`);
         const category = normalizeExtractedCategory(line.category || '', `${line.itemName} ${line.description}`) || inferCategoryFromText(text) || null;
         const itemType = detectItemType(`${text} ${line.notes || ''}`);
@@ -227,5 +268,25 @@ export async function normalizePdfChunks(input: {
     }
   }
 
-  return llmItems.length ? llmItems : deterministicItems;
+  if (!llmItems.length) {
+    return deterministicItems;
+  }
+
+  const llmCount = llmItems.length;
+  const windowCount = detWindowItems.length;
+  const avgLlmPerChunk = llmCount / Math.max(1, llmChunks.length);
+  // Word-export PDFs: Gemini returns ~20–40 rows per chunk; real takeoffs are much sparser on the same text.
+  const inflatedLlm = avgLlmPerChunk > 16 && llmCount >= 56;
+  const llmMuchRicherThanSameWindow =
+    windowCount >= 3 && llmCount > Math.max(72, windowCount * 2);
+
+  if (inflatedLlm || llmMuchRicherThanSameWindow) {
+    const strictItems = normalizePdfLinesDeterministically(input, { scopeRowFilter: 'strict' });
+    if (strictItems.length > 0) {
+      return strictItems;
+    }
+    return deterministicItems;
+  }
+
+  return llmItems;
 }

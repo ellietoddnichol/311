@@ -45,6 +45,8 @@ export interface ProjectJobConditions {
   deliveryValue: number;
   deliveryLeadDays: number;
   deliveryAutoCalculated: boolean;
+  /** True when distance exceeds the auto flat-fee band; travel/delivery quoted separately (no $ in estimate). */
+  deliveryQuotedSeparately: boolean;
   smallJobFactor: boolean;
   smallJobMultiplier: number;
   mobilizationComplexity: 'low' | 'medium' | 'high';
@@ -75,8 +77,17 @@ export interface ProjectRecord {
   materialHandling: string | null;
   wallSubstrate: string | null;
   laborBurdenPercent: number;
+  /** Overhead % applied to material (tax-inclusive base), not to labor. */
   overheadPercent: number;
+  /** Profit % applied after material overhead. */
   profitPercent: number;
+  /** Overhead % on subcontractor labor (after labor burden). Defaults to project overhead when unset in DB. */
+  laborOverheadPercent: number;
+  /** Profit % on subcontractor labor stack. Defaults to project profit when unset in DB. */
+  laborProfitPercent: number;
+  /** Optional fee (e.g. 5%) on loaded subcontractor labor. */
+  subLaborManagementFeeEnabled: boolean;
+  subLaborManagementFeePercent: number;
   taxPercent: number;
   pricingMode: PricingMode;
   selectedScopeCategories: string[];
@@ -208,10 +219,25 @@ export interface EstimateSummary {
   conditionAdjustmentAmount: number;
   conditionLaborMultiplier: number;
   conditionLaborHoursMultiplier: number;
+  /** Labor burden $ (subcontractor). */
   burdenAmount: number;
+  /** Material overhead $ (not applied to labor). */
   overheadAmount: number;
+  /** Material profit $ (not applied to labor). */
   profitAmount: number;
   taxAmount: number;
+  /** Labor overhead $ (subcontractor stack). */
+  laborOverheadAmount: number;
+  /** Labor profit $ (subcontractor stack). */
+  laborProfitAmount: number;
+  /** Sub labor management / fee $ (e.g. 5% on loaded labor). */
+  subLaborManagementFeeAmount: number;
+  /** Material + tax + material O&P (sell). */
+  materialLoadedSubtotal: number;
+  /** Labor after conditions + burden + labor O&P + optional fee (sell). */
+  laborLoadedSubtotal: number;
+  /** Same as laborLoadedSubtotal; use for a separate labor proposal when pricing mode is material-only. */
+  laborCompanionProposalTotal: number;
   baseBidTotal: number;
   conditionAssumptions: string[];
   projectConditions: ProjectConditions;

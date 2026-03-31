@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { ProjectRecord, TakeoffLineRecord } from '../../shared/types/estimator.ts';
 import { buildProjectConditionSummaryLines, createDefaultProjectJobConditions } from '../../shared/utils/jobConditions.ts';
 import { calculateEstimateSummary } from './estimateEngineV1.ts';
+import { getConfiguredLaborRatePerHour } from '../repos/takeoffRepo.ts';
 
 function buildProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
@@ -26,6 +27,10 @@ function buildProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     laborBurdenPercent: 25,
     overheadPercent: 15,
     profitPercent: 10,
+    laborOverheadPercent: 15,
+    laborProfitPercent: 10,
+    subLaborManagementFeeEnabled: false,
+    subLaborManagementFeePercent: 5,
     taxPercent: 8.25,
     pricingMode: 'labor_and_material',
     selectedScopeCategories: [],
@@ -108,4 +113,44 @@ test('night work applies globally to labor totals and labor hours', () => {
   assert.equal(summary.conditionLaborHoursMultiplier, 1.1);
   assert.equal(summary.projectConditions.nightWork, true);
   assert.equal(summary.conditionAssumptions.some((line) => /night work applies to all scoped items/i.test(line)), true);
+  assert.ok(Math.abs(summary.laborLoadedSubtotal - 284.625) < 0.05);
+  assert.ok(Math.abs(summary.materialLoadedSubtotal - 102.702) < 0.05);
+  assert.ok(Math.abs(summary.baseBidTotal - 387.327) < 0.1);
+});
+
+test('install-only bid excludes material dollars and material tax even when lines carry material costs', () => {
+  const project = buildProject({ pricingMode: 'labor_only', taxPercent: 8.25 });
+  const summary = calculateEstimateSummary(project, [buildLine({ materialCost: 500, baseMaterialCost: 500 })]);
+  assert.equal(summary.materialSubtotal, 0);
+  assert.equal(summary.taxAmount, 0);
+  assert.equal(summary.overheadAmount, 0);
+  assert.equal(summary.profitAmount, 0);
+  assert.equal(summary.materialLoadedSubtotal, 0);
+  assert.ok(summary.laborLoadedSubtotal > 0);
+  assert.equal(summary.baseBidTotal, summary.laborLoadedSubtotal);
+});
+
+test('material-only bid still builds labor companion dollars from minutes when unit labor cost is zero', () => {
+  const project = buildProject({ pricingMode: 'material_only' });
+  const rate = getConfiguredLaborRatePerHour();
+  const line = buildLine({ laborCost: 0, baseLaborCost: 0, laborMinutes: 120, qty: 1, materialCost: 200 });
+  const summary = calculateEstimateSummary(project, [line]);
+  const expectedRaw = Number(((120 / 60) * rate).toFixed(2));
+  assert.equal(summary.laborSubtotal, expectedRaw);
+  assert.equal(summary.adjustedLaborSubtotal, 0);
+  assert.ok(summary.laborCompanionProposalTotal > expectedRaw * 1.2);
+  assert.ok(summary.baseBidTotal > 200);
+});
+
+test('zero travel distance does not appear in condition assumptions or proposal summary lines', () => {
+  const project = buildProject({
+    jobConditions: {
+      ...createDefaultProjectJobConditions(),
+      travelDistanceMiles: 0,
+    },
+  });
+  const summary = calculateEstimateSummary(project, [buildLine()]);
+  assert.equal(summary.conditionAssumptions.some((line) => /travel distance|distance from office/i.test(line)), false);
+  const conditionLines = buildProjectConditionSummaryLines(project.jobConditions);
+  assert.equal(conditionLines.some((line) => /travel distance|distance from office/i.test(line)), false);
 });

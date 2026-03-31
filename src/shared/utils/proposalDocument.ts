@@ -239,14 +239,18 @@ export function buildClientFacingPricingRows(
     materialSubtotal: number;
     laborSubtotal: number;
     adjustedLaborSubtotal: number;
+    materialLoadedSubtotal?: number;
+    laborLoadedSubtotal?: number;
     baseBidTotal: number;
   },
   pricingMode: PricingMode
 ): ClientFacingPricingRow[] {
   const showMaterial = pricingMode !== 'labor_only';
   const showLabor = pricingMode !== 'material_only';
-  const materialBase = showMaterial ? Number(summary.materialSubtotal || 0) : 0;
-  const laborBase = showLabor ? Number(summary.adjustedLaborSubtotal || summary.laborSubtotal || 0) : 0;
+  const materialBase = showMaterial ? Number((summary.materialLoadedSubtotal ?? summary.materialSubtotal) ?? 0) : 0;
+  const laborBase = showLabor
+    ? Number((summary.laborLoadedSubtotal ?? summary.adjustedLaborSubtotal ?? summary.laborSubtotal) ?? 0)
+    : 0;
   const visibleBase = materialBase + laborBase;
   const total = Number(summary.baseBidTotal || 0);
 

@@ -1,16 +1,15 @@
 import type { IntakeProjectAssumption, IntakeProjectMetadata } from '../../shared/types/intake.ts';
+import {
+  coerceSafeProjectName,
+  isPlausibleProjectTitle,
+  stripIntakeControlCharacters,
+} from '../../shared/utils/intakeTextGuards.ts';
 import { extractAssumptionsFromText, inferPricingBasis, mergeAssumptions } from './proposalAssistService.ts';
+
+export { coerceSafeProjectName, isPlausibleProjectTitle, stripIntakeControlCharacters };
 
 export function intakeAsText(value: unknown): string {
   return String(value ?? '').trim();
-}
-
-/** Strip C0/C1 controls except tab/LF/CR/form-feed (keep PDF page breaks and line structure). */
-const INTAKE_CTRL_CHARS = /[\u0000-\u0008\u000B\u000E-\u001F\u007F-\u009F\uFEFF\uFFFD]/g;
-
-/** Remove unsafe control chars only — do not collapse newlines or form-feed (Excel/PDF rely on them). */
-export function stripIntakeControlCharacters(text: string): string {
-  return String(text || '').replace(INTAKE_CTRL_CHARS, ' ');
 }
 
 /** Cut "Project: Foo Client: Bar" → "Foo" for metadata fields. */
@@ -19,46 +18,6 @@ function clipCoappendedMetadataLabels(value: string): string {
   if (!t) return '';
   const parts = t.split(/\s+(?=Client\s*:|GC\s*:|Owner\s*:|Address\s*:|General\s+Contractor\s*:|Project\s*#\s*|Job\s*#\s*)/i);
   return parts[0]?.trim() || t;
-}
-
-/**
- * Reject PDF mojibake / binary soup masquerading as a title (common with Latin-1 buffer dumps).
- * Favors readable Latin job names; allows a Unicode fallback when the title is clearly letter-based.
- */
-export function isPlausibleProjectTitle(value: string): boolean {
-  const t = intakeAsText(value);
-  if (t.length < 2 || t.length > 180) return false;
-
-  const nonSpace = t.replace(/\s/g, '');
-  if (nonSpace.length < 2) return false;
-
-  // PDF mojibake: many math/symbol/currency chars and stray bytes — not typical job titles
-  let suspicious = 0;
-  for (const ch of nonSpace) {
-    if (/[A-Za-z0-9]/.test(ch)) continue;
-    if ('.,;:\'’"&/@#+\\=()%-–—_'.includes(ch)) continue;
-    if (/[\u00C0-\u024F]/.test(ch)) continue;
-    suspicious += 1;
-  }
-  if (suspicious / nonSpace.length > 0.22) return false;
-
-  let asciiSafe = 0;
-  for (const ch of nonSpace) {
-    if (/[A-Za-z0-9]/.test(ch)) asciiSafe += 1;
-  }
-  const asciiRatio = asciiSafe / nonSpace.length;
-
-  if (asciiRatio >= 0.48) {
-    if (!/[A-Za-z]{2,}/.test(t)) return false;
-    const letterWords = t.match(/[A-Za-z]{2,}/g) || [];
-    if (letterWords.length < 1) return false;
-    return true;
-  }
-
-  const letterish = [...nonSpace].filter((ch) => /\p{L}|\p{N}/u.test(ch)).length;
-  if (letterish / nonSpace.length < 0.55) return false;
-  if (!/\p{L}{3,}/u.test(t)) return false;
-  return true;
 }
 
 const TAKEOFF_FAMILY_TOKENS = new Set(['GB', 'CH', 'SNV', 'SND', 'SD', 'TTD', 'HD', 'SCR', 'SC', 'SCH', 'FSS', 'LTX']);
@@ -170,7 +129,9 @@ function looksLikeTakeoffStartToken(token: string): boolean {
 }
 
 function sanitizeProjectNameCandidate(value: string): string {
-  const candidate = clipCoappendedMetadataLabels(intakeAsText(value).replace(/\s+/g, ' ').trim());
+  const candidate = clipCoappendedMetadataLabels(
+    intakeAsText(stripIntakeControlCharacters(String(value || ''))).replace(/\s+/g, ' ').trim()
+  );
   if (!candidate) return '';
 
   const tokens = candidate.split(/\s+/).filter(Boolean);
@@ -290,7 +251,7 @@ export function extractMetadataFromCells(cells: string[]): Partial<IntakeProject
 export function mergeResolvedMetadata(primary: Partial<IntakeProjectMetadata>, secondary: Partial<IntakeProjectMetadata>, sources: string[]): IntakeProjectMetadata {
   const primaryName = sanitizeProjectNameCandidate(primary.projectName || '');
   const secondaryName = sanitizeProjectNameCandidate(secondary.projectName || '');
-  const projectName = primaryName || secondaryName || 'Imported Project';
+  const projectName = coerceSafeProjectName(primaryName || secondaryName || '', 'Imported Project');
   const projectNumber = primary.projectNumber || secondary.projectNumber || primary.bidPackage || secondary.bidPackage || '';
   const bidPackage = primary.bidPackage || secondary.bidPackage || projectNumber || '';
   const client = primary.client || secondary.client || '';

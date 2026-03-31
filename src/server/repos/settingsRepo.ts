@@ -10,7 +10,7 @@ function mapSettingsRow(row: any): SettingsRecord {
     companyPhone: row.company_phone,
     companyEmail: row.company_email,
     logoUrl: row.logo_url,
-    defaultLaborRatePerHour: Number(row.default_labor_rate_per_hour || 85),
+    defaultLaborRatePerHour: Number(row.default_labor_rate_per_hour || 100),
     defaultOverheadPercent: Number(row.default_overhead_percent || 15),
     defaultProfitPercent: Number(row.default_profit_percent || 10),
     defaultTaxPercent: Number(row.default_tax_percent || 8.25),
@@ -31,12 +31,14 @@ export function getSettings(): SettingsRecord {
 
 export function updateSettings(input: Partial<SettingsRecord>): SettingsRecord {
   const current = getSettings();
-  const next: SettingsRecord = {
+  const merged: SettingsRecord = {
     ...current,
     ...input,
     id: 'global',
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
   };
+  const next = sanitizeProposalSettings(merged) as SettingsRecord;
+  next.updatedAt = merged.updatedAt;
 
   estimatorDb.prepare(`
     UPDATE settings_v1 SET

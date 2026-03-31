@@ -2,7 +2,7 @@ import * as xlsx from 'xlsx';
 import { parse as parseCsv } from 'csv-parse/sync';
 import type { ExtractedSpreadsheetRow, IntakeProjectMetadata, UploadFileType } from '../../../shared/types/intake.ts';
 import { extractMetadataFromText, intakeAsText, mergeMetadataHint, normalizeComparableText } from '../metadataExtractorService.ts';
-import { analyzeMatrixTakeoffSheet, detectMatrixTakeoffSheet, type MatrixSheetAnalysis } from './workbookShapeDetector.ts';
+import { analyzeMatrixTakeoffSheet, detectMatrixTakeoffSheet, isTotalsRow, type MatrixSheetAnalysis } from './workbookShapeDetector.ts';
 import { parseMatrixTakeoffSheet } from './matrixTakeoffParser.ts';
 
 export interface ExcelParseOutput {
@@ -229,6 +229,22 @@ function readWorkbook(input: { fileName: string; mimeType: string; dataBase64: s
   };
 }
 
+/** Generic Column1… row + `JOB:` with no value and no data rows — blank matrix template (see repo sample TA Takeoff.xlsx). */
+function looksLikeEmptyMatrixTakeoffTemplate(rows: unknown[][]): boolean {
+  const r0 = rows[0] || [];
+  const labeled = r0.map((cell) => intakeAsText(cell)).filter(Boolean);
+  if (labeled.length < 3) return false;
+  if (!labeled.every((cell) => /^column\s*\d+$/i.test(cell))) return false;
+  const jobCell = intakeAsText((rows[1] || [])[0] || '');
+  if (!/^job:\s*$/i.test(jobCell.trim())) return false;
+  for (let i = 2; i < Math.min(40, rows.length); i += 1) {
+    const row = rows[i] || [];
+    if (isTotalsRow(row)) continue;
+    if (row.some((cell) => intakeAsText(cell))) return false;
+  }
+  return true;
+}
+
 export function parseExcelUpload(input: { fileName: string; mimeType: string; dataBase64: string }): ExcelParseOutput {
   const { workbook, fileType } = readWorkbook(input);
   const extractedRows: ExtractedSpreadsheetRow[] = [];
@@ -263,6 +279,11 @@ export function parseExcelUpload(input: { fileName: string; mimeType: string; da
 
     if (!headerRows.length) {
       warnings.push(`No confident header row was detected on sheet ${sheetName}.`);
+      if (looksLikeEmptyMatrixTakeoffTemplate(rows)) {
+        warnings.push(
+          `Sheet "${sheetName}" looks like an empty matrix takeoff template (Column1… headers and JOB: with no shorthand row or room quantities). Export a completed grid or fill the template, then re-upload.`
+        );
+      }
       return;
     }
 

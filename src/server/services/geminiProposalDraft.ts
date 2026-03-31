@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { ProjectRecord, SettingsRecord, TakeoffLineRecord } from '../../shared/types/estimator.ts';
 import { DEFAULT_PROPOSAL_ACCEPTANCE_LABEL, DEFAULT_PROPOSAL_CLARIFICATIONS, DEFAULT_PROPOSAL_EXCLUSIONS, DEFAULT_PROPOSAL_INTRO, DEFAULT_PROPOSAL_TERMS } from '../../shared/utils/proposalDefaults.ts';
+import { isPlausibleCustomerFacingProposalText } from '../../shared/utils/intakeTextGuards.ts';
 import { buildGeminiSummaryPrompt } from './geminiSummaryPrompt.ts';
 
 interface ProposalDraftInput {
@@ -20,6 +21,8 @@ interface ProposalDraftInput {
     overheadAmount: number;
     profitAmount: number;
     taxAmount: number;
+    materialLoadedSubtotal?: number;
+    laborLoadedSubtotal?: number;
     baseBidTotal: number;
     conditionAssumptions: string[];
   } | null;
@@ -28,6 +31,11 @@ interface ProposalDraftInput {
 
 function asText(value: unknown): string {
   return String(value ?? '').trim();
+}
+
+function safeCustomerProposalBlock(text: unknown, fallback: string): string {
+  const t = asText(text);
+  return t && isPlausibleCustomerFacingProposalText(t) ? t : fallback;
 }
 
 function summarizeLines(lines: TakeoffLineRecord[]): Array<Record<string, unknown>> {
@@ -79,8 +87,12 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
     bidDate: input.project.bidDate || input.project.proposalDate || input.project.dueDate || '',
     totalLaborHours: input.summary?.totalLaborHours || 0,
     totalDays: input.summary?.durationDays || 0,
-    materialTotal: input.summary?.materialSubtotal || 0,
-    laborTotal: input.summary?.adjustedLaborSubtotal || input.summary?.laborSubtotal || 0,
+    materialTotal: (input.summary?.materialLoadedSubtotal ?? input.summary?.materialSubtotal) ?? 0,
+    laborTotal:
+      input.summary?.laborLoadedSubtotal ??
+      input.summary?.adjustedLaborSubtotal ??
+      input.summary?.laborSubtotal ??
+      0,
     proposalTotal: input.summary?.baseBidTotal || 0,
     assumptions,
     scopeLines: summarizeLines(lines).map((line) => JSON.stringify(line)),
@@ -141,33 +153,33 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
 
   if (mode === 'scope_summary') {
     return {
-      proposalIntro: asText(parsed.proposalIntro) || DEFAULT_PROPOSAL_INTRO,
+      proposalIntro: safeCustomerProposalBlock(parsed.proposalIntro, DEFAULT_PROPOSAL_INTRO),
     };
   }
 
   if (mode === 'terms_and_conditions') {
     return {
-      proposalTerms: asText(parsed.proposalTerms) || DEFAULT_PROPOSAL_TERMS,
-      proposalExclusions: asText(parsed.proposalExclusions) || DEFAULT_PROPOSAL_EXCLUSIONS,
-      proposalClarifications: asText(parsed.proposalClarifications) || DEFAULT_PROPOSAL_CLARIFICATIONS,
+      proposalTerms: safeCustomerProposalBlock(parsed.proposalTerms, DEFAULT_PROPOSAL_TERMS),
+      proposalExclusions: safeCustomerProposalBlock(parsed.proposalExclusions, DEFAULT_PROPOSAL_EXCLUSIONS),
+      proposalClarifications: safeCustomerProposalBlock(parsed.proposalClarifications, DEFAULT_PROPOSAL_CLARIFICATIONS),
     };
   }
 
   if (mode === 'default_short') {
     return {
-      proposalIntro: asText(parsed.proposalIntro) || DEFAULT_PROPOSAL_INTRO,
-      proposalTerms: asText(parsed.proposalTerms) || DEFAULT_PROPOSAL_TERMS,
-      proposalExclusions: asText(parsed.proposalExclusions) || DEFAULT_PROPOSAL_EXCLUSIONS,
-      proposalClarifications: asText(parsed.proposalClarifications) || DEFAULT_PROPOSAL_CLARIFICATIONS,
+      proposalIntro: safeCustomerProposalBlock(parsed.proposalIntro, DEFAULT_PROPOSAL_INTRO),
+      proposalTerms: safeCustomerProposalBlock(parsed.proposalTerms, DEFAULT_PROPOSAL_TERMS),
+      proposalExclusions: safeCustomerProposalBlock(parsed.proposalExclusions, DEFAULT_PROPOSAL_EXCLUSIONS),
+      proposalClarifications: safeCustomerProposalBlock(parsed.proposalClarifications, DEFAULT_PROPOSAL_CLARIFICATIONS),
       proposalAcceptanceLabel: asText(parsed.proposalAcceptanceLabel) || DEFAULT_PROPOSAL_ACCEPTANCE_LABEL,
     };
   }
 
   return {
-    proposalIntro: asText(parsed.proposalIntro) || DEFAULT_PROPOSAL_INTRO,
-    proposalTerms: asText(parsed.proposalTerms) || DEFAULT_PROPOSAL_TERMS,
-    proposalExclusions: asText(parsed.proposalExclusions) || DEFAULT_PROPOSAL_EXCLUSIONS,
-    proposalClarifications: asText(parsed.proposalClarifications) || DEFAULT_PROPOSAL_CLARIFICATIONS,
+    proposalIntro: safeCustomerProposalBlock(parsed.proposalIntro, DEFAULT_PROPOSAL_INTRO),
+    proposalTerms: safeCustomerProposalBlock(parsed.proposalTerms, DEFAULT_PROPOSAL_TERMS),
+    proposalExclusions: safeCustomerProposalBlock(parsed.proposalExclusions, DEFAULT_PROPOSAL_EXCLUSIONS),
+    proposalClarifications: safeCustomerProposalBlock(parsed.proposalClarifications, DEFAULT_PROPOSAL_CLARIFICATIONS),
     proposalAcceptanceLabel: asText(parsed.proposalAcceptanceLabel) || DEFAULT_PROPOSAL_ACCEPTANCE_LABEL,
   };
 }

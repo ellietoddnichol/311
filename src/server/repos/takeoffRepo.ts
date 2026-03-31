@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { estimatorDb } from '../db/connection.ts';
 import { TakeoffLineRecord, TakeoffPricingSource } from '../../shared/types/estimator.ts';
 
-const DEFAULT_LABOR_RATE_PER_HOUR = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 85);
+const DEFAULT_LABOR_RATE_PER_HOUR = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 100);
 
 export function getConfiguredLaborRatePerHour(): number {
   const row = estimatorDb.prepare('SELECT default_labor_rate_per_hour FROM settings_v1 WHERE id = ?').get('global') as { default_labor_rate_per_hour?: number } | undefined;

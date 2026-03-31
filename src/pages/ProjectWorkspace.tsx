@@ -1,10 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Calculator, Clock3, Download, FileUp, Hammer, Layers3, Paperclip, Sparkles, Trash2, Wallet, CalendarClock } from 'lucide-react';
+import { ArrowRight, Calculator, Clock3, Download, FileUp, Gauge, Hammer, Layers3, Paperclip, Sparkles, Trash2, Wallet, CalendarClock } from 'lucide-react';
 import { api } from '../services/api';
 import { BundleRecord, InstallReviewEmailDraft, ModifierRecord, ProjectFileRecord, ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
 import { CatalogItem } from '../types';
-import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../shared/utils/jobConditions';
+import {
+  createDefaultProjectJobConditions,
+  isMeaningfulTravelDistanceMiles,
+  normalizeProjectJobConditions,
+  recommendDeliveryPlan,
+} from '../shared/utils/jobConditions';
 import {
   DEFAULT_PROPOSAL_ACCEPTANCE_LABEL,
   DEFAULT_PROPOSAL_CLARIFICATIONS,
@@ -34,10 +39,17 @@ interface Summary {
   lineSubtotal: number;
   conditionAdjustmentAmount: number;
   conditionLaborMultiplier: number;
+  conditionLaborHoursMultiplier?: number;
   burdenAmount: number;
   overheadAmount: number;
   profitAmount: number;
   taxAmount: number;
+  laborOverheadAmount?: number;
+  laborProfitAmount?: number;
+  subLaborManagementFeeAmount?: number;
+  materialLoadedSubtotal?: number;
+  laborLoadedSubtotal?: number;
+  laborCompanionProposalTotal?: number;
   baseBidTotal: number;
   conditionAssumptions: string[];
 }
@@ -241,6 +253,20 @@ export function ProjectWorkspace() {
   const pricingMode = project?.pricingMode || 'labor_and_material';
   const showMaterial = pricingMode !== 'labor_only';
   const showLabor = pricingMode !== 'material_only';
+
+  const baseLaborRatePerHour = useMemo(() => {
+    const n = Number(settings?.defaultLaborRatePerHour);
+    return Number.isFinite(n) && n > 0 ? n : 100;
+  }, [settings?.defaultLaborRatePerHour]);
+
+  const laborCostMultiplier = summary?.conditionLaborMultiplier ?? 1;
+  const laborHoursMultiplier = summary?.conditionLaborHoursMultiplier ?? 1;
+  const effectiveLaborCostPerHour = useMemo(
+    () => Number((baseLaborRatePerHour * laborCostMultiplier).toFixed(2)),
+    [baseLaborRatePerHour, laborCostMultiplier]
+  );
+  const laborRateModifiersActive =
+    Math.abs(laborCostMultiplier - 1) > 0.001 || Math.abs(laborHoursMultiplier - 1) > 0.001;
   const selectedScopeCategories = project?.selectedScopeCategories || [];
   const jobConditions = useMemo(
     () => normalizeProjectJobConditions(project?.jobConditions || createDefaultProjectJobConditions()),
@@ -371,9 +397,22 @@ export function ProjectWorkspace() {
         return;
       }
 
-      patchJobConditions({
-        travelDistanceMiles: distance,
-        remoteTravel: distance > 50 ? true : jobConditions.remoteTravel,
+      setProject((prev) => {
+        if (!prev) return prev;
+        const jc = prev.jobConditions;
+        const autoDelivery =
+          jc.deliveryAutoCalculated && distance !== null
+            ? recommendDeliveryPlan(distance, jc.deliveryDifficulty)
+            : {};
+        return {
+          ...prev,
+          jobConditions: normalizeProjectJobConditions({
+            ...jc,
+            travelDistanceMiles: distance,
+            remoteTravel: distance > 50 ? true : jc.remoteTravel,
+            ...autoDelivery,
+          }),
+        };
       });
     } catch (error) {
       console.error('Distance lookup failed', error);
@@ -848,8 +887,24 @@ export function ProjectWorkspace() {
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <p className="text-xs text-slate-500">Delivery</p>
-                    <p className="font-semibold text-slate-900 mt-1">{jobConditions.deliveryRequired ? 'Included in scope' : 'Not included'}</p>
-                    <p className="text-xs text-slate-500 mt-1">{jobConditions.deliveryRequired ? `${jobConditions.deliveryPricingMode === 'flat' ? formatCurrencySafe(jobConditions.deliveryValue) : jobConditions.deliveryPricingMode === 'percent' ? `${formatNumberSafe(jobConditions.deliveryValue, 2)}% of base` : 'No separate adder'}` : 'No delivery allowance applied'}</p>
+                    <p className="font-semibold text-slate-900 mt-1">
+                      {jobConditions.deliveryQuotedSeparately
+                        ? 'Travel priced separately'
+                        : jobConditions.deliveryRequired
+                          ? 'In scope'
+                          : 'Not included'}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {jobConditions.deliveryQuotedSeparately && isMeaningfulTravelDistanceMiles(jobConditions.travelDistanceMiles)
+                        ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} mi — not in estimate total`
+                        : jobConditions.deliveryRequired
+                          ? jobConditions.deliveryPricingMode === 'flat'
+                            ? formatCurrencySafe(jobConditions.deliveryValue)
+                            : jobConditions.deliveryPricingMode === 'percent'
+                              ? `${formatNumberSafe(jobConditions.deliveryValue, 2)}% of base`
+                              : 'No separate adder'
+                          : 'No delivery allowance applied'}
+                    </p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 md:col-span-2">
                     <p className="text-xs text-slate-500">Included Scope Categories</p>
@@ -965,16 +1020,43 @@ export function ProjectWorkspace() {
                       </select>
                     </label>
                     <label className="text-[11px] font-medium text-slate-700">Location / Region<input className="ui-input mt-1 h-9" value={jobConditions.locationLabel} onChange={(e) => patchJobConditions({ locationLabel: e.target.value })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Material Tax %<input type="number" className="ui-input mt-1 h-9" value={project.taxPercent} onChange={(e) => setProject({ ...project, taxPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Location Tax Override %<input type="number" className="ui-input mt-1 h-9" value={jobConditions.locationTaxPercent ?? ''} onChange={(e) => patchJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) || 0 })} /></label>
+                    {showMaterial ? (
+                      <>
+                        <label className="text-[11px] font-medium text-slate-700">Material Tax %<input type="number" className="ui-input mt-1 h-9" value={project.taxPercent} onChange={(e) => setProject({ ...project, taxPercent: Number(e.target.value) || 0 })} /></label>
+                        <label className="text-[11px] font-medium text-slate-700">Location Tax Override %<input type="number" className="ui-input mt-1 h-9" value={jobConditions.locationTaxPercent ?? ''} onChange={(e) => patchJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) || 0 })} /></label>
+                      </>
+                    ) : null}
                     <label className="text-[11px] font-medium text-slate-700">Labor Basis
                       <input className="ui-input mt-1 h-9 bg-slate-100" value="Union Baseline (Default)" readOnly />
                     </label>
                     <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.laborRateMultiplier} onChange={(e) => patchJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })} /></label>
                     <label className="text-[11px] font-medium text-slate-700">Installers / Crew Size<input type="number" min={1} className="ui-input mt-1 h-9" value={jobConditions.installerCount} onChange={(e) => patchJobConditions({ installerCount: Number(e.target.value) || 1 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Labor Burden %<input type="number" className="ui-input mt-1 h-9" value={project.laborBurdenPercent} onChange={(e) => setProject({ ...project, laborBurdenPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Overhead %<input type="number" className="ui-input mt-1 h-9" value={project.overheadPercent} onChange={(e) => setProject({ ...project, overheadPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Profit %<input type="number" className="ui-input mt-1 h-9" value={project.profitPercent} onChange={(e) => setProject({ ...project, profitPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-[11px] font-medium text-slate-700">Labor burden % (sub)<input type="number" className="ui-input mt-1 h-9" value={project.laborBurdenPercent} onChange={(e) => setProject({ ...project, laborBurdenPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-[11px] font-medium text-slate-700">Material overhead %<input type="number" className="ui-input mt-1 h-9" value={project.overheadPercent} onChange={(e) => setProject({ ...project, overheadPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-[11px] font-medium text-slate-700">Material profit %<input type="number" className="ui-input mt-1 h-9" value={project.profitPercent} onChange={(e) => setProject({ ...project, profitPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-[11px] font-medium text-slate-700">Labor overhead % (sub)<input type="number" className="ui-input mt-1 h-9" value={project.laborOverheadPercent} onChange={(e) => setProject({ ...project, laborOverheadPercent: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-[11px] font-medium text-slate-700">Labor profit % (sub)<input type="number" className="ui-input mt-1 h-9" value={project.laborProfitPercent} onChange={(e) => setProject({ ...project, laborProfitPercent: Number(e.target.value) || 0 })} /></label>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 md:col-span-3 space-y-2">
+                      <label className="text-xs text-slate-700 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={project.subLaborManagementFeeEnabled}
+                          onChange={(e) => setProject({ ...project, subLaborManagementFeeEnabled: e.target.checked })}
+                        />
+                        Sub labor management fee (e.g. 5% on loaded subcontractor labor)
+                      </label>
+                      <label className="text-[11px] font-medium text-slate-700 block max-w-xs">
+                        Fee %
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="ui-input mt-1 h-9"
+                          value={project.subLaborManagementFeePercent}
+                          onChange={(e) => setProject({ ...project, subLaborManagementFeePercent: Number(e.target.value) || 0 })}
+                        />
+                      </label>
+                      <p className="text-[11px] text-slate-500">Install minutes × the default labor rate (Settings) drive subcontractor dollars when line labor cost is blank — modifiers change labor minutes/cost only, not material.</p>
+                    </div>
                   </div>
                   <div className="rounded-xl bg-slate-50/80 border border-slate-200/80 p-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
                     <div>
@@ -1058,17 +1140,59 @@ export function ProjectWorkspace() {
                     <label className="text-[11px] font-medium text-slate-700">Project Adder %<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.estimateAdderPercent} onChange={(e) => patchJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} /></label>
                     <label className="text-[11px] font-medium text-slate-700">Project Adder $<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.estimateAdderAmount} onChange={(e) => patchJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} /></label>
                     <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 md:col-span-3 grid grid-cols-1 md:grid-cols-[1fr_180px_180px] gap-3 items-end">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.deliveryRequired} onChange={(e) => patchJobConditions({ deliveryRequired: e.target.checked })} />Delivery is included in this job</label>
+                      <label className="text-xs text-slate-700 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={jobConditions.deliveryRequired}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              const miles = jobConditions.travelDistanceMiles;
+                              const fromDistance =
+                                miles !== null && miles !== undefined && Number.isFinite(miles) && jobConditions.deliveryAutoCalculated
+                                  ? recommendDeliveryPlan(miles, jobConditions.deliveryDifficulty)
+                                  : {};
+                              patchJobConditions({ deliveryRequired: true, ...fromDistance });
+                            } else {
+                              patchJobConditions({
+                                deliveryRequired: false,
+                                deliveryQuotedSeparately: false,
+                                deliveryAutoCalculated: false,
+                              });
+                            }
+                          }}
+                        />
+                        Delivery is included in this job
+                      </label>
                       <label className="text-[11px] font-medium text-slate-700">Delivery Pricing Mode
-                        <select className="ui-input mt-1 h-9" value={jobConditions.deliveryPricingMode} onChange={(e) => patchJobConditions({ deliveryPricingMode: e.target.value as ProjectJobConditions['deliveryPricingMode'] })}>
+                        <select
+                          className="ui-input mt-1 h-9"
+                          value={jobConditions.deliveryPricingMode}
+                          onChange={(e) =>
+                            patchJobConditions({
+                              deliveryPricingMode: e.target.value as ProjectJobConditions['deliveryPricingMode'],
+                              deliveryAutoCalculated: false,
+                            })
+                          }
+                        >
                           <option value="included">Included / No Charge</option>
                           <option value="flat">Flat Amount</option>
                           <option value="percent">Percent of Base</option>
                         </select>
                       </label>
                       <label className="text-[11px] font-medium text-slate-700">Delivery Value
-                        <input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.deliveryValue} onChange={(e) => patchJobConditions({ deliveryValue: Number(e.target.value) || 0 })} />
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="ui-input mt-1 h-9"
+                          value={jobConditions.deliveryValue}
+                          onChange={(e) =>
+                            patchJobConditions({ deliveryValue: Number(e.target.value) || 0, deliveryAutoCalculated: false })
+                          }
+                        />
                       </label>
+                      <p className="text-[11px] text-slate-500 md:col-span-3">
+                        Auto delivery from distance: under 50 mi — no fee; 50–100 mi — $100 flat; over 100 mi — mark travel as priced separately (no $ in total). Recalculate by refreshing distance after the address is set.
+                      </p>
                     </div>
                   </div>
 
@@ -1337,6 +1461,78 @@ export function ProjectWorkspace() {
                 </div>
               </div>
 
+              <div className="rounded-[20px] border border-slate-200/80 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex min-w-0 gap-3">
+                    <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
+                      <Gauge className="h-5 w-5" aria-hidden />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Subcontractor labor rate</p>
+                      <p className="mt-1 text-xl font-semibold tabular-nums tracking-tight text-slate-950">
+                        {formatCurrencySafe(effectiveLaborCostPerHour)}
+                        <span className="text-base font-semibold text-slate-600">/hr</span>
+                        <span className="ml-2 text-sm font-medium text-slate-500">effective for labor dollars</span>
+                      </p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Configured base{' '}
+                        <span className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(baseLaborRatePerHour)}/hr</span>
+                        {' '}
+                        (Settings){' '}
+                        <span className="text-slate-400">·</span> labor cost multiplier{' '}
+                        <span className="font-semibold tabular-nums text-slate-900">×{formatNumberSafe(laborCostMultiplier, 2)}</span>
+                      </p>
+                      {Math.abs(laborHoursMultiplier - 1) > 0.001 ? (
+                        <p className="mt-1 text-sm text-amber-900">
+                          Scheduled labor time uses a separate multiplier{' '}
+                          <span className="font-semibold tabular-nums">×{formatNumberSafe(laborHoursMultiplier, 2)}</span>
+                          {' '}
+                          (hours and duration; not the same as the $/hr above).
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Labor hours are not scaled beyond line minutes × qty (time multiplier ×1.00).
+                        </p>
+                      )}
+                      <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                        The cost multiplier applies to rolled-up labor dollars (including manual unit labor on lines). Burden, labor O&amp;P, and fees are applied after that in the labor stack. Line-level catalog modifiers are separate—use <span className="font-medium text-slate-600">Edit selected line</span> below.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="w-full shrink-0 rounded-xl border border-slate-200 bg-slate-50/90 p-3 lg:max-w-md">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Project condition notes</p>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('setup')}
+                        className="text-[11px] font-semibold text-blue-700 hover:text-blue-800"
+                      >
+                        Edit in Setup
+                      </button>
+                    </div>
+                    {laborRateModifiersActive ? (
+                      <p className="mt-2 text-[11px] font-medium text-slate-700">
+                        Multipliers above come from job conditions (e.g. labor factor, night work, floors, adders).
+                      </p>
+                    ) : null}
+                    {(summary?.conditionAssumptions?.length || 0) > 0 ? (
+                      <ul className="mt-2 max-h-32 list-disc space-y-1 overflow-y-auto pl-4 text-[11px] leading-snug text-slate-600">
+                        {(summary?.conditionAssumptions || []).slice(0, 10).map((line, idx) => (
+                          <li key={idx}>{line}</li>
+                        ))}
+                      </ul>
+                    ) : laborRateModifiersActive ? (
+                      <p className="mt-2 text-[11px] text-slate-600">Adjust job conditions in Setup to see narrative notes here.</p>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-slate-600">Turn on job conditions in Setup if this job needs productivity or cost adjustments.</p>
+                    )}
+                    {(summary?.conditionAssumptions?.length || 0) > 10 ? (
+                      <p className="mt-2 text-[10px] text-slate-500">Showing 10 of {summary?.conditionAssumptions?.length}. Full list appears in Setup and proposal assumptions.</p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-4 rounded-[20px] border border-slate-200/80 bg-white p-4 shadow-sm">
                 <div className="border-b border-slate-100 pb-4">
                   <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Actions</p>
@@ -1390,9 +1586,30 @@ export function ProjectWorkspace() {
                 <div>
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Rollup</p>
                   <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
-                    <div className={`rounded-xl p-4 shadow-sm ring-1 ${showMaterial ? 'bg-white ring-slate-200/80' : 'bg-slate-50 opacity-50 ring-slate-200/80'}`}><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Material</p><Wallet className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-lg font-semibold tabular-nums text-slate-950">{formatCurrencySafe(summary?.materialSubtotal)}</p><p className="mt-1 text-xs text-slate-500">Installed material</p></div>
-                    <div className={`rounded-xl p-4 shadow-sm ring-1 ${showLabor ? 'bg-white ring-slate-200/80' : 'bg-slate-50 opacity-50 ring-slate-200/80'}`}><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Labor</p><Hammer className="h-4 w-4 text-slate-500" /></div><p className="mt-2 text-lg font-semibold tabular-nums text-slate-950">{formatCurrencySafe(summary?.adjustedLaborSubtotal || summary?.laborSubtotal)}</p><p className="mt-1 text-xs text-slate-500">After conditions</p></div>
-                    <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Markup + tax</p><Sparkles className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-lg font-semibold tabular-nums text-slate-950">{formatCurrencySafe((summary?.taxAmount || 0) + (summary?.overheadAmount || 0) + (summary?.profitAmount || 0) + (summary?.burdenAmount || 0))}</p><p className="mt-1 text-xs text-slate-500">Burden, O&amp;P, tax</p></div>
+                    <div className={`rounded-xl p-4 shadow-sm ring-1 ${showMaterial ? 'bg-white ring-slate-200/80' : 'bg-slate-50 opacity-50 ring-slate-200/80'}`}><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Material</p><Wallet className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-lg font-semibold tabular-nums text-slate-950">{formatCurrencySafe(summary?.materialLoadedSubtotal ?? summary?.materialSubtotal)}</p><p className="mt-1 text-xs text-slate-500">Incl. tax + material O&amp;P</p></div>
+                    <div
+                      className={`rounded-xl p-4 shadow-sm ring-1 ${
+                        showLabor || (pricingMode === 'material_only' && (summary?.laborCompanionProposalTotal ?? 0) > 0)
+                          ? 'bg-white ring-slate-200/80'
+                          : 'bg-slate-50 opacity-50 ring-slate-200/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-slate-500">{pricingMode === 'material_only' ? 'Sub labor proposal' : 'Labor'}</p>
+                        <Hammer className="h-4 w-4 text-slate-500" />
+                      </div>
+                      <p className="mt-2 text-lg font-semibold tabular-nums text-slate-950">
+                        {formatCurrencySafe(
+                          showLabor
+                            ? summary?.laborLoadedSubtotal ?? summary?.adjustedLaborSubtotal ?? summary?.laborSubtotal
+                            : summary?.laborCompanionProposalTotal ?? 0
+                        )}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {showLabor ? 'Loaded subcontractor (burden + labor O&amp;P)' : 'Same takeoff; not in material grand total'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Markup + tax</p><Sparkles className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-lg font-semibold tabular-nums text-slate-950">{formatCurrencySafe((summary?.taxAmount || 0) + (summary?.overheadAmount || 0) + (summary?.profitAmount || 0) + (summary?.burdenAmount || 0) + (summary?.laborOverheadAmount || 0) + (summary?.laborProfitAmount || 0) + (summary?.subLaborManagementFeeAmount || 0))}</p><p className="mt-1 text-xs text-slate-500">Material tax/O&amp;P + sub labor stack</p></div>
                     <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Labor time</p><Clock3 className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-xl font-semibold tabular-nums text-slate-950">{formatNumberSafe(summary?.totalLaborHours || 0, 1)} hr</p><p className="mt-1 text-xs font-medium tabular-nums text-slate-600">{formatNumberSafe(Math.round(summary?.totalLaborMinutes ?? (summary?.totalLaborHours || 0) * 60), 0)} min total</p><p className="mt-0.5 text-xs text-slate-500">After schedule multipliers · line minutes × qty</p></div>
                     <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Days</p><CalendarClock className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-xl font-semibold tabular-nums text-slate-950">{formatNumberSafe(summary?.durationDays || 0, 0)}</p><p className="mt-1 text-xs text-slate-500">Field days</p></div>
                     <div className="rounded-xl bg-slate-900 p-4 text-white shadow-sm"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">Grand total</p><Calculator className="h-4 w-4 text-slate-200" /></div><p className="mt-2 text-xl font-semibold tabular-nums">{formatCurrencySafe(summary?.baseBidTotal)}</p><p className="mt-1 text-xs text-slate-300">Room {formatCurrencySafe(roomSubtotal)}</p></div>
@@ -1793,7 +2010,7 @@ export function ProjectWorkspace() {
                     <span className="ui-chip-soft">{roomNamesById[selectedLine.roomId] || 'Unassigned room'}</span>
                   </div>
                   <h3 className="mt-3 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">Edit line item</h3>
-                  <p className="mt-2 text-[13px] leading-6 text-slate-600">Adjust description, room placement, pricing, notes, and modifiers without losing sight of the line’s sell math.</p>
+                  <p className="mt-2 text-[13px] leading-6 text-slate-600">Adjust description, room placement, pricing, and modifiers without losing sight of the line’s sell math.</p>
                 </div>
                 <button onClick={() => setModifiersModalOpen(false)} className="h-10 rounded-full border border-slate-200 bg-white px-4 text-[11px] font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">Done</button>
               </div>
@@ -1830,9 +2047,11 @@ export function ProjectWorkspace() {
                         <label className="text-[11px] font-medium text-slate-700">Unit
                           <input className="ui-input mt-1 h-10 rounded-xl" value={selectedLine.unit} onChange={(e) => patchLineLocal(selectedLine.id, { unit: e.target.value })} onBlur={() => void persistLine(selectedLine.id)} />
                         </label>
-                        <label className="text-[11px] font-medium text-slate-700 md:col-span-2">Notes
-                          <textarea rows={4} className="ui-textarea mt-1 rounded-2xl" value={selectedLine.notes || ''} onChange={(e) => patchLineLocal(selectedLine.id, { notes: e.target.value || null })} onBlur={() => void persistLine(selectedLine.id)} />
-                        </label>
+                        {activeTab !== 'estimate' ? (
+                          <label className="text-[11px] font-medium text-slate-700 md:col-span-2">Notes
+                            <textarea rows={4} className="ui-textarea mt-1 rounded-2xl" value={selectedLine.notes || ''} onChange={(e) => patchLineLocal(selectedLine.id, { notes: e.target.value || null })} onBlur={() => void persistLine(selectedLine.id)} />
+                          </label>
+                        ) : null}
                       </div>
                     </div>
 

@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import { EstimateSummary, ProjectRecord, SettingsRecord, TakeoffLineRecord } from '../../shared/types/estimator';
-import { buildProjectConditionSummaryLines } from '../../shared/utils/jobConditions';
 import { buildProposalScheduleSections, splitProposalTextLines } from '../../shared/utils/proposalDocument';
 import { DEFAULT_PROPOSAL_ACCEPTANCE_LABEL, DEFAULT_PROPOSAL_CLARIFICATIONS, DEFAULT_PROPOSAL_EXCLUSIONS, DEFAULT_PROPOSAL_INTRO, DEFAULT_PROPOSAL_TERMS } from '../../shared/utils/proposalDefaults';
 import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat';
@@ -24,7 +23,6 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
   const proposalDate = activeProjectDate
     ? new Date(activeProjectDate).toLocaleDateString()
     : new Date().toLocaleDateString();
-  const conditionLines = buildProjectConditionSummaryLines(project.jobConditions);
   const termLines = splitProposalTextLines(settings?.proposalTerms || DEFAULT_PROPOSAL_TERMS);
   const exclusionLines = splitProposalTextLines(settings?.proposalExclusions || DEFAULT_PROPOSAL_EXCLUSIONS);
   const clarificationLines = splitProposalTextLines(settings?.proposalClarifications || DEFAULT_PROPOSAL_CLARIFICATIONS);
@@ -156,21 +154,22 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
         </div>
       </section>
 
-      {conditionLines.length > 0 ? (
-        <section className="mt-10 proposal-section proposal-avoid-break">
-          <h2 className={sectionHeadingClass}>Project assumptions</h2>
-          <ul className="mt-5 max-w-[42rem] space-y-3 border-l-2 border-slate-200 pl-4 text-[13px] leading-relaxed text-slate-600">
-            {conditionLines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
       {project.specialNotes?.trim() ? (
         <section className="mt-10 proposal-section proposal-avoid-break">
           <h2 className={sectionHeadingClass}>Additional notes</h2>
           <p className="mt-5 max-w-[42rem] whitespace-pre-wrap text-[14px] leading-[1.65] text-slate-600">{project.specialNotes}</p>
+        </section>
+      ) : null}
+
+      {pricingMode === 'material_only' && (summary.laborCompanionProposalTotal ?? 0) > 0 && summary.totalLaborHours > 0 ? (
+        <section className="mt-10 proposal-section proposal-avoid-break">
+          <h2 className={sectionHeadingClass}>Subcontractor labor (separate scope)</h2>
+          <p className="mt-4 max-w-[42rem] text-[13px] leading-relaxed text-slate-600">
+            This proposal total reflects <strong>material scope only</strong>. For the same quantities, loaded subcontractor installation is estimated at{' '}
+            <strong className="tabular-nums text-slate-900">{formatCurrencySafe(summary.laborCompanionProposalTotal)}</strong>
+            {' '}
+            ({formatNumberSafe(summary.totalLaborHours, 1)} hr), including sub burden, labor overhead, and labor profit on labor only.
+          </p>
         </section>
       ) : null}
 
@@ -179,15 +178,17 @@ export function ProposalPreview({ project, settings, website, lines, summary }: 
         <div className="mt-6 max-w-md space-y-3 sm:ml-auto">
           {showMaterial ? (
             <div className="flex justify-between gap-6 text-[13px] text-slate-600">
-              <span>Total material</span>
-              <span className="tabular-nums font-medium text-slate-900">{formatCurrencySafe(summary.materialSubtotal)}</span>
+              <span>Material scope (incl. tax, O&amp;P)</span>
+              <span className="tabular-nums font-medium text-slate-900">
+                {formatCurrencySafe(summary.materialLoadedSubtotal ?? summary.materialSubtotal)}
+              </span>
             </div>
           ) : null}
           {showLabor ? (
             <div className="flex justify-between gap-6 text-[13px] text-slate-600">
-              <span>Total labor</span>
+              <span>Subcontractor labor (loaded)</span>
               <span className="tabular-nums font-medium text-slate-900">
-                {formatCurrencySafe(summary.adjustedLaborSubtotal || summary.laborSubtotal)}
+                {formatCurrencySafe(summary.laborLoadedSubtotal ?? summary.adjustedLaborSubtotal ?? summary.laborSubtotal)}
               </span>
             </div>
           ) : null}
