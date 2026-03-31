@@ -184,7 +184,7 @@ function buildAuth(): JWT {
     });
   }
 
-  if (serviceAccountFile) {
+  if (serviceAccountFile && fs.existsSync(serviceAccountFile)) {
     const parsed = JSON.parse(fs.readFileSync(serviceAccountFile, 'utf8'));
     return new JWT({
       email: parsed.client_email,
