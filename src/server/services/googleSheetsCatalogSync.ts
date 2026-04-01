@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'crypto';
+import { createHash, createPrivateKey, randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -271,6 +271,33 @@ function assertPrivateKeyLooksLikePem(key: string, sourceLabel: string): void {
   }
 }
 
+/** Catches corrupted PEM that still matches the BEGIN line regex (common when Secret Manager truncates). */
+function assertPrivateKeyParsesWithNode(pem: string, sourceLabel: string): void {
+  try {
+    createPrivateKey(pem);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `${sourceLabel}: private_key cannot be loaded by Node/OpenSSL (${msg}). The key material is likely truncated or altered in the secret. Fix: IAM → Service accounts → Keys → Add key → JSON, paste the **entire** file into Secret Manager as a new version, redeploy.`
+    );
+  }
+}
+
+const GOOGLE_JWT_SIGNATURE_HINT =
+  'Google returned invalid JWT signature: the assertion was signed with a key Google does not accept. ' +
+  'Fix: (1) Secret value must be the **complete** service account JSON from IAM for **one** key (not the Gemini/API client file unless it is type service_account). ' +
+  '(2) Do not mix GOOGLE_CLIENT_EMAIL from one JSON with GOOGLE_PRIVATE_KEY from another. ' +
+  '(3) If the secret is base64, set GOOGLE_SERVICE_ACCOUNT_BASE64 or store raw JSON starting with {. ' +
+  '(4) Create a new key in IAM, replace the secret, deploy a new revision.';
+
+function enrichGoogleAuthErrorMessage(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes('invalid_grant') && lower.includes('jwt')) {
+    return `${raw}\n\n${GOOGLE_JWT_SIGNATURE_HINT}`;
+  }
+  return raw;
+}
+
 function jwtFromServiceAccountJson(parsed: Record<string, unknown>, sourceLabel: string): JWT {
   if (parsed.type !== 'service_account') {
     throw new Error(
@@ -283,11 +310,7 @@ function jwtFromServiceAccountJson(parsed: Record<string, unknown>, sourceLabel:
     throw new Error(`${sourceLabel}: missing client_email or private_key in service account JSON.`);
   }
   assertPrivateKeyLooksLikePem(key, sourceLabel);
-  if (key.length < 400) {
-    throw new Error(
-      `${sourceLabel}: private_key looks truncated (${key.length} chars). RSA keys are usually 1600+ characters. Re-download the key from IAM and replace the secret.`
-    );
-  }
+  assertPrivateKeyParsesWithNode(key, sourceLabel);
   return new JWT({
     email,
     key,
@@ -314,7 +337,19 @@ function buildAuth(): JWT {
   const credentialFileHint = fileFromEnv || fileFromAdc;
 
   if (serviceAccountJson) {
-    const parsed = parseServiceAccountEnvJson(serviceAccountJson, 'GOOGLE_SERVICE_ACCOUNT');
+    const trimmed = serviceAccountJson.trimStart();
+    let parsed: Record<string, unknown>;
+    if (trimmed.startsWith('{')) {
+      parsed = parseServiceAccountEnvJson(serviceAccountJson, 'GOOGLE_SERVICE_ACCOUNT');
+    } else {
+      const fromB64 = decodeServiceAccountBase64(serviceAccountJson);
+      if (!fromB64) {
+        throw new Error(
+          'GOOGLE_SERVICE_ACCOUNT does not start with "{" and is not valid base64 JSON. Paste the raw service-account .json contents, or use GOOGLE_SERVICE_ACCOUNT_BASE64 for a base64-encoded file.'
+        );
+      }
+      parsed = fromB64;
+    }
     return jwtFromServiceAccountJson(parsed, 'GOOGLE_SERVICE_ACCOUNT');
   }
 
@@ -364,11 +399,7 @@ function buildAuth(): JWT {
   }
 
   assertPrivateKeyLooksLikePem(privateKey, 'GOOGLE_PRIVATE_KEY');
-  if (privateKey.length < 400) {
-    throw new Error(
-      'GOOGLE_PRIVATE_KEY looks truncated. Use the full private_key from the JSON file, or switch to GOOGLE_SERVICE_ACCOUNT with the entire JSON secret.'
-    );
-  }
+  assertPrivateKeyParsesWithNode(privateKey, 'GOOGLE_PRIVATE_KEY');
   return new JWT({
     email: clientEmail,
     key: privateKey,
@@ -547,7 +578,7 @@ export async function backfillTakeoffRegistryToGoogleSheets(): Promise<TakeoffRe
       warnings: uniqueWarnings,
       syncedAt,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const failedCounts = {
       itemsSynced: 0,
       modifiersSynced: 0,
@@ -555,21 +586,26 @@ export async function backfillTakeoffRegistryToGoogleSheets(): Promise<TakeoffRe
       bundleItemsSynced: 0,
     };
 
+    const baseMsg = error instanceof Error ? error.message : String(error);
+    const message = enrichGoogleAuthErrorMessage(
+      baseMsg || 'Takeoff registry backfill failed.'
+    );
+
     updateSyncStatus({
       status: 'failed',
-      message: error.message || 'Takeoff registry backfill failed.',
+      message,
       counts: failedCounts,
       warnings,
     });
 
     insertSyncRun({
       status: 'failed',
-      message: error.message || 'Takeoff registry backfill failed.',
+      message,
       counts: failedCounts,
       warnings,
     });
 
-    throw error;
+    throw new Error(message, error instanceof Error ? { cause: error } : undefined);
   }
 }
 
@@ -1020,7 +1056,7 @@ export async function syncCatalogFromGoogleSheets(): Promise<CatalogSyncResult> 
       warnings: uniqueWarnings,
       syncedAt,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const failedCounts = {
       itemsSynced: 0,
       modifiersSynced: 0,
@@ -1028,19 +1064,23 @@ export async function syncCatalogFromGoogleSheets(): Promise<CatalogSyncResult> 
       bundleItemsSynced: 0,
     };
 
+    const baseMsg = error instanceof Error ? error.message : String(error);
+    const message = enrichGoogleAuthErrorMessage(baseMsg);
+
     updateSyncStatus({
       status: 'failed',
-      message: error.message || 'Catalog sync failed.',
+      message,
       counts: failedCounts,
       warnings,
     });
 
     insertSyncRun({
       status: 'failed',
-      message: error.message || 'Catalog sync failed.',
+      message,
       counts: failedCounts,
       warnings,
     });
-    throw error;
+    const wrapped = new Error(message, error instanceof Error ? { cause: error } : undefined);
+    throw wrapped;
   }
 }
