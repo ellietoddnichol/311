@@ -208,6 +208,38 @@ function readServiceAccountFromFile(filePath: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+/** Fix Cloud Run / env mangling: quoted values, BOM, \\n vs newlines, \\r. */
+function normalizePrivateKeyPem(raw: string): string {
+  let key = String(raw || '').trim();
+  if (key.charCodeAt(0) === 0xfeff) key = key.slice(1).trim();
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+  for (let i = 0; i < 4; i += 1) {
+    const next = key.replace(/\\n/g, '\n');
+    if (next === key) break;
+    key = next;
+  }
+  key = key.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  return key;
+}
+
+function assertPrivateKeyLooksLikePem(key: string, sourceLabel: string): void {
+  const ok =
+    /BEGIN (RSA )?PRIVATE KEY/.test(key) ||
+    /BEGIN EC PRIVATE KEY/.test(key);
+  if (!ok || key.length < 80) {
+    throw new Error(
+      `${sourceLabel}: private_key is not a valid PEM (expected "-----BEGIN PRIVATE KEY-----"). ` +
+        `Cloud Run often breaks keys: recreate the variable from IAM → Service accounts → Keys → Add key → JSON, ` +
+        `or use GOOGLE_SERVICE_ACCOUNT with the full JSON secret. If using GOOGLE_PRIVATE_KEY alone, paste the key with each line separated by the two characters backslash+n, or use a multiline secret; do not wrap the key in extra quotes.`
+    );
+  }
+}
+
 function jwtFromServiceAccountJson(parsed: Record<string, unknown>, sourceLabel: string): JWT {
   if (parsed.type !== 'service_account') {
     throw new Error(
@@ -215,12 +247,11 @@ function jwtFromServiceAccountJson(parsed: Record<string, unknown>, sourceLabel:
     );
   }
   const email = String(parsed.client_email || '').trim();
-  const key = String(parsed.private_key || '')
-    .replace(/\\n/g, '\n')
-    .trim();
+  const key = normalizePrivateKeyPem(String(parsed.private_key || ''));
   if (!email || !key) {
     throw new Error(`${sourceLabel}: missing client_email or private_key in service account JSON.`);
   }
+  assertPrivateKeyLooksLikePem(key, sourceLabel);
   return new JWT({
     email,
     key,
@@ -304,6 +335,7 @@ function buildAuth(): JWT {
     );
   }
 
+  assertPrivateKeyLooksLikePem(privateKey, 'GOOGLE_PRIVATE_KEY');
   return new JWT({
     email: clientEmail,
     key: privateKey,
