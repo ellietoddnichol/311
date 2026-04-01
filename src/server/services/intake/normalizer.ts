@@ -7,7 +7,11 @@
  *   If LLM looks inflated, we use **strict** deterministic parsing on the **full document** (qty / numbered / unit / long phrase / modifiers).
  */
 import type { ExtractedSpreadsheetRow, IntakeProjectMetadata, NormalizedIntakeItem } from '../../../shared/types/intake.ts';
-import { looksLikePdfExtractionNoiseLine, looksLikePdfProposalBoilerplateLine } from '../../../shared/utils/intakeTextGuards.ts';
+import {
+  looksLikeIntakePricingSummaryOrDisclaimerLine,
+  looksLikePdfExtractionNoiseLine,
+  looksLikePdfProposalBoilerplateLine,
+} from '../../../shared/utils/intakeTextGuards.ts';
 import { extractDocumentWithGemini } from '../geminiExtractionService.ts';
 import { intakeAsText, normalizeComparableText } from '../metadataExtractorService.ts';
 import { inferCategoryFromText, normalizeExtractedCategory } from '../rowClassifierService.ts';
@@ -155,6 +159,7 @@ export function normalizePdfLinesDeterministically(
       if (!line) return;
       if (looksLikePdfExtractionNoiseLine(line)) return;
       if (looksLikePdfProposalBoilerplateLine(line)) return;
+      if (looksLikeIntakePricingSummaryOrDisclaimerLine(line)) return;
       if (/^(project|client|owner|gc|general contractor|address|site|bid date|proposal date|estimator|prepared by)\b/i.test(line)) return;
 
       const inferredItemType = detectItemType(line);

@@ -216,6 +216,57 @@ const HEADER_RIBBON_TOKENS = new Set([
  * Section titles, spec callouts, and echoed spreadsheet column headers — not billable scope lines.
  * Dropped at validation so they are not catalog-matched or shown as review items.
  */
+/**
+ * Proposal footers, lump-sum breakdowns, and contact/quote disclaimers — not billable scope lines.
+ * Examples: "Material: $2765", "IF LABOR IS NEEDED, PLEASE CALL FOR QUOTE".
+ */
+export function looksLikeIntakePricingSummaryOrDisclaimerLine(text: string): boolean {
+  const t = intakeTrim(stripIntakeControlCharacters(String(text || ''))).replace(/\s+/g, ' ').trim();
+  if (!t) return true;
+
+  // One-line labeled money subtotals (not "2 EA material hoist …")
+  if (
+    /^(material|labor|sub\s*labor|subcontractor\s*labor|equipment|freight|shipping|delivery|tax|discount|allowance|deposit|retainage)\s*[:\-]\s*\$?\s*[\d,]+(\.\d{2})?\s*$/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  if (/^(subtotal|total|grand\s*total|balance\s*due|amount\s*due|price\s*to\s*owner)\s*[:\-]\s*\$?\s*[\d,]+/i.test(t) && t.length < 96) {
+    return true;
+  }
+
+  // Contact / pricing instructions (any case)
+  if (/\b(call|contact)(\s+us)?\s+(for|to)\s+(a\s+)?(quote|pricing|information|details)\b/i.test(t)) return true;
+  if (/\bplease\s+call\b/i.test(t) && t.length < 160) return true;
+  if (/\b(call|phone)\s+(for|our)\s+(office|shop)\b/i.test(t) && t.length < 120) return true;
+  if (/\bif\s+.*\b(needed|required)\b.*\b(please|call|contact)\b/i.test(t)) return true;
+  if (/^\s*if\s+labor\b/i.test(t)) return true;
+  if (/\blabor\s+(is\s+)?(not\s+)?included\b.*\b(call|contact|quote|separate|additional)\b/i.test(t)) return true;
+  if (/\b(priced|quoted)\s+separately\b/i.test(t) && t.length < 140) return true;
+  if (/\bsee\s+(our\s+)?(office|shop)\s+for\b/i.test(t) && t.length < 120) return true;
+
+  // ALL CAPS instruction blocks (avoid dropping qty-led product lines)
+  if (!/^\d/.test(t) && t.length >= 18 && t.length <= 220) {
+    const letters = t.replace(/[^A-Za-z]/g, '');
+    if (letters.length >= 18) {
+      const upperCount = (t.match(/[A-Z]/g) || []).length;
+      const letterCount = (t.match(/[A-Za-z]/g) || []).length;
+      if (letterCount > 0 && upperCount / letterCount >= 0.82) {
+        if (
+          /\b(PLEASE|CALL|QUOTE|CONTACT|PRICING|SUBJECT\s+TO|NOT\s+INCLUDED|ALLOWANCE|WARRANTY|CONDITIONS|SEPARATELY|ESTIMATE\s+ONLY)\b/.test(
+            t
+          )
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 export function looksLikeIntakeSectionHeaderOrTitleLine(text: string): boolean {
   const t = intakeTrim(stripIntakeControlCharacters(String(text || ''))).replace(/\s+/g, ' ').trim();
   if (!t || t.length > 140) return false;
@@ -280,6 +331,7 @@ export function isPlausibleProposalScopeSnippet(text: string): boolean {
   if (!raw.trim() || raw.includes('\uFFFD')) return false;
   if (looksLikePdfExtractionNoiseLine(raw)) return false;
   if (looksLikePdfProposalBoilerplateLine(raw)) return false;
+  if (looksLikeIntakePricingSummaryOrDisclaimerLine(raw)) return false;
   if (looksLikeIntakeSectionHeaderOrTitleLine(raw)) return false;
 
   const t = intakeTrim(stripIntakeControlCharacters(raw)).replace(/\s+/g, ' ').trim();

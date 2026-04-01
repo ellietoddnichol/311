@@ -24,6 +24,7 @@ import {
   createDefaultProjectJobConditions,
   isMeaningfulTravelDistanceMiles,
   normalizeProjectJobConditions,
+  RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
   recommendDeliveryPlan,
 } from '../shared/utils/jobConditions';
 import {
@@ -1143,85 +1144,142 @@ export function ProjectWorkspace() {
                     </div>
                   </div>
                   </div>
-                  <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3 space-y-2">
-                    <p className="text-xs font-semibold text-slate-900">Field schedule, learning curve &amp; material allowances</p>
-                    <p className="text-[11px] text-slate-600">
-                      Learning curve increases labor hours and labor dollars before job-condition multipliers. Breaks/lunch reduce productive crew-hours per day (field-day count only). Waste and installer consumables add to material scope (skipped when Install Only).
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                      <label className="text-[11px] font-medium text-slate-700">
-                        Paid day length (hr/installer)
-                        <input
-                          type="number"
-                          step="0.25"
-                          min={4}
-                          max={12}
-                          className="ui-input mt-1 h-9"
-                          value={jobConditions.installerPaidDayHours}
-                          onChange={(e) => patchJobConditions({ installerPaidDayHours: Number(e.target.value) || 8 })}
-                        />
-                      </label>
-                      <label className="text-[11px] font-medium text-slate-700">
-                        Breaks / lunch (hr/installer/day)
-                        <input
-                          type="number"
-                          step="0.25"
-                          min={0}
-                          max={4}
-                          className="ui-input mt-1 h-9"
-                          value={jobConditions.dailyBreakHoursPerInstaller}
-                          onChange={(e) => patchJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })}
-                        />
-                      </label>
-                      <label className="text-[11px] font-medium text-slate-700">
-                        Learning curve allowance %
-                        <input
-                          type="number"
-                          step="0.5"
-                          min={0}
-                          className="ui-input mt-1 h-9"
-                          value={jobConditions.laborLearningCurvePercent}
-                          onChange={(e) => patchJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })}
-                        />
-                      </label>
-                      {showMaterial ? (
-                        <>
-                          <label className="text-[11px] font-medium text-slate-700">
-                            Material waste %
-                            <input
-                              type="number"
-                              step="0.5"
-                              min={0}
-                              className="ui-input mt-1 h-9"
-                              value={jobConditions.materialWastePercent}
-                              onChange={(e) => patchJobConditions({ materialWastePercent: Number(e.target.value) || 0 })}
-                            />
-                          </label>
-                          <label className="text-[11px] font-medium text-slate-700">
-                            Field supplies % (after waste)
-                            <input
-                              type="number"
-                              step="0.5"
-                              min={0}
-                              className="ui-input mt-1 h-9"
-                              value={jobConditions.installerFieldSuppliesPercent}
-                              onChange={(e) => patchJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })}
-                            />
-                          </label>
-                          <label className="text-[11px] font-medium text-slate-700">
-                            Field supplies flat $
-                            <input
-                              type="number"
-                              step="1"
-                              min={0}
-                              className="ui-input mt-1 h-9"
-                              value={jobConditions.installerFieldSuppliesFlat}
-                              onChange={(e) => patchJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })}
-                            />
-                          </label>
-                        </>
-                      ) : null}
+                  <div className="rounded-xl border border-slate-200/90 border-l-4 border-l-amber-500 bg-gradient-to-br from-slate-50 via-white to-amber-50/25 p-4 shadow-sm space-y-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-sm font-semibold text-slate-900">Field day &amp; material pad</p>
+                        <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
+                          Starts from typical commercial-fit assumptions (waste, consumables, paid day, break). Use the highlighted block to confirm what matters for <span className="font-medium text-slate-800">this</span> job; open Advanced for learning curve, break detail, and flat consumables.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => patchJobConditions({ ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES })}
+                        className="shrink-0 rounded-lg border border-amber-300/90 bg-white px-3 py-2 text-xs font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
+                      >
+                        Reset to recommended
+                      </button>
                     </div>
+
+                    <div className="rounded-lg border-2 border-amber-400/70 bg-white p-3 shadow-sm ring-1 ring-amber-200/50">
+                      <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <span className="rounded-md bg-amber-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Confirm</span>
+                        <span className="text-xs font-semibold text-slate-800">Adjust if this job differs from your norm</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        <label className="text-[11px] font-medium text-slate-800">
+                          <span className="inline-flex items-center gap-1.5">
+                            Paid day (hr/installer)
+                            <span className="rounded bg-slate-200/90 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">Key</span>
+                          </span>
+                          <input
+                            type="number"
+                            step="0.25"
+                            min={4}
+                            max={12}
+                            className="ui-input mt-1 h-9 border-slate-300"
+                            value={jobConditions.installerPaidDayHours}
+                            onChange={(e) => patchJobConditions({ installerPaidDayHours: Number(e.target.value) || RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.installerPaidDayHours })}
+                          />
+                          <span className="mt-1 block text-[10px] text-slate-500">Usually 8 hr; drives field-day math with breaks (Advanced).</span>
+                        </label>
+                        {showMaterial ? (
+                          <>
+                            <label className="text-[11px] font-medium text-slate-800">
+                              <span className="inline-flex items-center gap-1.5">
+                                Material waste %
+                                <span className="rounded bg-slate-200/90 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">Key</span>
+                              </span>
+                              <input
+                                type="number"
+                                step="0.5"
+                                min={0}
+                                className="ui-input mt-1 h-9 border-slate-300"
+                                value={jobConditions.materialWastePercent}
+                                onChange={(e) =>
+                                  patchJobConditions({ materialWastePercent: Number(e.target.value) || 0 })
+                                }
+                              />
+                              <span className="mt-1 block text-[10px] text-slate-500">Default 10% is a common pad before tax/O&amp;P; lower for repeat SKUs.</span>
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-800">
+                              <span className="inline-flex items-center gap-1.5">
+                                Field supplies % <span className="font-normal text-slate-500">(after waste)</span>
+                                <span className="rounded bg-slate-200/90 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">Key</span>
+                              </span>
+                              <input
+                                type="number"
+                                step="0.5"
+                                min={0}
+                                className="ui-input mt-1 h-9 border-slate-300"
+                                value={jobConditions.installerFieldSuppliesPercent}
+                                onChange={(e) =>
+                                  patchJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })
+                                }
+                              />
+                              <span className="mt-1 block text-[10px] text-slate-500">Default 3% on material after waste for consumables / small parts.</span>
+                            </label>
+                          </>
+                        ) : (
+                          <p className="text-xs text-slate-600 md:col-span-2 py-1">
+                            Install-only bid: material waste and field supplies are hidden (no material dollars in the bid).
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <details className="group rounded-lg border border-slate-300/80 bg-slate-100/60 open:bg-slate-100 shadow-sm">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-200/40 rounded-lg [&::-webkit-details-marker]:hidden">
+                        <span>Advanced — schedule detail &amp; labor pad</span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-600 transition-transform group-open:rotate-180" aria-hidden />
+                      </summary>
+                      <div className="border-t border-slate-200/90 px-3 pb-3 pt-3 space-y-3">
+                        <p className="text-[11px] text-slate-600">
+                          Breaks reduce productive hours per day (duration only). Learning curve scales labor dollars and minutes before job-condition multipliers.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          <label className="text-[11px] font-medium text-slate-700">
+                            Breaks / lunch (hr/installer/day)
+                            <input
+                              type="number"
+                              step="0.25"
+                              min={0}
+                              max={4}
+                              className="ui-input mt-1 h-9 bg-white"
+                              value={jobConditions.dailyBreakHoursPerInstaller}
+                              onChange={(e) => patchJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })}
+                            />
+                            <span className="mt-1 block text-[10px] text-slate-500">Recommended 0.5 hr; set 0 if you already netted breaks elsewhere.</span>
+                          </label>
+                          <label className="text-[11px] font-medium text-slate-700">
+                            Learning curve allowance %
+                            <input
+                              type="number"
+                              step="0.5"
+                              min={0}
+                              className="ui-input mt-1 h-9 bg-white"
+                              value={jobConditions.laborLearningCurvePercent}
+                              onChange={(e) => patchJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })}
+                            />
+                            <span className="mt-1 block text-[10px] text-slate-500">Default 5% mild pad; raise for new crews or complex systems.</span>
+                          </label>
+                          {showMaterial ? (
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Field supplies flat $
+                              <input
+                                type="number"
+                                step="1"
+                                min={0}
+                                className="ui-input mt-1 h-9 bg-white"
+                                value={jobConditions.installerFieldSuppliesFlat}
+                                onChange={(e) => patchJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })}
+                              />
+                              <span className="mt-1 block text-[10px] text-slate-500">Optional lump on top of the % allowance.</span>
+                            </label>
+                          ) : null}
+                        </div>
+                      </div>
+                    </details>
                   </div>
                   <div className="rounded-xl bg-slate-50/80 border border-slate-200/80 p-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
                     <div>
@@ -1522,70 +1580,69 @@ export function ProjectWorkspace() {
         )}
 
         {activeTab === 'takeoff' && (
-          <div className="space-y-4 min-w-0">
-              <div className="rounded-[20px] border border-teal-200/70 bg-gradient-to-br from-white via-white to-teal-50/30 p-4 shadow-sm ring-1 ring-teal-100/80">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2 min-w-0">
+              <div className="rounded-xl border border-teal-200/70 bg-gradient-to-br from-white via-white to-teal-50/30 p-3 shadow-sm ring-1 ring-teal-100/80">
+                <div className="flex flex-col gap-2.5 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-teal-800">Takeoff</p>
-                    <h3 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 md:text-3xl">Quantities &amp; scope</h3>
-                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-                      Build an accurate list: rooms, catalog matches, bundles, and line qty. Dollars and rollups stay on <span className="font-semibold text-slate-800">Estimate</span> so this page stays about &ldquo;what&rdquo; and &ldquo;how much,&rdquo; not final pricing.
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-teal-800">Takeoff</p>
+                    <h3 className="mt-0.5 text-base font-semibold tracking-tight text-slate-950 sm:text-lg">Quantities &amp; scope</h3>
+                    <p className="mt-1 max-w-2xl text-xs leading-snug text-slate-600">
+                      Catalog, bundles, and qty here — pricing on <span className="font-medium text-slate-800">Estimate</span>.
                     </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <span className="rounded-full bg-teal-50 px-3 py-1.5 text-sm font-medium text-teal-900 ring-1 ring-teal-200/80">{activeRoomLines.length} lines in view</span>
-                      <span className="rounded-full bg-white px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-200/80">{rooms.length} rooms</span>
-                      <span className="rounded-full bg-white px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-200/80">{formatNumberSafe(activeRoomQtyTotal, 1)} qty this room</span>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-900 ring-1 ring-teal-200/80">{activeRoomLines.length} lines</span>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-slate-200/80">{rooms.length} rooms</span>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-slate-200/80">{formatNumberSafe(activeRoomQtyTotal, 1)} qty</span>
                     </div>
                   </div>
-                  <div className="flex w-full shrink-0 flex-col gap-3 sm:w-auto lg:min-w-[280px]">
-                    <div className="rounded-xl border border-teal-200/80 bg-teal-50/50 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-teal-900">Active room</p>
-                      <p className="mt-1 truncate text-xl font-semibold text-slate-950">{roomNamesById[activeRoomId] || 'Unassigned'}</p>
-                      <div className="mt-2 space-y-1 text-sm text-slate-700">
-                        <div className="flex items-center justify-between">
+                  <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto lg:min-w-[220px]">
+                    <div className="rounded-lg border border-teal-200/80 bg-teal-50/50 p-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-teal-900">Active room</p>
+                      <p className="truncate text-sm font-semibold text-slate-950 leading-tight">{roomNamesById[activeRoomId] || 'Unassigned'}</p>
+                      <div className="mt-1.5 space-y-0.5 text-[11px] text-slate-700">
+                        <div className="flex items-center justify-between gap-2">
                           <span>Lines</span>
                           <span className="font-semibold tabular-nums text-slate-900">{activeRoomLines.length}</span>
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span>Total qty</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span>Qty</span>
                           <span className="font-semibold tabular-nums text-slate-900">{formatNumberSafe(activeRoomQtyTotal, 1)}</span>
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span>Est. install</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span>Install</span>
                           <span className="font-semibold tabular-nums text-slate-900">{formatLaborDurationMinutes(activeRoomLaborMinutes)}</span>
                         </div>
                       </div>
-                      <p className="mt-3 text-[11px] leading-snug text-teal-900/80">Room dollars and loaded costs: open the Estimate tab.</p>
+                      <p className="mt-1.5 text-[10px] leading-snug text-teal-900/75">Dollars → Estimate tab.</p>
                     </div>
                     <button
                       type="button"
                       onClick={() => setActiveTab('estimate')}
-                      className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-100/80 sm:w-auto"
+                      className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-950 shadow-sm hover:bg-amber-100/80 sm:w-auto"
                     >
-                      Open Estimate for pricing <ArrowRight className="h-4 w-4" />
+                      Estimate for pricing <ArrowRight className="h-3.5 w-3.5" />
                     </button>
-                    <button onClick={() => void addManualLine()} className="ui-btn-primary inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 text-sm font-semibold hover:bg-teal-800 sm:w-auto">
-                      <Sparkles className="h-4 w-4" /> Add manual line
+                    <button onClick={() => void addManualLine()} className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-teal-700 px-3 text-xs font-semibold text-white hover:bg-teal-800 sm:w-auto">
+                      <Sparkles className="h-3.5 w-3.5" /> Add line
                     </button>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-4 rounded-[20px] border border-teal-200/60 bg-white p-4 shadow-sm">
+              <div className="space-y-2.5 rounded-xl border border-teal-200/60 bg-white p-3 shadow-sm">
                 <div>
-                  <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-teal-800">Step 1 — Room</p>
-                      <p className="mt-0.5 text-sm font-semibold text-slate-900">Select the room you are working in</p>
-                      <p className="text-sm text-slate-500">Only lines for this room show in the table below.</p>
+                  <div className="mb-2 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-teal-800">1 · Room</p>
+                      <p className="text-xs text-slate-600">Pick a room — table below filters to it.</p>
                     </div>
-                    <div className="rounded-lg border border-teal-200 bg-teal-50/60 px-4 py-2 text-right">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-teal-900">This room (takeoff)</p>
-                      <p className="text-lg font-semibold tabular-nums text-slate-900">{formatNumberSafe(activeRoomQtyTotal, 1)} <span className="text-sm font-medium text-slate-600">qty</span></p>
-                      <p className="text-[11px] text-slate-600">{formatLaborDurationMinutes(activeRoomLaborMinutes)} install</p>
+                    <div className="rounded-md border border-teal-200 bg-teal-50/60 px-2.5 py-1.5 text-right shrink-0">
+                      <p className="text-[9px] font-semibold uppercase tracking-wide text-teal-900">This room</p>
+                      <p className="text-sm font-semibold tabular-nums text-slate-900 leading-tight">{formatNumberSafe(activeRoomQtyTotal, 1)} <span className="text-[11px] font-normal text-slate-600">qty</span></p>
+                      <p className="text-[10px] text-slate-600">{formatLaborDurationMinutes(activeRoomLaborMinutes)}</p>
                     </div>
                   </div>
-                  <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
+                  <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-0.5">
                     {rooms.map((room) => {
                       const active = room.id === activeRoomId;
                       const metric = roomMetrics[room.id] || { count: 0, subtotal: 0, totalQty: 0, laborMinutes: 0 };
@@ -1594,12 +1651,12 @@ export function ProjectWorkspace() {
                           key={room.id}
                           onClick={() => setActiveRoomId(room.id)}
                           title={`${metric.count} lines · ${formatNumberSafe(metric.totalQty, 1)} qty · ${formatNumberSafe(metric.laborMinutes, 0)} install min (pricing on Estimate)`}
-                          className={`shrink-0 rounded-xl px-4 py-3 text-left transition-all ${active ? 'bg-teal-900 text-white shadow-md ring-2 ring-teal-800' : 'bg-white text-slate-800 shadow-sm ring-1 ring-teal-200/80 hover:bg-teal-50/40'}`}
+                          className={`shrink-0 rounded-lg px-3 py-2 text-left transition-all ${active ? 'bg-teal-900 text-white shadow-sm ring-1 ring-teal-800' : 'bg-white text-slate-800 shadow-sm ring-1 ring-teal-200/80 hover:bg-teal-50/40'}`}
                         >
-                          <div className="min-w-[160px]">
-                            <div className={`text-sm font-semibold ${active ? 'text-white' : 'text-slate-900'}`}>{room.roomName}</div>
-                            <div className={`mt-1 flex items-center justify-between text-xs ${active ? 'text-teal-100' : 'text-slate-600'}`}>
-                              <span>{metric.count} lines</span>
+                          <div className="min-w-[132px]">
+                            <div className={`text-xs font-semibold leading-tight ${active ? 'text-white' : 'text-slate-900'}`}>{room.roomName}</div>
+                            <div className={`mt-0.5 flex items-center justify-between text-[10px] ${active ? 'text-teal-100' : 'text-slate-600'}`}>
+                              <span>{metric.count} ln</span>
                               <span className="tabular-nums font-medium">{formatNumberSafe(metric.totalQty, 1)} qty</span>
                             </div>
                           </div>
@@ -1609,24 +1666,23 @@ export function ProjectWorkspace() {
                   </div>
                 </div>
 
-                <div className="border-t border-teal-100 pt-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-teal-800">Step 2 — Add &amp; match</p>
-                  <p className="mt-1 text-sm text-slate-600">Pull lines from the catalog or bundles, then set qty and notes per line.</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <button onClick={() => setCatalogOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-lg bg-teal-700 px-4 text-sm font-semibold text-white shadow-sm hover:bg-teal-800">Catalog match</button>
-                    <button onClick={() => setBundleModalOpen(true)} className="ui-btn-secondary h-11 rounded-lg px-4 text-sm font-medium">Scope bundles</button>
-                    <button onClick={() => setTakeoffRoomsModalOpen(true)} className="ui-btn-secondary h-11 rounded-lg px-4 text-sm font-medium">Manage rooms</button>
+                <div className="border-t border-teal-100/90 pt-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-teal-800">2 · Add &amp; match</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <button onClick={() => setCatalogOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-teal-700 px-3 text-xs font-semibold text-white shadow-sm hover:bg-teal-800">Catalog match</button>
+                    <button onClick={() => setBundleModalOpen(true)} className="ui-btn-secondary h-9 rounded-lg px-3 text-xs font-medium">Bundles</button>
+                    <button onClick={() => setTakeoffRoomsModalOpen(true)} className="ui-btn-secondary h-9 rounded-lg px-3 text-xs font-medium">Rooms</button>
                   </div>
                 </div>
 
                 <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-teal-800">Step 3 — Line list</p>
-                  <p className="mb-3 text-sm text-slate-600">Edit quantities and descriptions here. Switch to <span className="font-semibold text-slate-800">Estimate</span> when you want loaded dollars, tax, and rollups.</p>
-                  <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Room</p><Layers3 className="h-4 w-4 text-slate-400" /></div><p className="mt-2 truncate text-lg font-semibold text-slate-950">{roomNamesById[activeRoomId] || 'Unassigned'}</p></div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Lines</p><ClipboardList className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">{activeRoomLines.length}</p></div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Qty in room</p><Calculator className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">{formatNumberSafe(activeRoomQtyTotal, 1)}</p></div>
-                    <div className="rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50 to-white p-4 shadow-sm ring-1 ring-teal-200/80"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-teal-900">Est. install time</p><Clock3 className="h-4 w-4 text-teal-600" /></div><p className="mt-2 text-xl font-semibold tabular-nums text-teal-950">{formatLaborDurationMinutes(activeRoomLaborMinutes)}</p><p className="mt-1 text-[11px] text-teal-800/90">From catalog minutes × qty</p></div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-teal-800">3 · Line list</p>
+                  <p className="text-[11px] text-slate-500 mb-1.5">Edit qty below — <span className="font-medium text-slate-700">Estimate</span> for $ rollups.</p>
+                  <div className="mb-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                    <div className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm"><div className="flex items-center justify-between gap-1"><p className="text-[10px] font-semibold uppercase text-slate-500">Room</p><Layers3 className="h-3.5 w-3.5 text-slate-400 shrink-0" /></div><p className="mt-1 truncate text-sm font-semibold text-slate-950">{roomNamesById[activeRoomId] || 'Unassigned'}</p></div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm"><div className="flex items-center justify-between gap-1"><p className="text-[10px] font-semibold uppercase text-slate-500">Lines</p><ClipboardList className="h-3.5 w-3.5 text-slate-400 shrink-0" /></div><p className="mt-1 text-lg font-semibold tabular-nums leading-none text-slate-950">{activeRoomLines.length}</p></div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm"><div className="flex items-center justify-between gap-1"><p className="text-[10px] font-semibold uppercase text-slate-500">Qty</p><Calculator className="h-3.5 w-3.5 text-slate-400 shrink-0" /></div><p className="mt-1 text-lg font-semibold tabular-nums leading-none text-slate-950">{formatNumberSafe(activeRoomQtyTotal, 1)}</p></div>
+                    <div className="rounded-lg border border-teal-200 bg-gradient-to-br from-teal-50 to-white p-2 shadow-sm ring-1 ring-teal-200/80"><div className="flex items-center justify-between gap-1"><p className="text-[10px] font-semibold uppercase text-teal-900">Install</p><Clock3 className="h-3.5 w-3.5 text-teal-600 shrink-0" /></div><p className="mt-1 text-sm font-semibold tabular-nums leading-tight text-teal-950">{formatLaborDurationMinutes(activeRoomLaborMinutes)}</p><p className="mt-0.5 text-[9px] text-teal-800/85">min × qty</p></div>
                   </div>
                 </div>
 

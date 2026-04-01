@@ -1,9 +1,14 @@
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
 import { JWT } from 'google-auth-library';
 import { estimatorDb } from '../db/connection.ts';
 import { TAKEOFF_CATALOG_SEED_ITEMS } from './intake/takeoffCatalogRegistry.ts';
+
+/** Repo root: …/src/server/services → ../../../ */
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 interface SyncCounts {
   itemsSynced: number;
@@ -171,26 +176,87 @@ function insertSyncRun(params: {
   );
 }
 
+/** Resolve a credential path: cwd, then project root (fixes Sync when the process cwd is not the repo root). */
+function resolveGoogleCredentialFilePaths(rawPath: string): string[] {
+  const trimmed = rawPath.trim();
+  if (!trimmed) return [];
+  const out: string[] = [];
+  const push = (p: string) => {
+    if (p && !out.includes(p)) out.push(p);
+  };
+  push(trimmed);
+  if (!path.isAbsolute(trimmed)) {
+    push(path.join(process.cwd(), trimmed));
+    push(path.join(PROJECT_ROOT, trimmed.replace(/^\.\//, '')));
+  }
+  return out;
+}
+
+function readServiceAccountFromFile(filePath: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `Could not read Google credential file "${filePath}". ${msg}. Use a service account JSON (type "service_account", client_email, private_key), not a Gemini API key file.`
+    );
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error(`Invalid JSON in Google credential file "${filePath}".`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function jwtFromServiceAccountJson(parsed: Record<string, unknown>, sourceLabel: string): JWT {
+  if (parsed.type !== 'service_account') {
+    throw new Error(
+      `${sourceLabel}: expected Google Cloud "service_account" JSON (client_email + private_key). Gemini / API-key JSON files will not work for Sheets sync.`
+    );
+  }
+  const email = String(parsed.client_email || '').trim();
+  const key = String(parsed.private_key || '')
+    .replace(/\\n/g, '\n')
+    .trim();
+  if (!email || !key) {
+    throw new Error(`${sourceLabel}: missing client_email or private_key in service account JSON.`);
+  }
+  return new JWT({
+    email,
+    key,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+}
+
 function buildAuth(): JWT {
-  const serviceAccountJson = process.env.GOOGLE_SERVICE_ACCOUNT;
-  const serviceAccountFile = process.env.GOOGLE_SERVICE_ACCOUNT_FILE;
+  const serviceAccountJson = process.env.GOOGLE_SERVICE_ACCOUNT?.trim();
+  const fileFromEnv = process.env.GOOGLE_SERVICE_ACCOUNT_FILE?.trim();
+  const fileFromAdc = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+  const credentialFileHint = fileFromEnv || fileFromAdc;
 
   if (serviceAccountJson) {
-    const parsed = JSON.parse(serviceAccountJson);
-    return new JWT({
-      email: parsed.client_email,
-      key: String(parsed.private_key || '').replace(/\\n/g, '\n'),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(serviceAccountJson) as Record<string, unknown>;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `GOOGLE_SERVICE_ACCOUNT is not valid JSON (${msg}). For Cloud Run, paste the full service-account JSON as one secret. For local dev, use GOOGLE_SERVICE_ACCOUNT_FILE=./your-sa.json instead.`
+      );
+    }
+    return jwtFromServiceAccountJson(parsed, 'GOOGLE_SERVICE_ACCOUNT');
   }
 
-  if (serviceAccountFile && fs.existsSync(serviceAccountFile)) {
-    const parsed = JSON.parse(fs.readFileSync(serviceAccountFile, 'utf8'));
-    return new JWT({
-      email: parsed.client_email,
-      key: String(parsed.private_key || '').replace(/\\n/g, '\n'),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
+  if (credentialFileHint) {
+    const candidates = resolveGoogleCredentialFilePaths(credentialFileHint);
+    const found = candidates.find((p) => fs.existsSync(p));
+    if (!found) {
+      throw new Error(
+        `Google credential file not found. Env: ${fileFromEnv ? 'GOOGLE_SERVICE_ACCOUNT_FILE' : 'GOOGLE_APPLICATION_CREDENTIALS'}="${credentialFileHint}". Tried:\n${candidates.map((p) => `  - ${path.resolve(p)}`).join('\n')}\nPlace the service account JSON in the repo root or set an absolute path. Share the spreadsheet with the service account email (Editor or Viewer).`
+      );
+    }
+    const parsed = readServiceAccountFromFile(found);
+    return jwtFromServiceAccountJson(parsed, `Credential file ${found}`);
   }
 
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL;
@@ -199,11 +265,18 @@ function buildAuth(): JWT {
   if (!clientEmail || !privateKey) {
     const diagnostics = [
       `GOOGLE_SERVICE_ACCOUNT=${serviceAccountJson ? 'set' : 'missing'}`,
-      `GOOGLE_SERVICE_ACCOUNT_FILE=${serviceAccountFile ? 'set' : 'missing'}`,
+      `GOOGLE_SERVICE_ACCOUNT_FILE=${fileFromEnv ? `set (path="${fileFromEnv}")` : 'missing'}`,
+      `GOOGLE_APPLICATION_CREDENTIALS=${fileFromAdc ? `set (path="${fileFromAdc}")` : 'missing'}`,
       `GOOGLE_SERVICE_ACCOUNT_EMAIL=${clientEmail ? 'set' : 'missing'}`,
       `GOOGLE_PRIVATE_KEY=${privateKey ? 'set' : 'missing'}`,
-    ].join(', ');
-    throw new Error(`Missing Google Sheets credentials. Set GOOGLE_SERVICE_ACCOUNT JSON or GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY. (${diagnostics})`);
+    ].join('\n');
+    throw new Error(
+      `Missing Google Sheets credentials. Use one of:\n` +
+        `  1) GOOGLE_SERVICE_ACCOUNT=<full service account JSON string>\n` +
+        `  2) GOOGLE_SERVICE_ACCOUNT_FILE=./service-account.json (or GOOGLE_APPLICATION_CREDENTIALS — same file)\n` +
+        `  3) GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY\n` +
+        `Current status:\n${diagnostics}`
+    );
   }
 
   return new JWT({

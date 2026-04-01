@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import type { IntakeProjectAssumption, IntakeProposalAssist } from '../../shared/types/intake.ts';
-import { isPlausibleProjectTitle } from '../../shared/utils/intakeTextGuards.ts';
+import { isPlausibleProjectTitle, looksLikeIntakePricingSummaryOrDisclaimerLine } from '../../shared/utils/intakeTextGuards.ts';
 import { intakeGeminiResponseSchema, INTAKE_GEMINI_MODEL } from './structuredExtractionSchemas.ts';
 
 export interface GeminiExtractionLine {
@@ -67,6 +67,10 @@ function sanitizeResult(value: any): GeminiExtractionResult {
           notes: asText(line?.notes),
         }))
         .filter((line: GeminiExtractionLine) => line.description || line.itemName)
+        .filter((line: GeminiExtractionLine) => {
+          const id = `${line.itemName} ${line.description}`.trim();
+          return !looksLikeIntakePricingSummaryOrDisclaimerLine(id);
+        })
     : [];
 
   const rooms = Array.isArray(value?.rooms)
@@ -160,6 +164,7 @@ export async function extractIntakeFromGemini(input: ExtractInput): Promise<Gemi
     'Header rows such as room/category/item/description/quantity/unit/labor/material/notes define structure only and must never appear in parsedLines.',
     'Section headers such as Toilet Accessories, Visual Display Boards, or Wall Protection may inform category context but must never appear in parsedLines unless a real scoped item is present.',
     'Ignore repeated field names, bid/proposal labels, generic setup text, parser artifacts, and long raw text blobs when they are not actual scoped items.',
+    'Never emit as parsedLines: lump-sum lines like "Material: $1234" or "Labor: $500", grand totals, or disclaimers such as "IF LABOR IS NEEDED PLEASE CALL FOR QUOTE" — those belong in assumptions or nowhere.',
     'Focus on finding: project name, project number or bid package, client, general contractor, full address, bid date, proposal date, estimator, room or area names, category, item identity, quantity, and unit.',
     'When the source is messy, use semantic reasoning to cleanly group scope lines and separate metadata from actual takeoff content.',
     'Prioritize accurate extraction over guessing; if uncertain, leave blank and add a warning.',

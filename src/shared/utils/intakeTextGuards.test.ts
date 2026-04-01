@@ -5,6 +5,7 @@ import {
   isPlausibleCustomerFacingProposalText,
   isPlausibleProjectTitle,
   isPlausibleProposalScopeSnippet,
+  looksLikeIntakePricingSummaryOrDisclaimerLine,
   looksLikeIntakeSectionHeaderOrTitleLine,
   looksLikePdfExtractionNoiseLine,
   looksLikePdfProposalBoilerplateLine,
@@ -42,6 +43,16 @@ test('looksLikeIntakeSectionHeaderOrTitleLine flags column headers and short div
 test('proposal scope snippets exclude table header ribbons', () => {
   assert.equal(isPlausibleProposalScopeSnippet('Qty Description Unit'), false);
   assert.equal(isPlausibleProposalScopeSnippet('ITEM'), false);
+});
+
+test('looksLikeIntakePricingSummaryOrDisclaimerLine drops totals and labor/quote disclaimers', () => {
+  assert.equal(looksLikeIntakePricingSummaryOrDisclaimerLine('Material: $2765'), true);
+  assert.equal(looksLikeIntakePricingSummaryOrDisclaimerLine('Labor: $1,200.00'), true);
+  assert.equal(looksLikeIntakePricingSummaryOrDisclaimerLine('Subtotal: $4,000'), true);
+  assert.equal(looksLikeIntakePricingSummaryOrDisclaimerLine('IF LABOR IS NEEDED, PLEASE CALL FOR QUOTE'), true);
+  assert.equal(looksLikeIntakePricingSummaryOrDisclaimerLine('Please call our office for pricing on labor.'), true);
+  assert.equal(looksLikeIntakePricingSummaryOrDisclaimerLine('4 EA Stainless grab bar 36 inch'), false);
+  assert.equal(looksLikeIntakePricingSummaryOrDisclaimerLine('Material hoist 1 ton per plans'), false);
 });
 
 test('isPlausibleProjectTitle accepts real warehouse-style job names', () => {

@@ -19,7 +19,11 @@ import { detectSpreadsheetHeaderRow, extractSpreadsheetPreludeText } from './spr
 import { INTAKE_GEMINI_MODEL } from './structuredExtractionSchemas.ts';
 import { classifyIntakeSourceType, deriveDocumentSourceKind } from './fileClassifierService.ts';
 import { extractDocumentWithGemini, extractSpreadsheetWithGemini } from './geminiExtractionService.ts';
-import { coerceSafeProjectName, isPlausibleProjectTitle } from '../../shared/utils/intakeTextGuards.ts';
+import {
+  coerceSafeProjectName,
+  isPlausibleProjectTitle,
+  looksLikeIntakePricingSummaryOrDisclaimerLine,
+} from '../../shared/utils/intakeTextGuards.ts';
 import {
   mergeResolvedMetadata as mergeResolvedMetadataFromService,
   extractMetadataFromText as extractMetadataFromTextFromService,
@@ -322,6 +326,7 @@ function classifyParsedChunk(cells: string[], lineIndex: number, knownMetadata?:
   const metadata = extractMetadataFromCells(compactCells);
 
   if (!text) return { kind: 'ignore', metadata };
+  if (looksLikeIntakePricingSummaryOrDisclaimerLine(text)) return { kind: 'ignore', metadata };
   if (looksLikeHeaderChunk(compactCells)) return { kind: 'header_row', metadata };
   if (hasProjectMetadataValue(metadata) || looksLikeProjectMetadataChunk(text, lineIndex, knownMetadata)) return { kind: 'project_metadata', metadata };
   if (looksLikeIgnoreChunk(text)) return { kind: 'ignore', metadata };
@@ -351,6 +356,7 @@ function shouldKeepNormalizedLine(line: NormalizedIntakeLine, lineIndex: number,
   if (!identity) return false;
   if (looksLikeHeaderChunk([line.itemName, line.description, line.category, line.unit, line.notes])) return false;
   if (looksLikeProjectMetadataChunk(identity, lineIndex, knownMetadata)) return false;
+  if (looksLikeIntakePricingSummaryOrDisclaimerLine(identity)) return false;
   return true;
 }
 

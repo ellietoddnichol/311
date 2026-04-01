@@ -1,6 +1,28 @@
 import { GlobalModifierImpact, ProjectConditions, ProjectJobConditions, ProjectRecord } from '../types/estimator';
 import { formatCurrencySafe, formatNumberSafe, formatPercentSafe } from '../../utils/numberFormat';
 
+/**
+ * Typical commercial / fit-out estimating pad: pre-waste material cushion, consumables on material,
+ * paid day minus a lunch break, mild learning-curve pad on labor dollars and minutes.
+ * Use for new projects and “Reset to recommended” in Project Setup.
+ */
+export const RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES: Pick<
+  ProjectJobConditions,
+  | 'installerPaidDayHours'
+  | 'dailyBreakHoursPerInstaller'
+  | 'laborLearningCurvePercent'
+  | 'materialWastePercent'
+  | 'installerFieldSuppliesPercent'
+  | 'installerFieldSuppliesFlat'
+> = {
+  installerPaidDayHours: 8,
+  dailyBreakHoursPerInstaller: 0.5,
+  laborLearningCurvePercent: 5,
+  materialWastePercent: 10,
+  installerFieldSuppliesPercent: 3,
+  installerFieldSuppliesFlat: 0,
+};
+
 const DEFAULT_JOB_CONDITIONS: ProjectJobConditions = {
   locationLabel: '',
   travelDistanceMiles: null,
@@ -43,12 +65,7 @@ const DEFAULT_JOB_CONDITIONS: ProjectJobConditions = {
   scheduleCompressionMultiplier: 0.1,
   estimateAdderPercent: 0,
   estimateAdderAmount: 0,
-  installerPaidDayHours: 8,
-  dailyBreakHoursPerInstaller: 0,
-  laborLearningCurvePercent: 0,
-  materialWastePercent: 0,
-  installerFieldSuppliesPercent: 0,
-  installerFieldSuppliesFlat: 0,
+  ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
 };
 
 export function createDefaultProjectJobConditions(): ProjectJobConditions {
@@ -85,9 +102,13 @@ export function normalizeProjectJobConditions(input?: Partial<ProjectJobConditio
     return Number.isFinite(parsed) ? parsed : fallback;
   };
 
-  const installerPaidDayHours = clampHours(numeric((merged as Partial<ProjectJobConditions>).installerPaidDayHours, 8), 4, 12);
+  const installerPaidDayHours = clampHours(
+    numeric((merged as Partial<ProjectJobConditions>).installerPaidDayHours, DEFAULT_JOB_CONDITIONS.installerPaidDayHours),
+    4,
+    12
+  );
   const dailyBreakHoursPerInstaller = clampBreakHours(
-    numeric((merged as Partial<ProjectJobConditions>).dailyBreakHoursPerInstaller, 0),
+    numeric((merged as Partial<ProjectJobConditions>).dailyBreakHoursPerInstaller, DEFAULT_JOB_CONDITIONS.dailyBreakHoursPerInstaller),
     installerPaidDayHours
   );
 
@@ -133,14 +154,25 @@ export function normalizeProjectJobConditions(input?: Partial<ProjectJobConditio
     deliveryQuotedSeparately: Boolean((merged as Partial<ProjectJobConditions>).deliveryQuotedSeparately),
     installerPaidDayHours,
     dailyBreakHoursPerInstaller,
-    laborLearningCurvePercent: clampPercent(numeric((merged as Partial<ProjectJobConditions>).laborLearningCurvePercent, 0), 0, 100),
-    materialWastePercent: clampPercent(numeric((merged as Partial<ProjectJobConditions>).materialWastePercent, 0), 0, 100),
-    installerFieldSuppliesPercent: clampPercent(
-      numeric((merged as Partial<ProjectJobConditions>).installerFieldSuppliesPercent, 0),
+    laborLearningCurvePercent: clampPercent(
+      numeric((merged as Partial<ProjectJobConditions>).laborLearningCurvePercent, DEFAULT_JOB_CONDITIONS.laborLearningCurvePercent),
       0,
       100
     ),
-    installerFieldSuppliesFlat: Math.max(0, numeric((merged as Partial<ProjectJobConditions>).installerFieldSuppliesFlat, 0)),
+    materialWastePercent: clampPercent(
+      numeric((merged as Partial<ProjectJobConditions>).materialWastePercent, DEFAULT_JOB_CONDITIONS.materialWastePercent),
+      0,
+      100
+    ),
+    installerFieldSuppliesPercent: clampPercent(
+      numeric((merged as Partial<ProjectJobConditions>).installerFieldSuppliesPercent, DEFAULT_JOB_CONDITIONS.installerFieldSuppliesPercent),
+      0,
+      100
+    ),
+    installerFieldSuppliesFlat: Math.max(
+      0,
+      numeric((merged as Partial<ProjectJobConditions>).installerFieldSuppliesFlat, DEFAULT_JOB_CONDITIONS.installerFieldSuppliesFlat)
+    ),
   };
 }
 

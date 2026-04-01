@@ -104,14 +104,20 @@ Notes:
 - Legacy and v1 tables coexist while migration work continues.
 - Schema initialization is non-destructive and runs at startup.
 
-## Google Sheets Sync Direction
+## Google Sheets catalog sync
 
-Google Sheets is intended as a master-data source for catalog, abbreviations, modifiers, bundles, and defaults.
+The app pulls **ITEMS**, **MODIFIERS**, and **BUNDLES** tabs from a spreadsheet into SQLite (`POST /api/sync/sheets` and the UI Sync button).
 
-Planned pattern:
+**Credentials (pick one):**
 
-- Backend sync routes pull from Sheets and upsert into SQLite
-- Application reads from SQLite, not direct per-screen Sheet calls
+1. `GOOGLE_SERVICE_ACCOUNT` — full service account JSON as a string (typical for Cloud Run / Secret Manager).
+2. `GOOGLE_SERVICE_ACCOUNT_FILE` — path to the JSON file, e.g. `./google-service-account.json` (gitignored). Paths are resolved from **current working directory** and **project root**, so sync still works if `cwd` is not the repo root.
+3. `GOOGLE_APPLICATION_CREDENTIALS` — same as (2); standard Google env name.
+4. `GOOGLE_SERVICE_ACCOUNT_EMAIL` + `GOOGLE_PRIVATE_KEY` — split variables (use `\n` in the key when inline).
+
+The JSON must be a **service account** (`type`, `client_email`, `private_key`). Enable **Google Sheets API** for the GCP project, and **share the spreadsheet** with that `client_email` (Viewer is enough for read sync).
+
+Spreadsheet: `GOOGLE_SHEETS_SPREADSHEET_ID` (or legacy `GOOGLE_SHEETS_ID`). Tab names: `GOOGLE_SHEETS_TAB_*` in `.env.example`.
 
 ## Deployment Readiness
 

@@ -1,9 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ProjectRecord, TakeoffLineRecord } from '../../shared/types/estimator.ts';
-import { buildProjectConditionSummaryLines, createDefaultProjectJobConditions } from '../../shared/utils/jobConditions.ts';
+import {
+  buildProjectConditionSummaryLines,
+  createDefaultProjectJobConditions,
+  RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
+} from '../../shared/utils/jobConditions.ts';
 import { calculateEstimateSummary } from './estimateEngineV1.ts';
 import { getConfiguredLaborRatePerHour } from '../repos/takeoffRepo.ts';
+
+/** Zeros learning/waste/supplies/breaks so tests assert a single modifier (e.g. night work) in isolation. */
+const ISOLATED_FIELD_SCHEDULE = {
+  laborLearningCurvePercent: 0,
+  materialWastePercent: 0,
+  installerFieldSuppliesPercent: 0,
+  installerFieldSuppliesFlat: 0,
+  dailyBreakHoursPerInstaller: 0,
+} as const;
 
 function buildProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
@@ -34,7 +47,7 @@ function buildProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     taxPercent: 8.25,
     pricingMode: 'labor_and_material',
     selectedScopeCategories: [],
-    jobConditions: createDefaultProjectJobConditions(),
+    jobConditions: { ...createDefaultProjectJobConditions(), ...ISOLATED_FIELD_SCHEDULE },
     status: 'Draft',
     notes: null,
     specialNotes: null,
@@ -76,8 +89,17 @@ function buildLine(overrides: Partial<TakeoffLineRecord> = {}): TakeoffLineRecor
   };
 }
 
+test('new project job conditions use recommended field schedule baselines', () => {
+  const j = createDefaultProjectJobConditions();
+  assert.equal(j.materialWastePercent, RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.materialWastePercent);
+  assert.equal(j.installerFieldSuppliesPercent, RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.installerFieldSuppliesPercent);
+  assert.equal(j.laborLearningCurvePercent, RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.laborLearningCurvePercent);
+  assert.equal(j.dailyBreakHoursPerInstaller, RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.dailyBreakHoursPerInstaller);
+});
+
 test('union labor is baseline and does not surface as a modifier', () => {
   const project = buildProject();
+  assert.equal(project.jobConditions.laborLearningCurvePercent, 0);
   const summary = calculateEstimateSummary(project, [buildLine()]);
   const conditionLines = buildProjectConditionSummaryLines(project.jobConditions);
 
@@ -92,6 +114,7 @@ test('night work applies globally to labor totals and labor hours', () => {
   const project = buildProject({
     jobConditions: {
       ...createDefaultProjectJobConditions(),
+      ...ISOLATED_FIELD_SCHEDULE,
       installerCount: 2,
       nightWork: true,
       nightWorkLaborCostMultiplier: 0.2,

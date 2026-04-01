@@ -1,5 +1,6 @@
 import type { NormalizedIntakeItem, ValidationResult } from '../../../shared/types/intake.ts';
 import {
+  looksLikeIntakePricingSummaryOrDisclaimerLine,
   looksLikeIntakeSectionHeaderOrTitleLine,
   looksLikePdfExtractionNoiseLine,
   looksLikePdfProposalBoilerplateLine,
@@ -44,10 +45,15 @@ export function validateNormalizedItems(items: NormalizedIntakeItem[]): Validati
 
   let pdfArtifactLinesDropped = 0;
   let sectionHeaderLinesDropped = 0;
+  let disclaimerOrPricingLinesDropped = 0;
   correctedItems = correctedItems.filter((item) => {
     const desc = item.description || '';
     if (item.sourceType === 'pdf' && (looksLikePdfExtractionNoiseLine(desc) || looksLikePdfProposalBoilerplateLine(desc))) {
       pdfArtifactLinesDropped += 1;
+      return false;
+    }
+    if (looksLikeIntakePricingSummaryOrDisclaimerLine(desc)) {
+      disclaimerOrPricingLinesDropped += 1;
       return false;
     }
     if (looksLikeIntakeSectionHeaderOrTitleLine(desc)) {
@@ -59,6 +65,11 @@ export function validateNormalizedItems(items: NormalizedIntakeItem[]): Validati
   if (pdfArtifactLinesDropped > 0) {
     warnings.push(
       `${pdfArtifactLinesDropped} PDF line(s) were removed as text artifacts (operators, metadata, pipe tokens).`
+    );
+  }
+  if (disclaimerOrPricingLinesDropped > 0) {
+    warnings.push(
+      `${disclaimerOrPricingLinesDropped} line(s) were removed as pricing summaries, totals, or contact/quote disclaimers (not scope items).`
     );
   }
   if (sectionHeaderLinesDropped > 0) {

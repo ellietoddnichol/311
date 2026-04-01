@@ -203,22 +203,22 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
   }, [lines, organizeBy, roomNamesById]);
 
   return (
-    <div className={`overflow-hidden rounded-[16px] border shadow-sm ${isTakeoffView ? 'border-teal-200/70 bg-white ring-1 ring-teal-100/60' : 'border-slate-200/70 bg-white'}`}>
+    <div className={`overflow-hidden border shadow-sm ${isTakeoffView ? 'rounded-xl border-teal-200/70 bg-white ring-1 ring-teal-100/60' : 'rounded-[16px] border-slate-200/70 bg-white'}`}>
       <div className="overflow-y-auto max-h-[min(72vh,900px)]">
-        <table className="w-full table-fixed text-sm">
+        <table className={`w-full table-fixed ${isTakeoffView ? 'text-xs' : 'text-sm'}`}>
           <thead className={`sticky top-0 z-10 border-b ${isTakeoffView ? 'border-teal-200/70 bg-teal-50/70' : 'border-slate-200/70 bg-slate-100'}`}>
             <tr>
               {isTakeoffView ? (
                 <>
-                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Item</th>
-                  <th className="px-3 py-3 w-24 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                  <th className="px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Item</th>
+                  <th className="px-2.5 py-2 w-[4.5rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Qty</th>
                   <th
-                    className="px-3 py-3 w-[7.5rem] text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    className="px-2.5 py-2 w-[6.5rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600"
                     title="Catalog install minutes × qty (before project schedule multipliers)"
                   >
-                    Install time
+                    Install
                   </th>
-                  <th className="px-3 py-3 w-28 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">Actions</th>
+                  <th className="px-2.5 py-2 w-24 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Actions</th>
                 </>
               ) : (
                 <>
@@ -269,9 +269,9 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                   <React.Fragment key={row.id}>
                     {isBundleStart && row.bundleId ? (
                       <tr className="border-b border-violet-100 bg-violet-50/60">
-                        <td colSpan={columnCount} className="px-3 py-3">
+                        <td colSpan={columnCount} className={isTakeoffView ? 'px-2.5 py-2' : 'px-3 py-3'}>
                           <button
-                            className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-violet-800 shadow-sm ring-1 ring-violet-200/70"
+                            className={`inline-flex items-center gap-1.5 rounded-lg bg-white font-medium text-violet-800 shadow-sm ring-1 ring-violet-200/70 ${isTakeoffView ? 'px-2 py-1 text-xs' : 'gap-2 px-3 py-1.5 text-sm'}`}
                             onClick={() => {
                               setCollapsedBundles((prev) => ({
                                 ...prev,
@@ -279,11 +279,17 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                               }));
                             }}
                           >
-                            {collapsedBundles[row.bundleId] ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                            <Layers3 className="h-3.5 w-3.5" />
+                            {collapsedBundles[row.bundleId] ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                            <Layers3 className="h-3 w-3" />
                             {bundleMeta[row.bundleId]?.name || 'Bundle'}
-                            <span className="text-violet-600/90">({bundleMeta[row.bundleId]?.count || 0} lines)</span>
-                            <span className="ml-1 text-violet-900">{formatCurrencySafe(bundleMeta[row.bundleId]?.subtotal)}</span>
+                            <span className="text-violet-600/90">({bundleMeta[row.bundleId]?.count || 0})</span>
+                            {isTakeoffView ? (
+                              <span className="text-violet-800/90 tabular-nums">
+                                · {formatLaborDurationMinutes(bundleMeta[row.bundleId]?.laborMinutesExtended ?? 0)}
+                              </span>
+                            ) : (
+                              <span className="ml-1 text-violet-900">{formatCurrencySafe(bundleMeta[row.bundleId]?.subtotal)}</span>
+                            )}
                           </button>
                         </td>
                       </tr>
@@ -294,9 +300,9 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                     >
                       {isTakeoffView ? (
                         <>
-                          <td className="px-3 py-3 align-top min-w-0">
+                          <td className="px-2.5 py-2 align-top min-w-0">
                             <div
-                              className="text-sm font-semibold leading-snug text-slate-900"
+                              className="text-xs font-semibold leading-snug text-slate-900"
                               title={[
                                 row.description,
                                 row.category || '',
@@ -311,30 +317,30 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                               {row.description || '—'}
                             </div>
                             {row.category ? (
-                              <div className="mt-1 text-xs text-slate-500">{row.category}</div>
+                              <div className="mt-0.5 text-[10px] text-slate-500">{row.category}</div>
                             ) : null}
                             {organizeBy === 'item' && (row.roomHint || row.roomLabel) ? (
-                              <div className="mt-1 text-xs text-slate-500">{row.roomHint || row.roomLabel}</div>
+                              <div className="mt-0.5 text-[10px] text-slate-500">{row.roomHint || row.roomLabel}</div>
                             ) : null}
                           </td>
-                          <td className="px-3 py-3 align-top text-sm font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                          <td className="px-2.5 py-2 align-top text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap">
                             <span>{formatNumberSafe(row.qty, row.qty % 1 === 0 ? 0 : 2)}</span>
-                            <span className="ml-1 text-sm font-medium text-slate-600">{row.unit}</span>
+                            <span className="ml-1 text-[11px] font-medium text-slate-600">{row.unit}</span>
                           </td>
-                          <td className="px-3 py-3 align-top text-sm tabular-nums text-slate-800">
-                            <div className="font-medium leading-snug" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
+                          <td className="px-2.5 py-2 align-top text-xs tabular-nums text-slate-800">
+                            <div className="font-medium leading-tight" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
                               {formatLaborDurationMinutes(row.laborMinutesExtended)}
                             </div>
                             {row.qty !== 1 ? (
-                              <div className="mt-0.5 text-xs font-normal text-slate-500">
-                                {formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)} min/unit
+                              <div className="mt-0.5 text-[10px] font-normal text-slate-500">
+                                {formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)}/u
                               </div>
                             ) : null}
                           </td>
-                          <td className="px-3 py-3 text-right" onClick={stopRowEvent}>
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button type="button" onClick={() => onSelectLine(row.lineId)} className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${selected ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>{selected ? <span className="inline-flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" /> Open</span> : organizeBy === 'item' ? 'Inspect' : 'Edit'}</button>
-                              {row.canDelete ? <button type="button" onClick={(e) => { e.stopPropagation(); onDeleteLine(row.lineId); }} className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700" aria-label="Delete line">×</button> : null}
+                          <td className="px-2.5 py-2 text-right" onClick={stopRowEvent}>
+                            <div className="flex items-center justify-end gap-1">
+                              <button type="button" onClick={() => onSelectLine(row.lineId)} className={`text-[11px] font-semibold px-2 py-1 rounded-md border transition ${selected ? 'border-teal-400 bg-teal-50 text-teal-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>{selected ? <span className="inline-flex items-center gap-0.5"><Sparkles className="h-3 w-3" /> Open</span> : organizeBy === 'item' ? 'View' : 'Edit'}</button>
+                              {row.canDelete ? <button type="button" onClick={(e) => { e.stopPropagation(); onDeleteLine(row.lineId); }} className="text-[11px] font-semibold px-1.5 py-1 rounded-md border border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700" aria-label="Delete line">×</button> : null}
                             </div>
                           </td>
                         </>
