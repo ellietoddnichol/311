@@ -2514,6 +2514,16 @@ export function ProjectIntake() {
                     <label className="text-xs text-slate-600">Adder %<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderPercent} onChange={(e) => patchDraftJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} /></label>
                     <label className="text-xs text-slate-600">Adder $<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderAmount} onChange={(e) => patchDraftJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} /></label>
                     <label className="text-xs text-slate-600">Crew Size<input type="number" min={1} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerCount} onChange={(e) => patchDraftJobConditions({ installerCount: Number(e.target.value) || 1 })} /></label>
+                    <label className="text-xs text-slate-600">Paid day (hr/installer)<input type="number" step="0.25" min={4} max={12} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerPaidDayHours} onChange={(e) => patchDraftJobConditions({ installerPaidDayHours: Number(e.target.value) || 8 })} /></label>
+                    <label className="text-xs text-slate-600">Breaks/lunch (hr/installer/day)<input type="number" step="0.25" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).dailyBreakHoursPerInstaller} onChange={(e) => patchDraftJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })} /></label>
+                    <label className="text-xs text-slate-600">Learning curve %<input type="number" step="0.5" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).laborLearningCurvePercent} onChange={(e) => patchDraftJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })} /></label>
+                    {(projectDraft.pricingMode as PricingMode) !== 'labor_only' ? (
+                      <>
+                        <label className="text-xs text-slate-600">Material waste %<input type="number" step="0.5" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).materialWastePercent} onChange={(e) => patchDraftJobConditions({ materialWastePercent: Number(e.target.value) || 0 })} /></label>
+                        <label className="text-xs text-slate-600">Field supplies % (after waste)<input type="number" step="0.5" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerFieldSuppliesPercent} onChange={(e) => patchDraftJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })} /></label>
+                        <label className="text-xs text-slate-600">Field supplies flat $<input type="number" step="1" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerFieldSuppliesFlat} onChange={(e) => patchDraftJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })} /></label>
+                      </>
+                    ) : null}
                   </div>
                 </div>
 

@@ -142,6 +142,41 @@ test('material-only bid still builds labor companion dollars from minutes when u
   assert.ok(summary.baseBidTotal > 200);
 });
 
+test('material waste, field supplies, learning curve, and breaks affect estimate', () => {
+  const rate = getConfiguredLaborRatePerHour();
+  const project = buildProject({
+    jobConditions: {
+      ...createDefaultProjectJobConditions(),
+      materialWastePercent: 10,
+      installerFieldSuppliesPercent: 5,
+      installerFieldSuppliesFlat: 20,
+      laborLearningCurvePercent: 20,
+      installerCount: 1,
+      dailyBreakHoursPerInstaller: 1,
+      installerPaidDayHours: 8,
+    },
+  });
+  const line = buildLine({
+    materialCost: 100,
+    qty: 1,
+    laborMinutes: 60,
+    laborCost: 0,
+    baseLaborCost: 0,
+    unitSell: 100,
+    lineTotal: 100,
+  });
+  const summary = calculateEstimateSummary(project, [line]);
+  assert.ok(Math.abs(summary.materialSubtotal - 135.5) < 0.05);
+  assert.ok(Math.abs(summary.materialWasteAllowanceAmount - 10) < 0.05);
+  assert.ok(Math.abs(summary.installerFieldSuppliesAmount - 25.5) < 0.05);
+  const baseLabor = Number(((60 / 60) * rate).toFixed(2));
+  assert.ok(Math.abs(summary.laborLearningCurveAllowanceAmount - baseLabor * 0.2) < 0.05);
+  assert.ok(summary.conditionAssumptions.some((a) => /waste/i.test(a)));
+  assert.ok(summary.conditionAssumptions.some((a) => /learning-curve/i.test(a)));
+  assert.ok(summary.conditionAssumptions.some((a) => /breaks/i.test(a)));
+  assert.equal(summary.productiveCrewHoursPerDay, 7);
+});
+
 test('zero travel distance does not appear in condition assumptions or proposal summary lines', () => {
   const project = buildProject({
     jobConditions: {

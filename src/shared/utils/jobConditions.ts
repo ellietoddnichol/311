@@ -43,6 +43,12 @@ const DEFAULT_JOB_CONDITIONS: ProjectJobConditions = {
   scheduleCompressionMultiplier: 0.1,
   estimateAdderPercent: 0,
   estimateAdderAmount: 0,
+  installerPaidDayHours: 8,
+  dailyBreakHoursPerInstaller: 0,
+  laborLearningCurvePercent: 0,
+  materialWastePercent: 0,
+  installerFieldSuppliesPercent: 0,
+  installerFieldSuppliesFlat: 0,
 };
 
 export function createDefaultProjectJobConditions(): ProjectJobConditions {
@@ -78,6 +84,12 @@ export function normalizeProjectJobConditions(input?: Partial<ProjectJobConditio
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
   };
+
+  const installerPaidDayHours = clampHours(numeric((merged as Partial<ProjectJobConditions>).installerPaidDayHours, 8), 4, 12);
+  const dailyBreakHoursPerInstaller = clampBreakHours(
+    numeric((merged as Partial<ProjectJobConditions>).dailyBreakHoursPerInstaller, 0),
+    installerPaidDayHours
+  );
 
   return {
     ...merged,
@@ -119,7 +131,33 @@ export function normalizeProjectJobConditions(input?: Partial<ProjectJobConditio
     estimateAdderPercent: Number.isFinite(Number(merged.estimateAdderPercent)) ? Number(merged.estimateAdderPercent) : 0,
     estimateAdderAmount: Number.isFinite(Number(merged.estimateAdderAmount)) ? Number(merged.estimateAdderAmount) : 0,
     deliveryQuotedSeparately: Boolean((merged as Partial<ProjectJobConditions>).deliveryQuotedSeparately),
+    installerPaidDayHours,
+    dailyBreakHoursPerInstaller,
+    laborLearningCurvePercent: clampPercent(numeric((merged as Partial<ProjectJobConditions>).laborLearningCurvePercent, 0), 0, 100),
+    materialWastePercent: clampPercent(numeric((merged as Partial<ProjectJobConditions>).materialWastePercent, 0), 0, 100),
+    installerFieldSuppliesPercent: clampPercent(
+      numeric((merged as Partial<ProjectJobConditions>).installerFieldSuppliesPercent, 0),
+      0,
+      100
+    ),
+    installerFieldSuppliesFlat: Math.max(0, numeric((merged as Partial<ProjectJobConditions>).installerFieldSuppliesFlat, 0)),
   };
+}
+
+function clampHours(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampBreakHours(breakH: number, paidDay: number): number {
+  if (!Number.isFinite(breakH) || breakH <= 0) return 0;
+  const paid = Number.isFinite(paidDay) && paidDay > 0 ? paidDay : 8;
+  return Math.min(Math.max(0, breakH), Math.max(0, paid - 0.25));
+}
+
+function clampPercent(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
 }
 
 export function recommendedPhasedWorkMultiplier(phaseCount: number): number {
@@ -457,6 +495,28 @@ export function buildProjectConditionSummaryLines(jobConditions?: Partial<Projec
     lines.push(`Approximate travel distance from office: ${formatNumberSafe(travelMilesForSummary, 1)} miles.`);
   }
   if (job.installerCount > 1) lines.push(`Schedule planning assumes a ${job.installerCount}-installer crew.`);
+  if (job.materialWastePercent > 0) {
+    lines.push(`Material waste allowance of ${formatPercentSafe(job.materialWastePercent)} was included on takeoff material.`);
+  }
+  if (job.installerFieldSuppliesFlat > 0 || job.installerFieldSuppliesPercent > 0) {
+    const parts: string[] = [];
+    if (job.installerFieldSuppliesFlat > 0) parts.push(`${formatCurrencySafe(job.installerFieldSuppliesFlat)} flat`);
+    if (job.installerFieldSuppliesPercent > 0) {
+      parts.push(`${formatPercentSafe(job.installerFieldSuppliesPercent)} of material after waste`);
+    }
+    lines.push(`Installer field supplies (consumables) were included: ${parts.join(' and ')}.`);
+  }
+  if (job.laborLearningCurvePercent > 0) {
+    lines.push(
+      `Labor learning-curve allowance of ${formatPercentSafe(job.laborLearningCurvePercent)} was applied to labor hours and labor dollars.`
+    );
+  }
+  if (job.dailyBreakHoursPerInstaller > 0) {
+    const productive = Math.max(0.25, job.installerPaidDayHours - job.dailyBreakHoursPerInstaller);
+    lines.push(
+      `Field-day length ${formatNumberSafe(job.installerPaidDayHours, 1)} hr paid per installer with ${formatNumberSafe(job.dailyBreakHoursPerInstaller, 2)} hr breaks/lunch (${formatNumberSafe(productive, 2)} productive hr/installer/day).`
+    );
+  }
 
   return lines;
 }

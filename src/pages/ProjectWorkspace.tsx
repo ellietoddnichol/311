@@ -52,6 +52,10 @@ interface Summary {
   laborCompanionProposalTotal?: number;
   baseBidTotal: number;
   conditionAssumptions: string[];
+  productiveCrewHoursPerDay?: number;
+  materialWasteAllowanceAmount?: number;
+  installerFieldSuppliesAmount?: number;
+  laborLearningCurveAllowanceAmount?: number;
 }
 
 interface RoomCreationDraft {
@@ -1058,6 +1062,86 @@ export function ProjectWorkspace() {
                       <p className="text-[11px] text-slate-500">Install minutes × the default labor rate (Settings) drive subcontractor dollars when line labor cost is blank — modifiers change labor minutes/cost only, not material.</p>
                     </div>
                   </div>
+                  <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3 space-y-2">
+                    <p className="text-xs font-semibold text-slate-900">Field schedule, learning curve &amp; material allowances</p>
+                    <p className="text-[11px] text-slate-600">
+                      Learning curve increases labor hours and labor dollars before job-condition multipliers. Breaks/lunch reduce productive crew-hours per day (field-day count only). Waste and installer consumables add to material scope (skipped when Install Only).
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      <label className="text-[11px] font-medium text-slate-700">
+                        Paid day length (hr/installer)
+                        <input
+                          type="number"
+                          step="0.25"
+                          min={4}
+                          max={12}
+                          className="ui-input mt-1 h-9"
+                          value={jobConditions.installerPaidDayHours}
+                          onChange={(e) => patchJobConditions({ installerPaidDayHours: Number(e.target.value) || 8 })}
+                        />
+                      </label>
+                      <label className="text-[11px] font-medium text-slate-700">
+                        Breaks / lunch (hr/installer/day)
+                        <input
+                          type="number"
+                          step="0.25"
+                          min={0}
+                          max={4}
+                          className="ui-input mt-1 h-9"
+                          value={jobConditions.dailyBreakHoursPerInstaller}
+                          onChange={(e) => patchJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })}
+                        />
+                      </label>
+                      <label className="text-[11px] font-medium text-slate-700">
+                        Learning curve allowance %
+                        <input
+                          type="number"
+                          step="0.5"
+                          min={0}
+                          className="ui-input mt-1 h-9"
+                          value={jobConditions.laborLearningCurvePercent}
+                          onChange={(e) => patchJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })}
+                        />
+                      </label>
+                      {showMaterial ? (
+                        <>
+                          <label className="text-[11px] font-medium text-slate-700">
+                            Material waste %
+                            <input
+                              type="number"
+                              step="0.5"
+                              min={0}
+                              className="ui-input mt-1 h-9"
+                              value={jobConditions.materialWastePercent}
+                              onChange={(e) => patchJobConditions({ materialWastePercent: Number(e.target.value) || 0 })}
+                            />
+                          </label>
+                          <label className="text-[11px] font-medium text-slate-700">
+                            Field supplies % (after waste)
+                            <input
+                              type="number"
+                              step="0.5"
+                              min={0}
+                              className="ui-input mt-1 h-9"
+                              value={jobConditions.installerFieldSuppliesPercent}
+                              onChange={(e) => patchJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })}
+                            />
+                          </label>
+                          <label className="text-[11px] font-medium text-slate-700">
+                            Field supplies flat $
+                            <input
+                              type="number"
+                              step="1"
+                              min={0}
+                              className="ui-input mt-1 h-9"
+                              value={jobConditions.installerFieldSuppliesFlat}
+                              onChange={(e) => patchJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })}
+                            />
+                          </label>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
                   <div className="rounded-xl bg-slate-50/80 border border-slate-200/80 p-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
                     <div>
                       <p className="font-medium text-slate-900">Job Distance From Office</p>
@@ -1610,7 +1694,7 @@ export function ProjectWorkspace() {
                       </p>
                     </div>
                     <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Markup + tax</p><Sparkles className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-lg font-semibold tabular-nums text-slate-950">{formatCurrencySafe((summary?.taxAmount || 0) + (summary?.overheadAmount || 0) + (summary?.profitAmount || 0) + (summary?.burdenAmount || 0) + (summary?.laborOverheadAmount || 0) + (summary?.laborProfitAmount || 0) + (summary?.subLaborManagementFeeAmount || 0))}</p><p className="mt-1 text-xs text-slate-500">Material tax/O&amp;P + sub labor stack</p></div>
-                    <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Labor time</p><Clock3 className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-xl font-semibold tabular-nums text-slate-950">{formatNumberSafe(summary?.totalLaborHours || 0, 1)} hr</p><p className="mt-1 text-xs font-medium tabular-nums text-slate-600">{formatNumberSafe(Math.round(summary?.totalLaborMinutes ?? (summary?.totalLaborHours || 0) * 60), 0)} min total</p><p className="mt-0.5 text-xs text-slate-500">After schedule multipliers · line minutes × qty</p></div>
+                    <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Labor time</p><Clock3 className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-xl font-semibold tabular-nums text-slate-950">{formatNumberSafe(summary?.totalLaborHours || 0, 1)} hr</p><p className="mt-1 text-xs font-medium tabular-nums text-slate-600">{formatNumberSafe(Math.round(summary?.totalLaborMinutes ?? (summary?.totalLaborHours || 0) * 60), 0)} min total</p><p className="mt-0.5 text-xs text-slate-500">After learning curve &amp; schedule multipliers · line minutes × qty</p><p className="mt-1 text-[10px] text-slate-500">Field days: {formatNumberSafe(summary?.productiveCrewHoursPerDay ?? jobConditions.installerCount * 8, 2)} productive crew-hr/day (paid day minus breaks)</p></div>
                     <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200/80"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-500">Days</p><CalendarClock className="h-4 w-4 text-slate-400" /></div><p className="mt-2 text-xl font-semibold tabular-nums text-slate-950">{formatNumberSafe(summary?.durationDays || 0, 0)}</p><p className="mt-1 text-xs text-slate-500">Field days</p></div>
                     <div className="rounded-xl bg-slate-900 p-4 text-white shadow-sm"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">Grand total</p><Calculator className="h-4 w-4 text-slate-200" /></div><p className="mt-2 text-xl font-semibold tabular-nums">{formatCurrencySafe(summary?.baseBidTotal)}</p><p className="mt-1 text-xs text-slate-300">Room {formatCurrencySafe(roomSubtotal)}</p></div>
                   </div>

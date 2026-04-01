@@ -56,6 +56,18 @@ export interface ProjectJobConditions {
   scheduleCompressionMultiplier: number;
   estimateAdderPercent: number;
   estimateAdderAmount: number;
+  /** Paid field day length per installer (used with breaks for schedule math). Default 8. */
+  installerPaidDayHours: number;
+  /** Non-productive time per installer per day (lunch, breaks) subtracted from paid day for duration only. */
+  dailyBreakHoursPerInstaller: number;
+  /** Extra labor hours and labor $ vs catalog baseline (ramp-in, unfamiliar scope). Applied before job multipliers. */
+  laborLearningCurvePercent: number;
+  /** Material waste % on takeoff material (before field-supplies adders). */
+  materialWastePercent: number;
+  /** Consumables / small parts as % of material after waste (caulk, blades, fasteners, etc.). */
+  installerFieldSuppliesPercent: number;
+  /** Flat allowance for installer consumables ($), added after waste, before field-supplies %. */
+  installerFieldSuppliesFlat: number;
 }
 
 export interface ProjectRecord {
@@ -241,6 +253,14 @@ export interface EstimateSummary {
   baseBidTotal: number;
   conditionAssumptions: string[];
   projectConditions: ProjectConditions;
+  /** Productive crew-hours per day (after breaks) used for field-day count. */
+  productiveCrewHoursPerDay: number;
+  /** $ added for material waste (on raw takeoff material). */
+  materialWasteAllowanceAmount: number;
+  /** $ added for installer field supplies (flat + % of material after waste). */
+  installerFieldSuppliesAmount: number;
+  /** Labor $ attributed to learning-curve allowance (before condition multipliers). */
+  laborLearningCurveAllowanceAmount: number;
 }
 
 export interface InstallReviewEmailDraft {
