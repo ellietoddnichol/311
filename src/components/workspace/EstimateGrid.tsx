@@ -61,10 +61,10 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
   const showMaterial = pricingMode !== 'labor_only';
   const showLabor = pricingMode !== 'material_only';
   const isTakeoffView = viewMode === 'takeoff';
-  const columnCount = isTakeoffView ? 3 : 8 + (showLabor ? 2 : 0) + (showMaterial ? 1 : 0);
+  const columnCount = isTakeoffView ? 4 : 8 + (showLabor ? 2 : 0) + (showMaterial ? 1 : 0);
 
   const bundleMeta = useMemo(() => {
-    const byBundle: Record<string, { count: number; subtotal: number; name: string }> = {};
+    const byBundle: Record<string, { count: number; subtotal: number; name: string; laborMinutesExtended: number }> = {};
     lines.forEach((line) => {
       if (!line.bundleId) return;
       if (!byBundle[line.bundleId]) {
@@ -72,10 +72,12 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
           count: 0,
           subtotal: 0,
           name: line.notes?.trim() || line.category || 'Bundle',
+          laborMinutesExtended: 0,
         };
       }
       byBundle[line.bundleId].count += 1;
       byBundle[line.bundleId].subtotal += line.lineTotal;
+      byBundle[line.bundleId].laborMinutesExtended += Number(line.laborMinutes || 0) * Number(line.qty || 0);
     });
     return byBundle;
   }, [lines]);
@@ -201,15 +203,21 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
   }, [lines, organizeBy, roomNamesById]);
 
   return (
-    <div className={`overflow-hidden rounded-[16px] border shadow-sm ${isTakeoffView ? 'border-amber-200/70 bg-white' : 'border-slate-200/70 bg-white'}`}>
+    <div className={`overflow-hidden rounded-[16px] border shadow-sm ${isTakeoffView ? 'border-teal-200/70 bg-white ring-1 ring-teal-100/60' : 'border-slate-200/70 bg-white'}`}>
       <div className="overflow-y-auto max-h-[min(72vh,900px)]">
         <table className="w-full table-fixed text-sm">
-          <thead className={`sticky top-0 z-10 border-b ${isTakeoffView ? 'border-amber-200/70 bg-amber-50/80' : 'border-slate-200/70 bg-slate-100'}`}>
+          <thead className={`sticky top-0 z-10 border-b ${isTakeoffView ? 'border-teal-200/70 bg-teal-50/70' : 'border-slate-200/70 bg-slate-100'}`}>
             <tr>
               {isTakeoffView ? (
                 <>
                   <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Item</th>
-                  <th className="px-3 py-3 w-28 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                  <th className="px-3 py-3 w-24 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                  <th
+                    className="px-3 py-3 w-[7.5rem] text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    title="Catalog install minutes × qty (before project schedule multipliers)"
+                  >
+                    Install time
+                  </th>
                   <th className="px-3 py-3 w-28 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">Actions</th>
                 </>
               ) : (
@@ -282,7 +290,7 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                     ) : null}
                     <tr
                       onClick={() => onSelectLine(row.lineId)}
-                      className={`cursor-pointer border-b border-slate-100/90 border-l-2 ${sourceLine ? rowAccentClass(sourceLine) : 'border-l-slate-200'} ${selected ? (isTakeoffView ? 'bg-amber-50/90 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.18)]' : 'bg-blue-50/70 shadow-[inset_0_0_0_1px_rgba(11,61,145,0.12)]') : stripe ? 'bg-white' : isTakeoffView ? 'bg-amber-50/10' : 'bg-slate-50/[0.55]'} hover:bg-slate-50 transition-colors`}
+                      className={`cursor-pointer border-b border-slate-100/90 border-l-2 ${sourceLine ? rowAccentClass(sourceLine) : 'border-l-slate-200'} ${selected ? (isTakeoffView ? 'bg-teal-50/90 shadow-[inset_0_0_0_1px_rgba(13,148,136,0.2)]' : 'bg-blue-50/70 shadow-[inset_0_0_0_1px_rgba(11,61,145,0.12)]') : stripe ? 'bg-white' : isTakeoffView ? 'bg-teal-50/[0.12]' : 'bg-slate-50/[0.55]'} hover:bg-slate-50 transition-colors`}
                     >
                       {isTakeoffView ? (
                         <>
@@ -312,6 +320,16 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                           <td className="px-3 py-3 align-top text-sm font-semibold text-slate-800 tabular-nums whitespace-nowrap">
                             <span>{formatNumberSafe(row.qty, row.qty % 1 === 0 ? 0 : 2)}</span>
                             <span className="ml-1 text-sm font-medium text-slate-600">{row.unit}</span>
+                          </td>
+                          <td className="px-3 py-3 align-top text-sm tabular-nums text-slate-800">
+                            <div className="font-medium leading-snug" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
+                              {formatLaborDurationMinutes(row.laborMinutesExtended)}
+                            </div>
+                            {row.qty !== 1 ? (
+                              <div className="mt-0.5 text-xs font-normal text-slate-500">
+                                {formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)} min/unit
+                              </div>
+                            ) : null}
                           </td>
                           <td className="px-3 py-3 text-right" onClick={stopRowEvent}>
                             <div className="flex items-center justify-end gap-1.5">
