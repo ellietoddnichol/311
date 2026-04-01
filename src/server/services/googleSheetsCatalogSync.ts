@@ -228,8 +228,20 @@ function jwtFromServiceAccountJson(parsed: Record<string, unknown>, sourceLabel:
   });
 }
 
+function decodeServiceAccountBase64(raw: string): Record<string, unknown> | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const json = Buffer.from(trimmed, 'base64').toString('utf8');
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 function buildAuth(): JWT {
   const serviceAccountJson = process.env.GOOGLE_SERVICE_ACCOUNT?.trim();
+  const serviceAccountBase64 = process.env.GOOGLE_SERVICE_ACCOUNT_BASE64?.trim();
   const fileFromEnv = process.env.GOOGLE_SERVICE_ACCOUNT_FILE?.trim();
   const fileFromAdc = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
   const credentialFileHint = fileFromEnv || fileFromAdc;
@@ -245,6 +257,16 @@ function buildAuth(): JWT {
       );
     }
     return jwtFromServiceAccountJson(parsed, 'GOOGLE_SERVICE_ACCOUNT');
+  }
+
+  if (serviceAccountBase64) {
+    const fromB64 = decodeServiceAccountBase64(serviceAccountBase64);
+    if (!fromB64) {
+      throw new Error(
+        'GOOGLE_SERVICE_ACCOUNT_BASE64 is set but is not valid base64 or does not decode to JSON. Encode the entire service-account .json file (UTF-8) as one line of standard base64, with no PEM headers or data: prefix.'
+      );
+    }
+    return jwtFromServiceAccountJson(fromB64, 'GOOGLE_SERVICE_ACCOUNT_BASE64');
   }
 
   if (credentialFileHint) {
@@ -265,16 +287,19 @@ function buildAuth(): JWT {
   if (!clientEmail || !privateKey) {
     const diagnostics = [
       `GOOGLE_SERVICE_ACCOUNT=${serviceAccountJson ? 'set' : 'missing'}`,
+      `GOOGLE_SERVICE_ACCOUNT_BASE64=${serviceAccountBase64 ? 'set' : 'missing'}`,
       `GOOGLE_SERVICE_ACCOUNT_FILE=${fileFromEnv ? `set (path="${fileFromEnv}")` : 'missing'}`,
       `GOOGLE_APPLICATION_CREDENTIALS=${fileFromAdc ? `set (path="${fileFromAdc}")` : 'missing'}`,
       `GOOGLE_SERVICE_ACCOUNT_EMAIL=${clientEmail ? 'set' : 'missing'}`,
       `GOOGLE_PRIVATE_KEY=${privateKey ? 'set' : 'missing'}`,
     ].join('\n');
     throw new Error(
-      `Missing Google Sheets credentials. Use one of:\n` +
-        `  1) GOOGLE_SERVICE_ACCOUNT=<full service account JSON string>\n` +
-        `  2) GOOGLE_SERVICE_ACCOUNT_FILE=./service-account.json (or GOOGLE_APPLICATION_CREDENTIALS — same file)\n` +
-        `  3) GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY\n` +
+      `Missing Google Sheets credentials. The server sees none of the supported variables (common on cloud: a local file path in .env does not exist inside the container).\n` +
+        `Use one of:\n` +
+        `  1) GOOGLE_SERVICE_ACCOUNT — paste full service account JSON (one line is OK)\n` +
+        `  2) GOOGLE_SERVICE_ACCOUNT_BASE64 — same JSON file, base64-encoded (single line, no data: prefix)\n` +
+        `  3) GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY — from the JSON; use \\n in the key for newlines\n` +
+        `  4) GOOGLE_SERVICE_ACCOUNT_FILE or GOOGLE_APPLICATION_CREDENTIALS — absolute path to JSON **inside the running container** (e.g. a mounted secret file)\n` +
         `Current status:\n${diagnostics}`
     );
   }
