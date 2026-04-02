@@ -1,19 +1,30 @@
 # Cloud Build → Docker → Artifact Registry → Cloud Run
-# Trigger can override these via substitution variables (same names as Cloud Console).
+# GitHub trigger sets COMMIT_SHA. For manual: gcloud builds submit --substitutions=COMMIT_SHA=$(git rev-parse HEAD)
 substitutions:
   _AR_HOSTNAME: europe-west1-docker.pkg.dev
   _AR_PROJECT_ID: gen-lang-client-0568373820
   _AR_REPOSITORY: cloud-run-source-deploy
-  # Must match Artifact Registry package path (GitHub repo name + service from Cloud Run source deploy).
   _IMAGE_NAME: install331/cwainstall-git
   _DEPLOY_REGION: europe-west1
   _SERVICE_NAME: cwainstall-git
+  # Same runtime SA as your existing Cloud Run revision (act-as permission required on builder SA).
+  _RUN_SERVICE_ACCOUNT: '353363250924-compute@developer.gserviceaccount.com'
 
 options:
   logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+timeout: 1800s
 
 steps:
-  # Tag image with COMMIT_SHA only (same ref deploy uses). Avoids parallel :latest pushes and tag races.
+  # Builder SA must have artifactregistry.repositories.uploadArtifacts (or Writer) on this repo.
+  - id: docker-auth
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - gcloud auth configure-docker $_AR_HOSTNAME --quiet
+
   - id: build
     name: gcr.io/cloud-builders/docker
     args:
@@ -21,6 +32,8 @@ steps:
       - -t
       - $_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$_IMAGE_NAME:$COMMIT_SHA
       - .
+    waitFor:
+      - docker-auth
 
   - id: push
     name: gcr.io/cloud-builders/docker
@@ -32,14 +45,16 @@ steps:
 
   - id: deploy
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - run
-      - deploy
-      - $_SERVICE_NAME
-      - --image=$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$_IMAGE_NAME:$COMMIT_SHA
-      - --region=$_DEPLOY_REGION
-      - --platform=managed
-      - --quiet
+      - -ceu
+      - |
+        gcloud run deploy "$_SERVICE_NAME" \
+          --project="$_AR_PROJECT_ID" \
+          --region="$_DEPLOY_REGION" \
+          --platform=managed \
+          --image="$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$_IMAGE_NAME:$COMMIT_SHA" \
+          --service-account="$_RUN_SERVICE_ACCOUNT" \
+          --quiet
     waitFor:
       - push
