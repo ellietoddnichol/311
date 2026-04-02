@@ -1,5 +1,12 @@
 # Cloud Build → Docker → Artifact Registry → Cloud Run
 # GitHub trigger sets COMMIT_SHA. For manual: gcloud builds submit --substitutions=COMMIT_SHA=$(git rev-parse HEAD)
+#
+# If the trigger runs as labor-catalog@gen-lang-client-0568373820.iam.gserviceaccount.com, that SA needs:
+#   - roles/artifactregistry.writer on repository cloud-run-source-deploy (region europe-west1) — or push step fails
+#   - roles/run.admin on the project — deploy step
+#   - roles/iam.serviceAccountUser on 353363250924-compute@developer.gserviceaccount.com — deploy with --service-account
+#   - roles/logging.logWriter on the project — build logs visible in console
+# One-shot (PowerShell): scripts/grant-labor-catalog-cloud-build-roles.ps1
 substitutions:
   _AR_HOSTNAME: europe-west1-docker.pkg.dev
   _AR_PROJECT_ID: gen-lang-client-0568373820
