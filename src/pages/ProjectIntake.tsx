@@ -16,6 +16,7 @@ import { collectPastProjectDateErrors, mapProjectDateErrors } from '../shared/ut
 import { OFFICE_ADDRESS, getDistanceInMiles } from '../utils/geo';
 import { coerceSafeProjectName, isPlausibleProjectTitle, plausibleTitleFromFileName } from '../shared/utils/intakeTextGuards';
 import { formatCurrencySafe, formatNumberSafe } from '../utils/numberFormat';
+import { SiteAddressAutocomplete } from '../components/intake/SiteAddressAutocomplete';
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
 type IntakeStep = 1 | 2 | 3 | 4 | 5;
@@ -1533,7 +1534,7 @@ export function ProjectIntake() {
             sourceKind: 'text-document',
             metadataSources: [],
             metadataFound: [],
-            metadataMissing: ['projectNumber', 'client', 'generalContractor', 'address', 'bidDate', 'proposalDate', 'estimator'],
+            metadataMissing: ['projectNumber', 'client', 'address', 'bidDate', 'proposalDate', 'estimator'],
             warnings: [],
             totalLines: 0,
             completeLines: 0,
@@ -2457,9 +2458,8 @@ export function ProjectIntake() {
                     <label className="text-xs text-slate-600">Project Name<input className="ui-input mt-1" value={projectDraft.projectName || ''} onChange={(e) => patchProjectDraft({ projectName: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">Bid Package / Job #<input className="ui-input mt-1" value={projectDraft.projectNumber || ''} onChange={(e) => patchProjectDraft({ projectNumber: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">Client<input className="ui-input mt-1" value={projectDraft.clientName || ''} onChange={(e) => patchProjectDraft({ clientName: e.target.value })} /></label>
-                    <label className="text-xs text-slate-600">GC<input className="ui-input mt-1" value={projectDraft.generalContractor || ''} onChange={(e) => patchProjectDraft({ generalContractor: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">Estimator<input className="ui-input mt-1" value={projectDraft.estimator || ''} onChange={(e) => patchProjectDraft({ estimator: e.target.value })} /></label>
-                    <label className="text-xs text-slate-600">Project Type
+                    <label className="text-xs text-slate-600 md:col-span-2">Project Type
                       <select className="ui-input mt-1" value={projectDraft.projectType || 'Commercial'} onChange={(e) => patchProjectDraft({ projectType: e.target.value })}>
                         <option value="Commercial">Commercial</option>
                         <option value="Residential">Residential</option>
@@ -2470,12 +2470,14 @@ export function ProjectIntake() {
                     </label>
                     <label className="text-xs text-slate-600 md:col-span-2">Bid Due Date<input type="date" className={`ui-input mt-1 ${projectDateErrors.bidDate ? 'border-red-300 ring-1 ring-red-200' : ''}`} value={unifiedProjectDate} onChange={(e) => patchProjectDate(e.target.value)} />{projectDateErrors.bidDate ? <span className="mt-1 block text-[11px] text-red-600">{projectDateErrors.bidDate}</span> : null}</label>
                     <label className="text-xs text-slate-600 md:col-span-2">Site Address
-                      <textarea
-                        rows={2}
-                        className="ui-input mt-1 min-h-[84px] py-2"
+                      <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                        Type a few characters — pick a suggestion to fill the full address, or keep typing manually.
+                      </span>
+                      <SiteAddressAutocomplete
+                        className="mt-1"
                         value={projectDraft.address || ''}
-                        onChange={(e) => {
-                          patchProjectDraft({ address: e.target.value });
+                        onChange={(v) => {
+                          patchProjectDraft({ address: v });
                           setDistanceError(null);
                           setDistanceMessage('Address updated. Calculating travel distance...');
                           patchDraftJobConditions({ travelDistanceMiles: null });

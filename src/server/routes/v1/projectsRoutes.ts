@@ -1,9 +1,23 @@
 import { Router } from 'express';
 import { archiveProject, createProject, deleteProject, getProject, listProjects, updateProject } from '../../repos/projectsRepo.ts';
 import { createProjectFile, deleteProjectFile, getProjectFile, listProjectFiles } from '../../repos/projectFilesRepo.ts';
+import { suggestAddresses } from '../../services/addressSuggestService.ts';
 import { calculateDistanceMiles } from '../../services/distanceService.ts';
 
 export const projectsRouter = Router();
+
+projectsRouter.get('/address-suggest', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 3) {
+    return res.json({ data: { suggestions: [] as { label: string }[] } });
+  }
+  try {
+    const suggestions = await suggestAddresses(q);
+    return res.json({ data: { suggestions } });
+  } catch {
+    return res.status(502).json({ error: 'Address suggestions unavailable' });
+  }
+});
 
 projectsRouter.get('/distance', async (req, res) => {
   const address = String(req.query.address || '').trim();
