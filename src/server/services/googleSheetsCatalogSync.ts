@@ -58,7 +58,13 @@ function parseBoolean(input: unknown, defaultValue = true): boolean {
 }
 
 function parseNumber(input: unknown, defaultValue = 0): number {
-  const parsed = Number(String(input ?? '').replace(/,/g, '').trim());
+  let s = String(input ?? '')
+    .trim()
+    .replace(/,/g, '')
+    .replace(/^\s*[$€£]\s*/i, '')
+    .replace(/\s*[$€£]\s*$/i, '')
+    .trim();
+  const parsed = Number(s);
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
@@ -541,7 +547,17 @@ export async function upsertItemInGoogleSheet(input: {
       { aliases: ['Model', 'Model Number'], value: input.model || '' },
       { aliases: ['Description', 'Item Description'], value: input.description || '' },
       { aliases: ['Unit', 'UOM', 'Base Unit'], value: input.unit || 'EA' },
-      { aliases: ['BaseMaterialCost', 'Base Material Cost', 'Material Cost'], value: String(input.baseMaterialCost || 0) },
+      {
+        aliases: [
+          'BaseMaterialCost',
+          'Base Material Cost',
+          'Material Cost',
+          'Material Price',
+          'Unit Price',
+          'Item Price',
+        ],
+        value: String(input.baseMaterialCost || 0),
+      },
       { aliases: ['BaseLaborMinutes', 'Base Labor Minutes', 'Labor Minutes'], value: String(input.baseLaborMinutes || 0) },
       { aliases: ['Active', 'Is Active', 'Enabled'], value: input.active ? 'TRUE' : 'FALSE' },
       { aliases: ['UpdatedAt', 'Updated At'], value: new Date().toISOString() },
@@ -709,7 +725,23 @@ function upsertItems(rows: string[][], warnings: string[]): number {
   const descriptionCol = columnIndex(headers, ['description', 'item description']);
   const itemCol = columnIndex(headers, ['item', 'item name', 'itemname']);
   const uomCol = columnIndex(headers, ['unit', 'uom', 'base unit']);
-  const materialCol = columnIndex(headers, ['material cost', 'basematerialcost', 'base material cost', 'base material', 'material']);
+  // Order matters: avoid bare "material" — it matches "Material Type" etc. before "Material Price".
+  const materialCol = columnIndex(headers, [
+    'base material cost',
+    'material cost',
+    'base material',
+    'basematerialcost',
+    'material price',
+    'unit price',
+    'item price',
+    'list price',
+    'sell price',
+    'net material',
+    'mat cost',
+    'price each',
+    'each price',
+    'material unit cost',
+  ]);
   const laborCol = columnIndex(headers, ['baselaborminutes', 'base labor minutes', 'labor minutes', 'labor mins']);
   const tagsCol = columnIndex(headers, ['keywords', 'tags', 'search terms']);
   const activeCol = columnIndex(headers, ['active', 'is active', 'isactive', 'enabled']);
@@ -722,6 +754,11 @@ function upsertItems(rows: string[][], warnings: string[]): number {
   }
 
   if (skuCol === null && itemKeyCol === null) warnings.push('ITEMS: neither SKU nor Item Key header found; using fallback key for some rows.');
+  if (materialCol === null) {
+    warnings.push(
+      'ITEMS: no material price column found. Add a header such as Material Cost, Material Price, Unit Price, or Base Material Cost — otherwise prices import as 0.'
+    );
+  }
 
   // One-way master mode: Google Sheet defines active catalog records.
   estimatorDb.prepare('UPDATE catalog_items SET active = 0').run();
