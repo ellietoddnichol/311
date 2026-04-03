@@ -62,7 +62,7 @@
 
 @layer utilities {
   .ui-page {
-    @apply mx-auto w-full max-w-[1480px] px-3 py-2 md:px-4 md:py-3;
+    @apply mx-auto w-full max-w-[1600px] px-3 py-2 md:px-4 md:py-3;
   }
 
   .ui-page-narrow {
@@ -106,6 +106,21 @@
   .ui-input:focus {
     border-color: #8faee9;
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  }
+
+  /**
+   * Search / leading icon: `.ui-input` uses `px-3`; a plain `pl-*` on the same element can lose
+   * to `padding-left` from `px-3` in the stylesheet, so text overlaps the icon. These classes
+   * set horizontal padding with higher specificity than `px-3` alone.
+   */
+  .ui-input.ui-input--leading-icon {
+    padding-left: 2.75rem;
+    padding-right: 0.75rem;
+  }
+
+  .ui-input.ui-input--leading-icon-sm {
+    padding-left: 2.5rem;
+    padding-right: 0.5rem;
   }
 
   .ui-textarea {

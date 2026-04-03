@@ -1,0 +1,862 @@
+import React from 'react';
+import { ChevronDown, Info } from 'lucide-react';
+import type { ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord } from '../../shared/types/estimator';
+import { RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES, recommendDeliveryPlan } from '../../shared/utils/jobConditions';
+import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat';
+
+type SummaryLite = {
+  conditionLaborMultiplier?: number;
+  conditionAdjustmentAmount?: number;
+  adjustedLaborSubtotal?: number;
+  conditionAssumptions?: string[];
+};
+
+function FieldBadge({ kind }: { kind: 'required' | 'optional' | 'office' }) {
+  if (kind === 'required') {
+    return (
+      <span className="ml-1.5 inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-900">
+        Required
+      </span>
+    );
+  }
+  if (kind === 'optional') {
+    return (
+      <span className="ml-1.5 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-900">
+        Optional
+      </span>
+    );
+  }
+  return (
+    <span className="ml-1.5 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600">
+      Office default
+    </span>
+  );
+}
+
+function Legend() {
+  return (
+    <div className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2.5 text-[11px] text-slate-600">
+      <span className="font-semibold text-slate-700">Field types:</span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-blue-600" aria-hidden />
+        Required for this estimate
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden />
+        Optional project adjustment
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-slate-300" aria-hidden />
+        Usually matches office defaults
+      </span>
+    </div>
+  );
+}
+
+export interface ProjectSetupWorkspaceProps {
+  project: ProjectRecord;
+  setProject: React.Dispatch<React.SetStateAction<ProjectRecord | null>>;
+  jobConditions: ProjectJobConditions;
+  patchJobConditions: (patch: Partial<ProjectJobConditions>) => void;
+  showMaterial: boolean;
+  scopeCategoryOptions: string[];
+  selectedScopeCategories: string[];
+  toggleScopeCategory: (category: string) => void;
+  rooms: RoomRecord[];
+  setActiveTab: (tab: 'overview' | 'setup' | 'rooms' | 'takeoff' | 'estimate' | 'files' | 'proposal') => void;
+  summary: SummaryLite | null;
+  settings: SettingsRecord | null;
+  distanceError: string | null;
+  distanceCalculating: boolean;
+}
+
+export function ProjectSetupWorkspace({
+  project,
+  setProject,
+  jobConditions,
+  patchJobConditions,
+  showMaterial,
+  scopeCategoryOptions,
+  selectedScopeCategories,
+  toggleScopeCategory,
+  rooms,
+  setActiveTab,
+  summary,
+  settings,
+  distanceError,
+  distanceCalculating,
+}: ProjectSetupWorkspaceProps) {
+  const officeBurden = settings?.defaultLaborBurdenPercent;
+  const officeOverhead = settings?.defaultOverheadPercent;
+  const officeProfit = settings?.defaultProfitPercent;
+  const officeTax = settings?.defaultTaxPercent;
+
+  const matchesOffice = (field: 'burden' | 'overhead' | 'profit' | 'tax'): boolean => {
+    if (!settings) return false;
+    if (field === 'burden') return project.laborBurdenPercent === officeBurden;
+    if (field === 'overhead') return project.overheadPercent === officeOverhead;
+    if (field === 'profit') return project.profitPercent === officeProfit;
+    if (field === 'tax') return project.taxPercent === officeTax;
+    return false;
+  };
+
+  function resetAdvancedPricingToOfficeDefaults() {
+    if (!settings) return;
+    setProject((prev) =>
+      prev
+        ? {
+            ...prev,
+            laborBurdenPercent: settings.defaultLaborBurdenPercent,
+            overheadPercent: settings.defaultOverheadPercent,
+            profitPercent: settings.defaultProfitPercent,
+            taxPercent: settings.defaultTaxPercent,
+            laborOverheadPercent: settings.defaultOverheadPercent,
+            laborProfitPercent: settings.defaultProfitPercent,
+          }
+        : prev
+    );
+    patchJobConditions({
+      ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
+      laborRateMultiplier: 1,
+      installerCount: 1,
+      estimateAdderPercent: 0,
+      estimateAdderAmount: 0,
+    });
+  }
+
+  const deliveryOn = jobConditions.deliveryRequired;
+
+  return (
+    <div className="w-full min-w-0 space-y-10 pb-2">
+      {/* Project details — compact identity */}
+      <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm">
+        <details open className="group">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 [&::-webkit-details-marker]:hidden">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Project details</p>
+              <h2 className="mt-0.5 text-lg font-semibold text-slate-900">Identity &amp; client</h2>
+              <p className="mt-1 text-xs text-slate-500">Name, client, and site — used on proposals and distance.</p>
+            </div>
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-180" />
+          </summary>
+          <div className="grid grid-cols-1 gap-3 px-5 pb-5 pt-2 md:grid-cols-2">
+            <label className="text-[11px] font-medium text-slate-700">
+              Project name
+              <input className="ui-input mt-1 h-9" value={project.projectName} onChange={(e) => setProject({ ...project, projectName: e.target.value })} />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Client
+              <input className="ui-input mt-1 h-9" value={project.clientName || ''} onChange={(e) => setProject({ ...project, clientName: e.target.value || null })} />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Project #
+              <input className="ui-input mt-1 h-9" value={project.projectNumber || ''} onChange={(e) => setProject({ ...project, projectNumber: e.target.value || null })} />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Estimator
+              <input className="ui-input mt-1 h-9" value={project.estimator || ''} onChange={(e) => setProject({ ...project, estimator: e.target.value || null })} />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
+              Address
+              <input className="ui-input mt-1 h-9" value={project.address || ''} onChange={(e) => setProject({ ...project, address: e.target.value || null })} />
+            </label>
+          </div>
+        </details>
+      </section>
+
+      {/* 1 — Project inputs */}
+      <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-5 py-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 1</p>
+          <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Project inputs</h2>
+          <p className="mt-2 max-w-3xl text-sm text-slate-600">
+            Core setup for this bid: how you price, what scope applies, and site context. Most estimates only need these fields.
+          </p>
+          <Legend />
+        </div>
+        <div className="space-y-6 px-5 py-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <label className="text-[11px] font-medium text-slate-800">
+              <span className="inline-flex items-center">
+                Price mode
+                <FieldBadge kind="required" />
+              </span>
+              <select
+                className="ui-input mt-1.5 h-10"
+                value={project.pricingMode || 'labor_and_material'}
+                onChange={(e) => setProject({ ...project, pricingMode: e.target.value as ProjectRecord['pricingMode'] })}
+              >
+                <option value="material_only">Material only</option>
+                <option value="labor_only">Install only</option>
+                <option value="labor_and_material">Material + install</option>
+              </select>
+              <span className="mt-1 block text-[10px] text-slate-500">Controls whether material and/or labor appear in the estimate.</span>
+            </label>
+
+            <label className="text-[11px] font-medium text-slate-800 sm:col-span-2 lg:col-span-2">
+              <span className="inline-flex items-center">
+                Project size
+                <FieldBadge kind="optional" />
+              </span>
+              <select
+                className="ui-input mt-1.5 h-10"
+                value={project.projectSize || 'Medium'}
+                onChange={(e) => setProject({ ...project, projectSize: e.target.value })}
+              >
+                <option value="Small">Small</option>
+                <option value="Medium">Medium</option>
+                <option value="Large">Large</option>
+              </select>
+            </label>
+
+            <label className="text-[11px] font-medium text-slate-800">
+              <span className="inline-flex items-center">
+                Floor level
+                <FieldBadge kind="optional" />
+              </span>
+              <select
+                className="ui-input mt-1.5 h-10"
+                value={project.floorLevel || 'Ground'}
+                onChange={(e) => setProject({ ...project, floorLevel: e.target.value })}
+              >
+                <option value="Ground">Ground</option>
+                <option value="2-3">2–3</option>
+                <option value="4+">4+</option>
+              </select>
+            </label>
+
+            <label className="text-[11px] font-medium text-slate-800">
+              <span className="inline-flex items-center">
+                Floors (building)
+                <FieldBadge kind="optional" />
+              </span>
+              <input
+                type="number"
+                min={1}
+                className="ui-input mt-1.5 h-10"
+                value={jobConditions.floors}
+                onChange={(e) => patchJobConditions({ floors: Number(e.target.value) || 1 })}
+              />
+              <span className="mt-1 block text-[10px] text-slate-500">Stories or levels for vertical labor factors.</span>
+            </label>
+
+            <label className="text-[11px] font-medium text-slate-800">
+              <span className="inline-flex items-center">
+                Wall substrate
+                <FieldBadge kind="optional" />
+              </span>
+              <select
+                className="ui-input mt-1.5 h-10"
+                value={project.wallSubstrate || 'Drywall'}
+                onChange={(e) => setProject({ ...project, wallSubstrate: e.target.value })}
+              >
+                <option value="Drywall">Drywall</option>
+                <option value="CMU">CMU</option>
+                <option value="Concrete">Concrete</option>
+                <option value="Tile">Tile</option>
+              </select>
+            </label>
+
+            <label className="text-[11px] font-medium text-slate-800">
+              <span className="inline-flex items-center">
+                Location / region
+                <FieldBadge kind="optional" />
+              </span>
+              <input
+                className="ui-input mt-1.5 h-10"
+                value={jobConditions.locationLabel}
+                onChange={(e) => patchJobConditions({ locationLabel: e.target.value })}
+                placeholder="e.g. Austin metro"
+              />
+            </label>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-semibold text-slate-800">
+              <span className="inline-flex items-center">
+                Scope categories
+                <FieldBadge kind="required" />
+              </span>
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Filter catalog and takeoff to the trades included on this job.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {scopeCategoryOptions.map((category) => {
+                const active = selectedScopeCategories.includes(category);
+                return (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => toggleScopeCategory(category)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                      active
+                        ? 'border-blue-400 bg-blue-50 text-blue-900 shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    {category}
+                  </button>
+                );
+              })}
+            </div>
+            {scopeCategoryOptions.length === 0 ? <p className="mt-2 text-xs text-slate-500">Categories load after catalog sync.</p> : null}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 rounded border-slate-300"
+                checked={deliveryOn}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    const miles = jobConditions.travelDistanceMiles;
+                    const fromDistance =
+                      miles !== null && miles !== undefined && Number.isFinite(miles) && jobConditions.deliveryAutoCalculated
+                        ? recommendDeliveryPlan(miles, jobConditions.deliveryDifficulty)
+                        : {};
+                    patchJobConditions({ deliveryRequired: true, ...fromDistance });
+                  } else {
+                    patchJobConditions({
+                      deliveryRequired: false,
+                      deliveryQuotedSeparately: false,
+                      deliveryAutoCalculated: false,
+                    });
+                  }
+                }}
+              />
+              <span>
+                <span className="font-semibold">Delivery required / included in this estimate</span>
+                <span className="mt-0.5 block text-xs font-normal text-slate-600">
+                  Turn on when freight or jobsite delivery should be priced. Detail fields stay hidden until this is on.
+                </span>
+              </span>
+            </label>
+
+            {deliveryOn ? (
+              <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-200/80 pt-4 sm:grid-cols-3">
+                <label className="text-[11px] font-medium text-slate-700">
+                  Delivery mode
+                  <select
+                    className="ui-input mt-1 h-9"
+                    value={jobConditions.deliveryPricingMode}
+                    onChange={(e) =>
+                      patchJobConditions({
+                        deliveryPricingMode: e.target.value as ProjectJobConditions['deliveryPricingMode'],
+                        deliveryAutoCalculated: false,
+                      })
+                    }
+                  >
+                    <option value="included">Included / no charge</option>
+                    <option value="flat">Flat amount</option>
+                    <option value="percent">Percent of base</option>
+                  </select>
+                </label>
+                <label className="text-[11px] font-medium text-slate-700">
+                  Delivery $ or %
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="ui-input mt-1 h-9"
+                    value={jobConditions.deliveryValue}
+                    onChange={(e) => patchJobConditions({ deliveryValue: Number(e.target.value) || 0, deliveryAutoCalculated: false })}
+                  />
+                </label>
+                <label className="text-[11px] font-medium text-slate-700">
+                  Lead time (days)
+                  <input
+                    type="number"
+                    min={0}
+                    className="ui-input mt-1 h-9"
+                    value={jobConditions.deliveryLeadDays}
+                    onChange={(e) => patchJobConditions({ deliveryLeadDays: Number(e.target.value) || 0 })}
+                  />
+                </label>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-slate-200 bg-white px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-slate-900">Rooms &amp; areas</p>
+              <p className="text-xs text-slate-500">{rooms.length} room(s) — organize takeoff lines.</p>
+            </div>
+            <button type="button" onClick={() => setActiveTab('rooms')} className="ui-btn-secondary h-9 px-4 text-xs font-semibold">
+              Manage rooms
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* 2 — Job conditions (chips) */}
+      <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm px-5 py-5">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 2</p>
+        <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Job conditions</h2>
+        <p className="mt-2 max-w-3xl text-sm text-slate-600">
+          Toggle only what applies. These adjust labor multipliers — they are not the same as company pricing defaults below.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {(
+            [
+              ['occupiedBuilding', 'Occupied building', jobConditions.occupiedBuilding],
+              ['restrictedAccess', 'Restricted access', jobConditions.restrictedAccess],
+              ['nightWork', 'Night work', jobConditions.nightWork],
+              ['phasedWork', 'Phased work', jobConditions.phasedWork],
+              ['remoteTravel', 'Remote travel', jobConditions.remoteTravel],
+              ['scheduleCompression', 'Schedule compression', jobConditions.scheduleCompression],
+              ['smallJobFactor', 'Small job factor', jobConditions.smallJobFactor],
+            ] as const
+          ).map(([key, label, on]) => (
+            <button
+              key={key}
+              type="button"
+              role="switch"
+              aria-checked={on}
+              onClick={() => patchJobConditions({ [key]: !on } as Partial<ProjectJobConditions>)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                on ? 'border-slate-800 bg-slate-900 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-4 flex items-start gap-2 text-[11px] text-slate-500">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+          Fine-tune per-condition multipliers and floor access in <strong className="font-medium text-slate-700">Advanced pricing defaults</strong> when needed.
+        </p>
+      </section>
+
+      {/* 3 — Advanced pricing (collapsed) */}
+      <details className="group rounded-2xl border border-slate-300/80 bg-slate-50/50 shadow-sm open:bg-white">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 3</p>
+            <h2 className="mt-0.5 text-xl font-semibold text-slate-900">Advanced pricing defaults</h2>
+            <p className="mt-1 text-sm text-slate-600">Office-style markups, burdens, field allowances, and adders. Collapsed by default — open when this job differs from your norms.</p>
+          </div>
+          <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" />
+        </summary>
+
+        <div className="space-y-6 border-t border-slate-200 px-5 pb-6 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-slate-600">
+              Values here usually match your <strong className="font-medium text-slate-800">Settings → estimate defaults</strong>. Edit only when this job needs an exception.
+            </p>
+            <button
+              type="button"
+              onClick={resetAdvancedPricingToOfficeDefaults}
+              disabled={!settings}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+            >
+              Reset to office defaults
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <label className="text-[11px] font-medium text-slate-700">
+              Labor burden % (sub)
+              {matchesOffice('burden') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
+              <input
+                type="number"
+                className="ui-input mt-1 h-9"
+                value={project.laborBurdenPercent}
+                onChange={(e) => setProject({ ...project, laborBurdenPercent: Number(e.target.value) || 0 })}
+              />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Material overhead %
+              {matchesOffice('overhead') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
+              <input
+                type="number"
+                className="ui-input mt-1 h-9"
+                value={project.overheadPercent}
+                onChange={(e) => setProject({ ...project, overheadPercent: Number(e.target.value) || 0 })}
+              />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Material profit %
+              {matchesOffice('profit') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
+              <input
+                type="number"
+                className="ui-input mt-1 h-9"
+                value={project.profitPercent}
+                onChange={(e) => setProject({ ...project, profitPercent: Number(e.target.value) || 0 })}
+              />
+            </label>
+            {showMaterial ? (
+              <label className="text-[11px] font-medium text-slate-700">
+                Material tax %
+                {matchesOffice('tax') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
+                <input
+                  type="number"
+                  className="ui-input mt-1 h-9"
+                  value={project.taxPercent}
+                  onChange={(e) => setProject({ ...project, taxPercent: Number(e.target.value) || 0 })}
+                />
+              </label>
+            ) : null}
+            <label className="text-[11px] font-medium text-slate-700">
+              Location tax override %
+              <FieldBadge kind="optional" />
+              <input
+                type="number"
+                className="ui-input mt-1 h-9"
+                value={jobConditions.locationTaxPercent ?? ''}
+                onChange={(e) => patchJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) || 0 })}
+                placeholder="Leave blank to use material tax"
+              />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Labor factor (multiplier)
+              <FieldBadge kind="optional" />
+              <input
+                type="number"
+                step="0.01"
+                className="ui-input mt-1 h-9"
+                value={jobConditions.laborRateMultiplier}
+                onChange={(e) => patchJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })}
+              />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Crew size (installers)
+              <FieldBadge kind="optional" />
+              <input
+                type="number"
+                min={1}
+                className="ui-input mt-1 h-9"
+                value={jobConditions.installerCount}
+                onChange={(e) => patchJobConditions({ installerCount: Number(e.target.value) || 1 })}
+              />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Labor overhead % (sub)
+              <FieldBadge kind="optional" />
+              <input
+                type="number"
+                className="ui-input mt-1 h-9"
+                value={project.laborOverheadPercent}
+                onChange={(e) => setProject({ ...project, laborOverheadPercent: Number(e.target.value) || 0 })}
+              />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Labor profit % (sub)
+              <FieldBadge kind="optional" />
+              <input
+                type="number"
+                className="ui-input mt-1 h-9"
+                value={project.laborProfitPercent}
+                onChange={(e) => setProject({ ...project, laborProfitPercent: Number(e.target.value) || 0 })}
+              />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Project adder %
+              <FieldBadge kind="optional" />
+              <input
+                type="number"
+                step="0.01"
+                className="ui-input mt-1 h-9"
+                value={jobConditions.estimateAdderPercent}
+                onChange={(e) => patchJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })}
+              />
+            </label>
+            <label className="text-[11px] font-medium text-slate-700">
+              Project adder $
+              <FieldBadge kind="optional" />
+              <input
+                type="number"
+                step="0.01"
+                className="ui-input mt-1 h-9"
+                value={jobConditions.estimateAdderAmount}
+                onChange={(e) => patchJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })}
+              />
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+            <p className="text-xs font-semibold text-slate-900">Field day &amp; material pad</p>
+            <p className="mt-1 text-[11px] text-slate-600">Paid day, breaks, learning curve, waste, and field supplies — typical commercial-fit assumptions.</p>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+              <label className="text-[11px] font-medium text-slate-700">
+                Paid day (hr/installer)
+                <input
+                  type="number"
+                  step="0.25"
+                  min={4}
+                  max={12}
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.installerPaidDayHours}
+                  onChange={(e) => patchJobConditions({ installerPaidDayHours: Number(e.target.value) || RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.installerPaidDayHours })}
+                />
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">
+                Breaks / lunch (hr/installer/day)
+                <input
+                  type="number"
+                  step="0.25"
+                  min={0}
+                  max={4}
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.dailyBreakHoursPerInstaller}
+                  onChange={(e) => patchJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">
+                Learning curve %
+                <input
+                  type="number"
+                  step="0.5"
+                  min={0}
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.laborLearningCurvePercent}
+                  onChange={(e) => patchJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })}
+                />
+              </label>
+              {showMaterial ? (
+                <>
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Material waste %
+                    <input
+                      type="number"
+                      step="0.5"
+                      min={0}
+                      className="ui-input mt-1 h-9"
+                      value={jobConditions.materialWastePercent}
+                      onChange={(e) => patchJobConditions({ materialWastePercent: Number(e.target.value) || 0 })}
+                    />
+                  </label>
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Field supplies % (after waste)
+                    <input
+                      type="number"
+                      step="0.5"
+                      min={0}
+                      className="ui-input mt-1 h-9"
+                      value={jobConditions.installerFieldSuppliesPercent}
+                      onChange={(e) => patchJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })}
+                    />
+                  </label>
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Field supplies flat $
+                    <input
+                      type="number"
+                      step="1"
+                      min={0}
+                      className="ui-input mt-1 h-9"
+                      value={jobConditions.installerFieldSuppliesFlat}
+                      onChange={(e) => patchJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })}
+                    />
+                  </label>
+                </>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => patchJobConditions({ ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES })}
+              className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-950 hover:bg-amber-100"
+            >
+              Reset field schedule to recommended
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-semibold text-slate-900">Sub labor management fee</p>
+            <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-700">
+              <input
+                type="checkbox"
+                checked={project.subLaborManagementFeeEnabled}
+                onChange={(e) => setProject({ ...project, subLaborManagementFeeEnabled: e.target.checked })}
+              />
+              Enable fee on loaded subcontractor labor
+            </label>
+            <label className="mt-2 block text-[11px] font-medium text-slate-700">
+              Fee %
+              <input
+                type="number"
+                step="0.01"
+                className="ui-input mt-1 h-9 max-w-[200px]"
+                value={project.subLaborManagementFeePercent}
+                onChange={(e) => setProject({ ...project, subLaborManagementFeePercent: Number(e.target.value) || 0 })}
+              />
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+            <p className="text-xs font-semibold text-slate-900">Site &amp; access (advanced)</p>
+            <p className="mt-1 text-[11px] text-slate-600">Floors, elevator, mobilization, and delivery difficulty — use when vertical transport or logistics matter.</p>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <label className="text-[11px] font-medium text-slate-700">
+                Floor labor add / floor
+                <input
+                  type="number"
+                  step="0.01"
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.floorMultiplierPerFloor}
+                  onChange={(e) => patchJobConditions({ floorMultiplierPerFloor: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">
+                Delivery difficulty
+                <select
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.deliveryDifficulty}
+                  onChange={(e) => patchJobConditions({ deliveryDifficulty: e.target.value as ProjectJobConditions['deliveryDifficulty'] })}
+                >
+                  <option value="standard">Standard</option>
+                  <option value="constrained">Constrained</option>
+                  <option value="difficult">Difficult</option>
+                </select>
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">
+                Mobilization
+                <select
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.mobilizationComplexity}
+                  onChange={(e) => patchJobConditions({ mobilizationComplexity: e.target.value as ProjectJobConditions['mobilizationComplexity'] })}
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-[11px] text-slate-700 md:col-span-3">
+                <input type="checkbox" checked={jobConditions.elevatorAvailable} onChange={(e) => patchJobConditions({ elevatorAvailable: e.target.checked })} />
+                Elevator available (uncheck to apply multi-floor labor lift when not using stairs only)
+              </label>
+            </div>
+            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-[11px] text-slate-600">
+              <p className="font-medium text-slate-800">Job distance from office</p>
+              <p className="mt-1">
+                {jobConditions.travelDistanceMiles !== null
+                  ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} miles from office`
+                  : 'No calculated distance yet — set address in Project details.'}
+              </p>
+              {distanceCalculating ? <p className="mt-1 text-blue-700">Calculating…</p> : null}
+              {distanceError ? <p className="mt-1 text-red-600">{distanceError}</p> : null}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-semibold text-slate-900">Condition multipliers (when toggles are on)</p>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+              <label className="text-[11px] text-slate-700">
+                Occupied building
+                <input
+                  type="number"
+                  step="0.01"
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.occupiedBuildingMultiplier}
+                  onChange={(e) => patchJobConditions({ occupiedBuildingMultiplier: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="text-[11px] text-slate-700">
+                Restricted access
+                <input
+                  type="number"
+                  step="0.01"
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.restrictedAccessMultiplier}
+                  onChange={(e) => patchJobConditions({ restrictedAccessMultiplier: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="text-[11px] text-slate-700">
+                Night work (labor $)
+                <input
+                  type="number"
+                  step="0.01"
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.nightWorkLaborCostMultiplier}
+                  onChange={(e) => patchJobConditions({ nightWorkLaborCostMultiplier: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="text-[11px] text-slate-700">
+                Night work (labor min)
+                <input
+                  type="number"
+                  step="0.01"
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.nightWorkLaborMinutesMultiplier}
+                  onChange={(e) => patchJobConditions({ nightWorkLaborMinutesMultiplier: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="text-[11px] text-slate-700">
+                Phased work
+                <input
+                  type="number"
+                  step="0.01"
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.phasedWorkMultiplier}
+                  onChange={(e) => patchJobConditions({ phasedWorkMultiplier: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="text-[11px] text-slate-700">
+                Remote travel
+                <input
+                  type="number"
+                  step="0.01"
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.remoteTravelMultiplier}
+                  onChange={(e) => patchJobConditions({ remoteTravelMultiplier: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="text-[11px] text-slate-700">
+                Schedule compression
+                <input
+                  type="number"
+                  step="0.01"
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.scheduleCompressionMultiplier}
+                  onChange={(e) => patchJobConditions({ scheduleCompressionMultiplier: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="text-[11px] text-slate-700">
+                Small job
+                <input
+                  type="number"
+                  step="0.01"
+                  className="ui-input mt-1 h-9"
+                  value={jobConditions.smallJobMultiplier}
+                  onChange={(e) => patchJobConditions({ smallJobMultiplier: Number(e.target.value) || 0 })}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+            <p className="text-xs font-semibold text-slate-900">Labor basis</p>
+            <p className="mt-1 text-[11px] text-slate-600">Union baseline is the default for this workspace.</p>
+            <input className="ui-input mt-2 h-9 max-w-md bg-slate-100" value="Union baseline (default)" readOnly />
+          </div>
+        </div>
+      </details>
+
+      {/* Notes */}
+      <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm px-5 py-5">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Notes</p>
+        <h2 className="mt-1 text-lg font-semibold text-slate-900">Special notes</h2>
+        <p className="mt-1 text-sm text-slate-600">Internal coordination — optional on the client proposal.</p>
+        <label className="mt-3 block text-[11px] font-medium text-slate-700">
+          Project notes
+          <textarea
+            className="ui-input mt-1 min-h-[100px] py-2"
+            value={project.specialNotes || ''}
+            onChange={(e) => setProject({ ...project, specialNotes: e.target.value || null })}
+            placeholder="Coordination, exclusions clarifications, owner requests…"
+          />
+        </label>
+        <label className="mt-3 flex cursor-pointer items-start gap-2 text-[11px] text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={project.proposalIncludeSpecialNotes}
+            onChange={(e) => setProject({ ...project, proposalIncludeSpecialNotes: e.target.checked })}
+          />
+          <span>
+            <span className="font-medium text-slate-800">Include on proposal</span>
+            <span className="mt-0.5 block text-[10px] text-slate-500">When off, notes stay in setup only.</span>
+          </span>
+        </label>
+      </section>
+
+    </div>
+  );
+}

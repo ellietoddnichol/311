@@ -35,6 +35,7 @@ import {
   ensureProposalDefaults,
 } from '../shared/utils/proposalDefaults';
 import { TopProjectHeader } from '../components/workspace/TopProjectHeader';
+import { ProjectSetupWorkspace } from '../components/workspace/ProjectSetupWorkspace';
 import { RoomManager } from '../components/workspace/RoomManager';
 import { EstimateGrid } from '../components/workspace/EstimateGrid';
 import { ItemPicker } from '../components/workspace/ItemPicker';
@@ -1000,115 +1001,166 @@ export function ProjectWorkspace() {
         </div>
 
         {activeTab === 'overview' && (
-          <div className="space-y-3">
-            <div className="ui-surface p-3 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 text-sm">
-              <div><p className="text-xs text-slate-500">Project</p><p className="font-semibold">{project.projectName}</p></div>
-              <div><p className="text-xs text-slate-500">Client</p><p className="font-semibold">{project.clientName || 'N/A'}</p></div>
-              <div><p className="text-xs text-slate-500">Pricing Basis</p><p className="font-semibold">{pricingMode === 'material_only' ? 'Material Only' : pricingMode === 'labor_only' ? 'Install Only' : 'Material + Install'}</p></div>
-              <div><p className="text-xs text-slate-500">Rooms / Areas</p><p className="font-semibold">{rooms.length}</p></div>
-              <div><p className="text-xs text-slate-500">Scope Categories</p><p className="font-semibold">{selectedScopeCategories.length || scopeCategoryOptions.length || 0}</p></div>
-              <div><p className="text-xs text-slate-500">Estimate Total</p><p className="font-semibold">{formatCurrencySafe(summary?.baseBidTotal)}</p></div>
-            </div>
-
-            <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_1fr_300px] gap-3 items-start">
-              <section className="rounded-xl border border-slate-200/80 bg-white/90 shadow-sm p-3 space-y-3">
-                <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-semibold">Setup Snapshot</p>
-                  <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Estimator Assumptions</h2>
+          <div className="mx-auto w-full max-w-[1600px] space-y-8">
+            <header className="rounded-2xl border border-slate-200/70 bg-white px-5 py-5 shadow-sm">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Project overview</p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Read-only snapshot</h2>
+              <p className="mt-2 max-w-3xl text-sm text-slate-600">
+                High-level context for this bid — same structure as Project Setup, without editing controls. Adjust details on the Setup tab.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-x-8 gap-y-4 border-t border-slate-100 pt-5 text-sm">
+                <div className="min-w-[140px]">
+                  <p className="text-xs text-slate-500">Project</p>
+                  <p className="mt-0.5 font-semibold text-slate-900">{project.projectName}</p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Labor Basis</p>
-                    <p className="font-semibold text-slate-900 mt-1">Union baseline labor</p>
-                    <p className="text-xs text-slate-500 mt-1">Base multiplier x{formatNumberSafe(jobConditions.laborRateMultiplier, 2)}</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Delivery</p>
-                    <p className="font-semibold text-slate-900 mt-1">
-                      {jobConditions.deliveryQuotedSeparately
-                        ? 'Travel priced separately'
-                        : jobConditions.deliveryRequired
-                          ? 'In scope'
-                          : 'Not included'}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      {jobConditions.deliveryQuotedSeparately && isMeaningfulTravelDistanceMiles(jobConditions.travelDistanceMiles)
-                        ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} mi — not in estimate total`
-                        : jobConditions.deliveryRequired
-                          ? jobConditions.deliveryPricingMode === 'flat'
-                            ? formatCurrencySafe(jobConditions.deliveryValue)
-                            : jobConditions.deliveryPricingMode === 'percent'
-                              ? `${formatNumberSafe(jobConditions.deliveryValue, 2)}% of base`
-                              : 'No separate adder'
-                          : 'No delivery allowance applied'}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 md:col-span-2">
-                    <p className="text-xs text-slate-500">Included Scope Categories</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {(selectedScopeCategories.length > 0 ? selectedScopeCategories : scopeCategoryOptions).slice(0, 12).map((category) => (
-                        <span key={category} className="px-2 py-1 rounded-full bg-white text-slate-700 text-[11px] border border-slate-200">{category}</span>
-                      ))}
-                      {selectedScopeCategories.length === 0 && scopeCategoryOptions.length === 0 ? <span className="text-xs text-slate-500">No catalog categories loaded yet.</span> : null}
+                <div className="min-w-[120px]">
+                  <p className="text-xs text-slate-500">Client</p>
+                  <p className="mt-0.5 font-semibold text-slate-900">{project.clientName || '—'}</p>
+                </div>
+                <div className="min-w-[140px]">
+                  <p className="text-xs text-slate-500">Price mode</p>
+                  <p className="mt-0.5 font-semibold text-slate-900">
+                    {pricingMode === 'material_only' ? 'Material only' : pricingMode === 'labor_only' ? 'Install only' : 'Material + install'}
+                  </p>
+                </div>
+                <div className="min-w-[100px]">
+                  <p className="text-xs text-slate-500">Rooms</p>
+                  <p className="mt-0.5 font-semibold text-slate-900">{rooms.length}</p>
+                </div>
+                <div className="min-w-[120px]">
+                  <p className="text-xs text-slate-500">Scope tags</p>
+                  <p className="mt-0.5 font-semibold text-slate-900">{selectedScopeCategories.length || scopeCategoryOptions.length || 0}</p>
+                </div>
+                <div className="min-w-[120px]">
+                  <p className="text-xs text-slate-500">Bid total</p>
+                  <p className="mt-0.5 font-semibold text-slate-900">{formatCurrencySafe(summary?.baseBidTotal)}</p>
+                </div>
+              </div>
+            </header>
+
+            <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_340px_280px] xl:items-start">
+              <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 1 · Project inputs</p>
+                <h3 className="mt-1 text-lg font-semibold text-slate-900">Setup snapshot</h3>
+                <p className="mt-2 text-sm text-slate-600">Labor basis, delivery posture, and what is in scope for catalog and takeoff.</p>
+
+                <div className="mt-6 space-y-5">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">Labor basis</p>
+                      <p className="mt-1 font-semibold text-slate-900">Union baseline</p>
+                      <p className="mt-1 text-xs text-slate-500">Multiplier ×{formatNumberSafe(jobConditions.laborRateMultiplier, 2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">Delivery</p>
+                      <p className="mt-1 font-semibold text-slate-900">
+                        {jobConditions.deliveryQuotedSeparately
+                          ? 'Travel priced separately'
+                          : jobConditions.deliveryRequired
+                            ? 'In scope'
+                            : 'Not included'}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {jobConditions.deliveryQuotedSeparately && isMeaningfulTravelDistanceMiles(jobConditions.travelDistanceMiles)
+                          ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} mi — not in estimate total`
+                          : jobConditions.deliveryRequired
+                            ? jobConditions.deliveryPricingMode === 'flat'
+                              ? formatCurrencySafe(jobConditions.deliveryValue)
+                              : jobConditions.deliveryPricingMode === 'percent'
+                                ? `${formatNumberSafe(jobConditions.deliveryValue, 2)}% of base`
+                                : 'No separate adder'
+                            : 'No delivery allowance applied'}
+                      </p>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 md:col-span-2">
-                    <p className="text-xs text-slate-500">Rooms / Areas</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {rooms.slice(0, 10).map((room) => (
-                        <span key={room.id} className="px-2 py-1 rounded-full bg-white text-slate-700 text-[11px] border border-slate-200">{room.roomName}</span>
+
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">Scope categories</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(selectedScopeCategories.length > 0 ? selectedScopeCategories : scopeCategoryOptions).slice(0, 16).map((category) => (
+                        <span
+                          key={category}
+                          className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700"
+                        >
+                          {category}
+                        </span>
                       ))}
+                      {selectedScopeCategories.length === 0 && scopeCategoryOptions.length === 0 ? (
+                        <span className="text-xs text-slate-500">No catalog categories loaded yet.</span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">Rooms / areas</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {rooms.slice(0, 12).map((room) => (
+                        <span
+                          key={room.id}
+                          className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700"
+                        >
+                          {room.roomName}
+                        </span>
+                      ))}
+                      {rooms.length === 0 ? <span className="text-xs text-slate-500">No rooms yet.</span> : null}
                     </div>
                   </div>
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-4 space-y-4">
-                <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-semibold">Project-Wide Adders</p>
-                  <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Pricing Impact Summary</h2>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Condition Labor Multiplier</p>
-                    <p className="font-semibold text-slate-900 mt-1">x{formatNumberSafe(summary?.conditionLaborMultiplier || 1, 2)}</p>
+              <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Pricing rollups</p>
+                <h3 className="mt-1 text-lg font-semibold text-slate-900">Conditions &amp; adders</h3>
+                <p className="mt-2 text-sm text-slate-600">How job conditions and project adders flow into labor dollars.</p>
+
+                <dl className="mt-6 space-y-4 text-sm">
+                  <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 pb-3">
+                    <dt className="text-slate-500">Condition labor mult.</dt>
+                    <dd className="font-semibold tabular-nums text-slate-900">×{formatNumberSafe(summary?.conditionLaborMultiplier || 1, 2)}</dd>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Condition Adjustment</p>
-                    <p className="font-semibold text-slate-900 mt-1">{formatCurrencySafe(summary?.conditionAdjustmentAmount)}</p>
+                  <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 pb-3">
+                    <dt className="text-slate-500">Condition adjustment</dt>
+                    <dd className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(summary?.conditionAdjustmentAmount)}</dd>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Project Adder %</p>
-                    <p className="font-semibold text-slate-900 mt-1">{formatNumberSafe(jobConditions.estimateAdderPercent, 2)}%</p>
+                  <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 pb-3">
+                    <dt className="text-slate-500">Project adder %</dt>
+                    <dd className="font-semibold tabular-nums text-slate-900">{formatNumberSafe(jobConditions.estimateAdderPercent, 2)}%</dd>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Project Adder $</p>
-                    <p className="font-semibold text-slate-900 mt-1">{formatCurrencySafe(jobConditions.estimateAdderAmount)}</p>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="text-slate-500">Project adder $</dt>
+                    <dd className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(jobConditions.estimateAdderAmount)}</dd>
                   </div>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Special Notes</p>
-                  <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{project.specialNotes?.trim() || 'No project-wide special notes yet.'}</p>
+                </dl>
+
+                <div className="mt-6 border-t border-slate-100 pt-4">
+                  <p className="text-xs font-medium text-slate-500">Special notes</p>
+                  <p className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">
+                    {project.specialNotes?.trim() || 'No project-wide notes yet.'}
+                  </p>
                 </div>
               </section>
 
-              <aside className="space-y-3">
-                <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Active Assumptions</p>
+              <aside className="space-y-4 xl:sticky xl:top-[88px]">
+                <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active assumptions</p>
                   {(summary?.conditionAssumptions || []).length > 0 ? (
-                    <div className="mt-2 space-y-1.5 max-h-64 overflow-auto pr-1">
-                      {(summary?.conditionAssumptions || []).slice(0, 12).map((assumption) => (
-                        <p key={assumption} className="text-xs text-slate-700 leading-4">- {assumption}</p>
+                    <div className="mt-2 max-h-56 space-y-1.5 overflow-auto pr-1 text-xs text-slate-700">
+                      {(summary?.conditionAssumptions || []).slice(0, 14).map((assumption) => (
+                        <p key={assumption} className="leading-4">
+                          — {assumption}
+                        </p>
                       ))}
                     </div>
                   ) : (
                     <p className="mt-2 text-xs text-slate-500">No project-level assumptions are active.</p>
                   )}
                 </section>
-                <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5 space-y-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Next Step</p>
-                  <p className="text-xs text-slate-600">Confirm setup before final pricing.</p>
-                  <button onClick={() => setActiveTab('setup')} className="ui-btn-secondary h-8 px-3 text-[11px] font-semibold">Open Project Setup</button>
+                <section className="rounded-2xl border border-dashed border-slate-300/80 bg-slate-50/80 p-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Next step</p>
+                  <p className="mt-2 text-xs text-slate-600">Refine inputs and defaults on Project Setup before locking the estimate.</p>
+                  <button type="button" onClick={() => setActiveTab('setup')} className="ui-btn-secondary mt-3 h-9 w-full text-[11px] font-semibold">
+                    Open Project Setup
+                  </button>
                 </section>
               </aside>
             </div>
@@ -1116,511 +1168,57 @@ export function ProjectWorkspace() {
         )}
 
         {activeTab === 'setup' && (
-          <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4 items-start">
-            <section className="rounded-2xl border border-slate-200/70 bg-white/85 backdrop-blur-sm shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-200/80 bg-gradient-to-r from-slate-50 to-white">
-                <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-semibold">Project</p>
-                <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Project Setup</h2>
-                <p className="mt-1 text-xs text-slate-600 max-w-2xl">
-                  Five collapsible sections below. Keep <span className="font-medium text-slate-700">Site conditions &amp; delivery</span> closed until you need floors, access, adders, and delivery rules.
-                </p>
-              </div>
+          <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-8 xl:grid-cols-[1fr_300px] items-start">
+            <ProjectSetupWorkspace
+              project={project}
+              setProject={setProject}
+              jobConditions={jobConditions}
+              patchJobConditions={patchJobConditions}
+              showMaterial={showMaterial}
+              scopeCategoryOptions={scopeCategoryOptions}
+              selectedScopeCategories={selectedScopeCategories}
+              toggleScopeCategory={toggleScopeCategory}
+              rooms={rooms}
+              setActiveTab={setActiveTab}
+              summary={summary}
+              settings={settings}
+              distanceError={distanceError}
+              distanceCalculating={distanceCalculating}
+            />
 
-              <div className="border-b border-slate-200/80 bg-slate-50/50 px-5 py-2.5">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Jump to</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {(
-                    [
-                      ['setup-identity', 'Identity'],
-                      ['setup-pricing', 'Pricing'],
-                      ['setup-scope', 'Scope'],
-                      ['setup-site', 'Site & delivery'],
-                      ['setup-notes', 'Notes'],
-                    ] as const
-                  ).map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-                      onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="px-5 py-4 space-y-3">
-                <details open className="group setup-details rounded-xl border border-slate-200/90 bg-white shadow-sm" id="setup-identity">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3.5 text-sm font-semibold text-slate-900 hover:bg-slate-50/80 rounded-xl [&::-webkit-details-marker]:hidden">
-                    <span className="flex items-center gap-2">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-[11px] font-bold text-white">1</span>
-                      Project identity
-                    </span>
-                    <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-180" aria-hidden />
-                  </summary>
-                  <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <label className="text-[11px] font-medium text-slate-700">Project Name<input className="ui-input mt-1 h-9" value={project.projectName} onChange={(e) => setProject({ ...project, projectName: e.target.value })} /></label>
-                      <label className="text-[11px] font-medium text-slate-700">Client<input className="ui-input mt-1 h-9" value={project.clientName || ''} onChange={(e) => setProject({ ...project, clientName: e.target.value || null })} /></label>
-                      <label className="text-[11px] font-medium text-slate-700">Project #<input className="ui-input mt-1 h-9" value={project.projectNumber || ''} onChange={(e) => setProject({ ...project, projectNumber: e.target.value || null })} /></label>
-                      <label className="text-[11px] font-medium text-slate-700">Estimator<input className="ui-input mt-1 h-9" value={project.estimator || ''} onChange={(e) => setProject({ ...project, estimator: e.target.value || null })} /></label>
-                      <label className="text-[11px] font-medium text-slate-700 md:col-span-2">Address<input className="ui-input mt-1 h-9" value={project.address || ''} onChange={(e) => setProject({ ...project, address: e.target.value || null })} /></label>
-                    </div>
-                  </div>
-                </details>
-
-                <details open className="group setup-details rounded-xl border border-slate-200/90 bg-white shadow-sm" id="setup-pricing">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3.5 text-sm font-semibold text-slate-900 hover:bg-slate-50/80 rounded-xl [&::-webkit-details-marker]:hidden">
-                    <span className="flex items-center gap-2">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-[11px] font-bold text-white">2</span>
-                      Pricing, markups &amp; field allowances
-                    </span>
-                    <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-180" aria-hidden />
-                  </summary>
-                  <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-4">
-                  <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Basis &amp; rates</h3>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <label className="text-[11px] font-medium text-slate-700">Pricing Basis
-                      <select
-                        className="ui-input mt-1 h-9"
-                        value={project.pricingMode || 'labor_and_material'}
-                        onChange={(e) => setProject({ ...project, pricingMode: e.target.value as ProjectRecord['pricingMode'] })}
-                      >
-                        <option value="material_only">Material Only</option>
-                        <option value="labor_only">Install Only</option>
-                        <option value="labor_and_material">Material + Install</option>
-                      </select>
-                    </label>
-                    <label className="text-[11px] font-medium text-slate-700">Location / Region<input className="ui-input mt-1 h-9" value={jobConditions.locationLabel} onChange={(e) => patchJobConditions({ locationLabel: e.target.value })} /></label>
-                    {showMaterial ? (
-                      <>
-                        <label className="text-[11px] font-medium text-slate-700">Material Tax %<input type="number" className="ui-input mt-1 h-9" value={project.taxPercent} onChange={(e) => setProject({ ...project, taxPercent: Number(e.target.value) || 0 })} /></label>
-                        <label className="text-[11px] font-medium text-slate-700">Location Tax Override %<input type="number" className="ui-input mt-1 h-9" value={jobConditions.locationTaxPercent ?? ''} onChange={(e) => patchJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) || 0 })} /></label>
-                      </>
-                    ) : null}
-                    <label className="text-[11px] font-medium text-slate-700">Labor Basis
-                      <input className="ui-input mt-1 h-9 bg-slate-100" value="Union Baseline (Default)" readOnly />
-                    </label>
-                    <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.laborRateMultiplier} onChange={(e) => patchJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Installers / Crew Size<input type="number" min={1} className="ui-input mt-1 h-9" value={jobConditions.installerCount} onChange={(e) => patchJobConditions({ installerCount: Number(e.target.value) || 1 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Labor burden % (sub)<input type="number" className="ui-input mt-1 h-9" value={project.laborBurdenPercent} onChange={(e) => setProject({ ...project, laborBurdenPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Material overhead %<input type="number" className="ui-input mt-1 h-9" value={project.overheadPercent} onChange={(e) => setProject({ ...project, overheadPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Material profit %<input type="number" className="ui-input mt-1 h-9" value={project.profitPercent} onChange={(e) => setProject({ ...project, profitPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Labor overhead % (sub)<input type="number" className="ui-input mt-1 h-9" value={project.laborOverheadPercent} onChange={(e) => setProject({ ...project, laborOverheadPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Labor profit % (sub)<input type="number" className="ui-input mt-1 h-9" value={project.laborProfitPercent} onChange={(e) => setProject({ ...project, laborProfitPercent: Number(e.target.value) || 0 })} /></label>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 md:col-span-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={project.subLaborManagementFeeEnabled}
-                          onChange={(e) => setProject({ ...project, subLaborManagementFeeEnabled: e.target.checked })}
-                        />
-                        Sub labor management fee (e.g. 5% on loaded subcontractor labor)
-                      </label>
-                      <label className="text-[11px] font-medium text-slate-700 block max-w-xs">
-                        Fee %
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="ui-input mt-1 h-9"
-                          value={project.subLaborManagementFeePercent}
-                          onChange={(e) => setProject({ ...project, subLaborManagementFeePercent: Number(e.target.value) || 0 })}
-                        />
-                      </label>
-                      <p className="text-[11px] text-slate-500">Install minutes × the default labor rate (Settings) drive subcontractor dollars when line labor cost is blank — modifiers change labor minutes/cost only, not material.</p>
-                    </div>
-                  </div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200/90 border-l-4 border-l-amber-500 bg-gradient-to-br from-slate-50 via-white to-amber-50/25 p-4 shadow-sm space-y-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0 space-y-1">
-                        <p className="text-sm font-semibold text-slate-900">Field day &amp; material pad</p>
-                        <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
-                          Starts from typical commercial-fit assumptions (waste, consumables, paid day, break). Use the highlighted block to confirm what matters for <span className="font-medium text-slate-800">this</span> job; open Advanced for learning curve, break detail, and flat consumables.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => patchJobConditions({ ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES })}
-                        className="shrink-0 rounded-lg border border-amber-300/90 bg-white px-3 py-2 text-xs font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
-                      >
-                        Reset to recommended
-                      </button>
-                    </div>
-
-                    <div className="rounded-lg border-2 border-amber-400/70 bg-white p-3 shadow-sm ring-1 ring-amber-200/50">
-                      <div className="flex flex-wrap items-center gap-2 mb-3">
-                        <span className="rounded-md bg-amber-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Confirm</span>
-                        <span className="text-xs font-semibold text-slate-800">Adjust if this job differs from your norm</span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                        <label className="text-[11px] font-medium text-slate-800">
-                          <span className="inline-flex items-center gap-1.5">
-                            Paid day (hr/installer)
-                            <span className="rounded bg-slate-200/90 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">Key</span>
-                          </span>
-                          <input
-                            type="number"
-                            step="0.25"
-                            min={4}
-                            max={12}
-                            className="ui-input mt-1 h-9 border-slate-300"
-                            value={jobConditions.installerPaidDayHours}
-                            onChange={(e) => patchJobConditions({ installerPaidDayHours: Number(e.target.value) || RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.installerPaidDayHours })}
-                          />
-                          <span className="mt-1 block text-[10px] text-slate-500">Usually 8 hr; drives field-day math with breaks (Advanced).</span>
-                        </label>
-                        {showMaterial ? (
-                          <>
-                            <label className="text-[11px] font-medium text-slate-800">
-                              <span className="inline-flex items-center gap-1.5">
-                                Material waste %
-                                <span className="rounded bg-slate-200/90 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">Key</span>
-                              </span>
-                              <input
-                                type="number"
-                                step="0.5"
-                                min={0}
-                                className="ui-input mt-1 h-9 border-slate-300"
-                                value={jobConditions.materialWastePercent}
-                                onChange={(e) =>
-                                  patchJobConditions({ materialWastePercent: Number(e.target.value) || 0 })
-                                }
-                              />
-                              <span className="mt-1 block text-[10px] text-slate-500">Default 10% is a common pad before tax/O&amp;P; lower for repeat SKUs.</span>
-                            </label>
-                            <label className="text-[11px] font-medium text-slate-800">
-                              <span className="inline-flex items-center gap-1.5">
-                                Field supplies % <span className="font-normal text-slate-500">(after waste)</span>
-                                <span className="rounded bg-slate-200/90 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-700">Key</span>
-                              </span>
-                              <input
-                                type="number"
-                                step="0.5"
-                                min={0}
-                                className="ui-input mt-1 h-9 border-slate-300"
-                                value={jobConditions.installerFieldSuppliesPercent}
-                                onChange={(e) =>
-                                  patchJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })
-                                }
-                              />
-                              <span className="mt-1 block text-[10px] text-slate-500">Default 3% on material after waste for consumables / small parts.</span>
-                            </label>
-                          </>
-                        ) : (
-                          <p className="text-xs text-slate-600 md:col-span-2 py-1">
-                            Install-only bid: material waste and field supplies are hidden (no material dollars in the bid).
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <details className="group rounded-lg border border-slate-300/80 bg-slate-100/60 open:bg-slate-100 shadow-sm">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-200/40 rounded-lg [&::-webkit-details-marker]:hidden">
-                        <span>Advanced — schedule detail &amp; labor pad</span>
-                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-600 transition-transform group-open:rotate-180" aria-hidden />
-                      </summary>
-                      <div className="border-t border-slate-200/90 px-3 pb-3 pt-3 space-y-3">
-                        <p className="text-[11px] text-slate-600">
-                          Breaks reduce productive hours per day (duration only). Learning curve scales labor dollars and minutes before job-condition multipliers.
-                        </p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                          <label className="text-[11px] font-medium text-slate-700">
-                            Breaks / lunch (hr/installer/day)
-                            <input
-                              type="number"
-                              step="0.25"
-                              min={0}
-                              max={4}
-                              className="ui-input mt-1 h-9 bg-white"
-                              value={jobConditions.dailyBreakHoursPerInstaller}
-                              onChange={(e) => patchJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })}
-                            />
-                            <span className="mt-1 block text-[10px] text-slate-500">Recommended 0.5 hr; set 0 if you already netted breaks elsewhere.</span>
-                          </label>
-                          <label className="text-[11px] font-medium text-slate-700">
-                            Learning curve allowance %
-                            <input
-                              type="number"
-                              step="0.5"
-                              min={0}
-                              className="ui-input mt-1 h-9 bg-white"
-                              value={jobConditions.laborLearningCurvePercent}
-                              onChange={(e) => patchJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })}
-                            />
-                            <span className="mt-1 block text-[10px] text-slate-500">Default 5% mild pad; raise for new crews or complex systems.</span>
-                          </label>
-                          {showMaterial ? (
-                            <label className="text-[11px] font-medium text-slate-700">
-                              Field supplies flat $
-                              <input
-                                type="number"
-                                step="1"
-                                min={0}
-                                className="ui-input mt-1 h-9 bg-white"
-                                value={jobConditions.installerFieldSuppliesFlat}
-                                onChange={(e) => patchJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })}
-                              />
-                              <span className="mt-1 block text-[10px] text-slate-500">Optional lump on top of the % allowance.</span>
-                            </label>
-                          ) : null}
-                        </div>
-                      </div>
-                    </details>
-                  </div>
-                  <div className="rounded-xl bg-slate-50/80 border border-slate-200/80 p-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-                    <div>
-                      <p className="font-medium text-slate-900">Job Distance From Office</p>
-                      <p className="mt-1">{jobConditions.travelDistanceMiles !== null ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} miles from office` : 'No calculated distance yet.'}</p>
-                      {distanceError ? <p className="mt-1 text-red-600">{distanceError}</p> : null}
-                    </div>
-                    {distanceCalculating ? <span className="text-[11px] font-semibold text-blue-700">Calculating...</span> : null}
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 rounded-xl bg-slate-50/80 border border-slate-200/80 p-3">
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <p className="text-xs font-semibold text-slate-900">Union labor baseline</p>
-                      <p className="text-[11px] text-slate-500">Union labor is the default.</p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.smallJobFactor} onChange={(e) => patchJobConditions({ smallJobFactor: e.target.checked })} />Small Job Factor</label>
-                      <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.smallJobMultiplier} onChange={(e) => patchJobConditions({ smallJobMultiplier: Number(e.target.value) || 0 })} /></label>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.nightWork} onChange={(e) => patchJobConditions({ nightWork: e.target.checked })} />Night Work</label>
-                      <p className="text-[11px] text-slate-500">Applies to all applicable scope items.</p>
-                    </div>
-                  </div>
-                  </div>
-                </details>
-
-                <details open className="group setup-details rounded-xl border border-slate-200/90 bg-white shadow-sm" id="setup-scope">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3.5 text-sm font-semibold text-slate-900 hover:bg-slate-50/80 rounded-xl [&::-webkit-details-marker]:hidden">
-                    <span className="flex items-center gap-2">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-[11px] font-bold text-white">3</span>
-                      Rooms &amp; included catalog scope
-                    </span>
-                    <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-180" aria-hidden />
-                  </summary>
-                  <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">Rooms / Areas</p>
-                      <p className="text-xs text-slate-500 mt-1">{rooms.length} room(s) organize takeoff and estimate lines.</p>
-                    </div>
-                    <button onClick={() => setActiveTab('rooms')} className="ui-btn-secondary h-8 px-3 text-[11px] font-semibold">Manage Rooms</button>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-medium text-slate-700">Included Catalog Categories</p>
-                    <div className="flex flex-wrap gap-2">
-                      {scopeCategoryOptions.map((category) => {
-                        const active = selectedScopeCategories.includes(category);
-                        return (
-                          <button
-                            key={category}
-                            type="button"
-                            onClick={() => toggleScopeCategory(category)}
-                            className={`px-2.5 py-1.5 rounded-full border text-[11px] font-medium transition-colors ${active ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
-                          >
-                            {category}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {scopeCategoryOptions.length === 0 ? <p className="text-xs text-slate-500">Categories appear after catalog sync.</p> : null}
-                  </div>
-                  </div>
-                </details>
-
-                <details className="group setup-details rounded-xl border border-slate-200/90 bg-white shadow-sm" id="setup-site">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3.5 text-sm font-semibold text-slate-900 hover:bg-slate-50/80 rounded-xl [&::-webkit-details-marker]:hidden">
-                    <span className="flex items-center gap-2">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 text-[11px] font-bold text-white">4</span>
-                      Site conditions, delivery &amp; adders
-                    </span>
-                    <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-180" aria-hidden />
-                  </summary>
-                  <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-4">
-                  <p className="text-[11px] text-slate-600">Floors, access, delivery pricing, and project-wide labor adders. Expand when this job needs more than baseline productivity.</p>
-                  <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Job conditions</h3>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <label className="text-[11px] font-medium text-slate-700">Floors<input type="number" min={1} className="ui-input mt-1 h-9" value={jobConditions.floors} onChange={(e) => patchJobConditions({ floors: Number(e.target.value) || 1 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Floor Labor Add / Floor<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.floorMultiplierPerFloor} onChange={(e) => patchJobConditions({ floorMultiplierPerFloor: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Delivery Difficulty
-                      <select className="ui-input mt-1 h-9" value={jobConditions.deliveryDifficulty} onChange={(e) => patchJobConditions({ deliveryDifficulty: e.target.value as ProjectJobConditions['deliveryDifficulty'] })}>
-                        <option value="standard">Standard</option>
-                        <option value="constrained">Constrained</option>
-                        <option value="difficult">Difficult</option>
-                      </select>
-                    </label>
-                    <label className="text-[11px] font-medium text-slate-700">Mobilization Complexity
-                      <select className="ui-input mt-1 h-9" value={jobConditions.mobilizationComplexity} onChange={(e) => patchJobConditions({ mobilizationComplexity: e.target.value as ProjectJobConditions['mobilizationComplexity'] })}>
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                      </select>
-                    </label>
-                    <label className="text-[11px] font-medium text-slate-700">Project Adder %<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.estimateAdderPercent} onChange={(e) => patchJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-[11px] font-medium text-slate-700">Project Adder $<input type="number" step="0.01" className="ui-input mt-1 h-9" value={jobConditions.estimateAdderAmount} onChange={(e) => patchJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} /></label>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 md:col-span-3 grid grid-cols-1 md:grid-cols-[1fr_180px_180px] gap-3 items-end">
-                      <label className="text-xs text-slate-700 flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={jobConditions.deliveryRequired}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              const miles = jobConditions.travelDistanceMiles;
-                              const fromDistance =
-                                miles !== null && miles !== undefined && Number.isFinite(miles) && jobConditions.deliveryAutoCalculated
-                                  ? recommendDeliveryPlan(miles, jobConditions.deliveryDifficulty)
-                                  : {};
-                              patchJobConditions({ deliveryRequired: true, ...fromDistance });
-                            } else {
-                              patchJobConditions({
-                                deliveryRequired: false,
-                                deliveryQuotedSeparately: false,
-                                deliveryAutoCalculated: false,
-                              });
-                            }
-                          }}
-                        />
-                        Delivery is included in this job
-                      </label>
-                      <label className="text-[11px] font-medium text-slate-700">Delivery Pricing Mode
-                        <select
-                          className="ui-input mt-1 h-9"
-                          value={jobConditions.deliveryPricingMode}
-                          onChange={(e) =>
-                            patchJobConditions({
-                              deliveryPricingMode: e.target.value as ProjectJobConditions['deliveryPricingMode'],
-                              deliveryAutoCalculated: false,
-                            })
-                          }
-                        >
-                          <option value="included">Included / No Charge</option>
-                          <option value="flat">Flat Amount</option>
-                          <option value="percent">Percent of Base</option>
-                        </select>
-                      </label>
-                      <label className="text-[11px] font-medium text-slate-700">Delivery Value
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="ui-input mt-1 h-9"
-                          value={jobConditions.deliveryValue}
-                          onChange={(e) =>
-                            patchJobConditions({ deliveryValue: Number(e.target.value) || 0, deliveryAutoCalculated: false })
-                          }
-                        />
-                      </label>
-                      <p className="text-[11px] text-slate-500 md:col-span-3">
-                        Auto delivery from distance: under 50 mi — no fee; 50–100 mi — $100 flat; over 100 mi — mark travel as priced separately (no $ in total). Recalculate by refreshing distance after the address is set.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 rounded-xl bg-slate-50/80 border border-slate-200/80 p-3">
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.elevatorAvailable} onChange={(e) => patchJobConditions({ elevatorAvailable: e.target.checked })} />Elevator Available</label>
-                      <p className="text-[11px] text-slate-500">If unchecked on multi-floor work, labor increases automatically.</p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.occupiedBuilding} onChange={(e) => patchJobConditions({ occupiedBuilding: e.target.checked })} />Occupied Building</label>
-                      <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.occupiedBuildingMultiplier} onChange={(e) => patchJobConditions({ occupiedBuildingMultiplier: Number(e.target.value) || 0 })} /></label>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.restrictedAccess} onChange={(e) => patchJobConditions({ restrictedAccess: e.target.checked })} />Restricted Access</label>
-                      <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.restrictedAccessMultiplier} onChange={(e) => patchJobConditions({ restrictedAccessMultiplier: Number(e.target.value) || 0 })} /></label>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.remoteTravel} onChange={(e) => patchJobConditions({ remoteTravel: e.target.checked })} />Remote / Travel Job</label>
-                      <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.remoteTravelMultiplier} onChange={(e) => patchJobConditions({ remoteTravelMultiplier: Number(e.target.value) || 0 })} /></label>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.afterHoursWork} onChange={(e) => patchJobConditions({ afterHoursWork: e.target.checked })} />After-hours Work</label>
-                      <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.afterHoursMultiplier} onChange={(e) => patchJobConditions({ afterHoursMultiplier: Number(e.target.value) || 0 })} /></label>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.phasedWork} onChange={(e) => patchJobConditions({ phasedWork: e.target.checked })} />Phased Work</label>
-                      <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.phasedWorkMultiplier} onChange={(e) => patchJobConditions({ phasedWorkMultiplier: Number(e.target.value) || 0 })} /></label>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2 md:col-span-2 xl:col-span-1">
-                      <label className="text-xs text-slate-700 flex items-center gap-2"><input type="checkbox" checked={jobConditions.scheduleCompression} onChange={(e) => patchJobConditions({ scheduleCompression: e.target.checked })} />Schedule Compression</label>
-                      <label className="text-[11px] font-medium text-slate-700">Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1 h-8" value={jobConditions.scheduleCompressionMultiplier} onChange={(e) => patchJobConditions({ scheduleCompressionMultiplier: Number(e.target.value) || 0 })} /></label>
-                    </div>
-                  </div>
-                  </div>
-                  </div>
-                </details>
-
-                <details open className="group setup-details rounded-xl border border-slate-200/90 bg-white shadow-sm" id="setup-notes">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3.5 text-sm font-semibold text-slate-900 hover:bg-slate-50/80 rounded-xl [&::-webkit-details-marker]:hidden">
-                    <span className="flex items-center gap-2">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 text-[11px] font-bold text-white">5</span>
-                      Special notes
-                    </span>
-                    <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-180" aria-hidden />
-                  </summary>
-                  <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
-                  <label className="text-[11px] font-medium text-slate-700 block">Project special notes
-                    <textarea className="ui-input mt-1 min-h-[112px] py-2" value={project.specialNotes || ''} onChange={(e) => setProject({ ...project, specialNotes: e.target.value || null })} placeholder="Internal or coordination notes (optional on the client proposal — see below)." />
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-2 text-[11px] text-slate-700">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={project.proposalIncludeSpecialNotes}
-                      onChange={(e) => setProject({ ...project, proposalIncludeSpecialNotes: e.target.checked })}
-                    />
-                    <span>
-                      <span className="font-medium text-slate-800">Show special notes on proposal</span>
-                      <span className="mt-0.5 block text-[10px] font-normal text-slate-500">When off, this text stays in Project Setup only and is omitted from print / export.</span>
-                    </span>
-                  </label>
-                  </div>
-                </details>
-              </div>
-            </section>
-
-            <aside className="space-y-3 xl:sticky xl:top-[88px]">
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Summary</p>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+            <aside className="space-y-4 xl:sticky xl:top-[88px]">
+              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">At a glance</p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
                     <p className="text-slate-500">Installers</p>
                     <p className="font-semibold text-slate-900">{jobConditions.installerCount}</p>
                   </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
                     <p className="text-slate-500">Distance</p>
-                    <p className="font-semibold text-slate-900">{jobConditions.travelDistanceMiles !== null ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} mi` : 'n/a'}</p>
+                    <p className="font-semibold text-slate-900">{jobConditions.travelDistanceMiles !== null ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} mi` : '—'}</p>
                   </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
-                    <p className="text-slate-500">Labor Multiplier</p>
-                    <p className="font-semibold text-slate-900">x{formatNumberSafe(summary?.conditionLaborMultiplier || 1, 2)}</p>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
+                    <p className="text-slate-500">Labor mult.</p>
+                    <p className="font-semibold text-slate-900">×{formatNumberSafe(summary?.conditionLaborMultiplier || 1, 2)}</p>
                   </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
-                    <p className="text-slate-500">Condition Adj.</p>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
+                    <p className="text-slate-500">Cond. adj.</p>
                     <p className="font-semibold text-slate-900">{formatCurrencySafe(summary?.conditionAdjustmentAmount)}</p>
                   </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 col-span-2">
-                    <p className="text-slate-500">Adjusted Labor Subtotal</p>
+                  <div className="col-span-2 rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
+                    <p className="text-slate-500">Adjusted labor subtotal</p>
                     <p className="font-semibold text-slate-900">{formatCurrencySafe(summary?.adjustedLaborSubtotal)}</p>
                   </div>
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Active Assumptions</p>
+              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active assumptions</p>
                 {(summary?.conditionAssumptions || []).length > 0 ? (
-                  <div className="mt-2 space-y-1.5 max-h-48 overflow-auto pr-1">
+                  <div className="mt-2 max-h-48 space-y-1.5 overflow-auto pr-1 text-xs text-slate-700">
                     {(summary?.conditionAssumptions || []).slice(0, 12).map((assumption) => (
-                      <p key={assumption} className="text-xs text-slate-700 leading-4">- {assumption}</p>
+                      <p key={assumption} className="leading-4">— {assumption}</p>
                     ))}
                   </div>
                 ) : (
@@ -1628,36 +1226,50 @@ export function ProjectWorkspace() {
                 )}
               </section>
 
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5 space-y-2">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Scope Included</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedScopeCategories.length > 0 ? selectedScopeCategories.map((category) => (
-                    <span key={category} className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] border border-slate-200">{category}</span>
-                  )) : <p className="text-xs text-slate-500">No categories selected yet.</p>}
+              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Scope included</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {selectedScopeCategories.length > 0 ? (
+                    selectedScopeCategories.map((category) => (
+                      <span key={category} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
+                        {category}
+                      </span>
+                    ))
+                  ) : (
+                    <p className="text-xs text-slate-500">No categories selected yet.</p>
+                  )}
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Proposal Notes</p>
-                  <button onClick={() => setActiveTab('proposal')} className="text-[11px] font-medium text-blue-700 hover:text-blue-800">Open</button>
+              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Proposal</p>
+                  <button type="button" onClick={() => setActiveTab('proposal')} className="text-[11px] font-medium text-blue-700 hover:text-blue-800">
+                    Open
+                  </button>
                 </div>
-                <p className="text-xs text-slate-600">Review proposal assumptions and notes.</p>
+                <p className="mt-2 text-xs text-slate-600">Review wording and assumptions before export.</p>
               </section>
 
-              <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-3.5">
+              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Rooms</p>
-                    <p className="text-xs text-slate-600 mt-1">Manage rooms in the Rooms tab.</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Rooms</p>
+                    <p className="mt-1 text-xs text-slate-600">Manage areas on the Rooms tab.</p>
                   </div>
-                  <button onClick={() => setActiveTab('rooms')} className="ui-btn-secondary h-7 px-2 text-[11px]">Open Rooms</button>
+                  <button type="button" onClick={() => setActiveTab('rooms')} className="ui-btn-secondary h-8 shrink-0 px-2.5 text-[11px] font-semibold">
+                    Open
+                  </button>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {rooms.slice(0, 6).map((room) => (
-                    <span key={room.id} className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] border border-slate-200">{room.roomName}</span>
+                    <span key={room.id} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
+                      {room.roomName}
+                    </span>
                   ))}
-                  {rooms.length > 6 && <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-500 text-[11px] border border-slate-200">+{rooms.length - 6} more</span>}
+                  {rooms.length > 6 ? (
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500">+{rooms.length - 6} more</span>
+                  ) : null}
                 </div>
               </section>
             </aside>

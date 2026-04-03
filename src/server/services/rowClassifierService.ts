@@ -22,15 +22,24 @@ export interface RowClassifierLineLike {
 export function inferCategoryFromText(text: string): string {
   const normalized = normalizeComparableText(text);
   if (!normalized) return '';
-  if (/(grab bar|toilet accessory|paper towel|soap dispenser|mirror|napkin|dispenser|sanitary)/.test(normalized)) return 'Toilet Accessories';
-  if (/(partition|urinal screen|privacy panel)/.test(normalized)) return 'Toilet Partitions';
-  if (/(locker|bench)/.test(normalized)) return 'Lockers';
-  if (/(fire extinguisher|cabinet)/.test(normalized)) return 'Fire Protection Specialties';
-  if (/(sign|plaque|marker|wayfinding)/.test(normalized)) return 'Signage';
+  if (/(grab bar|toilet accessory|paper towel|soap dispenser|mirror|napkin|dispenser|sanitary|baby change|shower seat|coat hook|robe hook)/.test(normalized)) {
+    return 'Toilet Accessories';
+  }
+  if (/(partition|urinal screen|privacy panel|toilet compartment)/.test(normalized)) return 'Toilet Partitions';
+  if (/(locker|bench|z locker|team locker)/.test(normalized)) return 'Lockers';
+  if (/(fire extinguisher|extinguisher cabinet|fire hose|cabinet.*extinguisher)/.test(normalized)) return 'Fire Protection Specialties';
+  if (/(sign|plaque|marker|wayfinding|room id|ada sign|exit sign|directory)/.test(normalized)) return 'Signage';
   if (/(access panel|access door)/.test(normalized)) return 'Access Doors';
-  if (/(whiteboard|map rail|marker board|tackboard|visual display)/.test(normalized)) return 'Visual Display Boards';
-  if (/(corner guard|wall protection)/.test(normalized)) return 'Wall Protection';
-  if (/(mop|broom|utility shelf|custodial)/.test(normalized)) return 'Custodial';
+  if (/(whiteboard|map rail|marker board|tackboard|visual display|bulletin board)/.test(normalized)) return 'Visual Display Boards';
+  if (/(corner guard|wall protection|crash rail|chair rail)/.test(normalized)) return 'Wall Protection';
+  if (/(mop|broom|utility shelf|custodial|janitor)/.test(normalized)) return 'Custodial';
+  if (/(shelving|wire deck|storage rack|pallet rack|cantilever rack)/.test(normalized)) return 'Shelving';
+  if (/(hollow metal|hm door|metal frame|borrowed lite|steel door)/.test(normalized)) return 'Doors & Frames';
+  if (/(overhead door|rolling door|coiling door|garage door)/.test(normalized)) return 'Overhead Doors';
+  if (/(storefront|curtain wall|glazing|glass|window|skylight)/.test(normalized)) return 'Glazing';
+  if (/(acoustic|ceiling tile|grid ceiling|suspension system|lay.in)/.test(normalized)) return 'Ceilings';
+  if (/(resilient flooring|vinyl tile|carpet|ceramic tile|stone flooring|epoxy floor)/.test(normalized)) return 'Flooring';
+  if (/(handrail|guardrail|stair rail|pipe rail)/.test(normalized)) return 'Rails';
   return '';
 }
 

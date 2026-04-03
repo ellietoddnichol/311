@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowUpDown, Database, Edit2, Package, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { ArrowUpDown, Database, Package, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { CatalogSyncStatusRecord, BundleRecord, ModifierRecord } from '../shared/types/estimator';
 import { CatalogItem } from '../types';
@@ -361,7 +361,7 @@ export function Catalog() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={activeTab === 'items' ? 'Search SKU, description, category' : activeTab === 'modifiers' ? 'Search modifier key, name, categories' : 'Search bundle id, name, category'}
-              className="ui-input h-8 pl-8 text-xs"
+              className="ui-input ui-input--leading-icon-sm h-8 text-xs"
             />
           </div>
 
@@ -394,7 +394,7 @@ export function Catalog() {
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as SortKey)}
-                  className="ui-input h-8 w-full pl-8 pr-2 text-xs"
+                  className="ui-input ui-input--leading-icon-sm h-8 w-full pr-2 text-xs"
                 >
                   <option value="sku-asc">Sort: SKU (A-Z)</option>
                   <option value="sku-desc">Sort: SKU (Z-A)</option>
@@ -524,7 +524,20 @@ export function Catalog() {
                 </thead>
                 <tbody>
                   {filteredModifiers.map((modifier) => (
-                    <tr key={modifier.id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <tr
+                      key={modifier.id}
+                      role="button"
+                      tabIndex={0}
+                      title="Click row to edit"
+                      className="border-b border-slate-100 hover:bg-slate-50/70 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400/50"
+                      onClick={() => void handleEditModifier(modifier)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          void handleEditModifier(modifier);
+                        }
+                      }}
+                    >
                       <td className="py-2 px-3 font-medium text-slate-900">{modifier.name}</td>
                       <td className="py-2 px-2 text-slate-700">{modifier.modifierKey}</td>
                       <td className="py-2 px-2 text-slate-700">{modifier.appliesToCategories.join(', ') || '-'}</td>
@@ -537,19 +550,14 @@ export function Catalog() {
                           {modifier.active ? 'Yes' : 'No'}
                         </span>
                       </td>
-                      <td className="py-2 px-3">
+                      <td className="py-2 px-3" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
                           <button
                             type="button"
-                            onClick={() => void handleEditModifier(modifier)}
-                            className="h-7 px-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteModifier(modifier.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleDeleteModifier(modifier.id);
+                            }}
                             className="h-7 px-2 rounded border border-red-200 text-red-700 hover:bg-red-50 inline-flex items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
                           >
                             <Trash2 className="w-3 h-3" />
@@ -578,7 +586,20 @@ export function Catalog() {
               </thead>
               <tbody>
                 {filteredBundles.map((bundle) => (
-                  <tr key={bundle.id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                  <tr
+                    key={bundle.id}
+                    role="button"
+                    tabIndex={0}
+                    title="Click row to edit"
+                    className="border-b border-slate-100 hover:bg-slate-50/70 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400/50"
+                    onClick={() => void handleEditBundle(bundle)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        void handleEditBundle(bundle);
+                      }
+                    }}
+                  >
                     <td className="py-2 px-3 text-slate-700">{bundle.id}</td>
                     <td className="py-2 px-2 font-medium text-slate-900">{bundle.bundleName}</td>
                     <td className="py-2 px-2 text-slate-700">{bundle.category || '-'}</td>
@@ -588,19 +609,14 @@ export function Catalog() {
                         {bundle.active ? 'Yes' : 'No'}
                       </span>
                     </td>
-                    <td className="py-2 px-3">
+                    <td className="py-2 px-3" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         <button
                           type="button"
-                          onClick={() => void handleEditBundle(bundle)}
-                          className="h-7 px-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteBundle(bundle.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDeleteBundle(bundle.id);
+                          }}
                           className="h-7 px-2 rounded border border-red-200 text-red-700 hover:bg-red-50 inline-flex items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
                         >
                           <Trash2 className="w-3 h-3" />

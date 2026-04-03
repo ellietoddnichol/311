@@ -116,7 +116,7 @@ export function Projects() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by project, client, or number"
-            className="ui-input pl-9"
+            className="ui-input ui-input--leading-icon"
           />
         </div>
 
@@ -191,7 +191,20 @@ export function Projects() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((project) => (
-                <tr key={project.id} className="hover:bg-slate-50/80">
+                <tr
+                  key={project.id}
+                  role="button"
+                  tabIndex={0}
+                  title="Click row to open"
+                  className="hover:bg-slate-50/80 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400/50"
+                  onClick={() => navigate(`/project/${project.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      navigate(`/project/${project.id}`);
+                    }
+                  }}
+                >
                   <td className="px-5 py-4">
                     <p className="text-sm font-semibold text-slate-900">{project.projectName}</p>
                     <p className="text-xs text-slate-500">{project.projectNumber ? `#${project.projectNumber}` : 'No project number'} · {project.address || 'No address'}</p>
@@ -205,21 +218,17 @@ export function Projects() {
                       ? format(new Date(project.createdAt), 'MMM d, yyyy')
                       : 'N/A'}
                   </td>
-                  <td className="px-5 py-4 text-right">
-                    <div className="inline-flex items-center gap-2">
-                      <button
-                        onClick={() => navigate(`/project/${project.id}`)}
-                        className="ui-btn-secondary h-8 px-3 text-xs"
-                      >
-                        Open
-                      </button>
-                      <button
-                        onClick={() => void deleteProject(project.id, project.projectName)}
-                        className="h-8 px-3 rounded-md border border-red-200 text-red-700 text-xs font-medium hover:bg-red-50"
-                      >
-                        Delete
-                      </button>
-                    </div>
+                  <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void deleteProject(project.id, project.projectName);
+                      }}
+                      className="h-8 px-3 rounded-md border border-red-200 text-red-700 text-xs font-medium hover:bg-red-50 outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}

@@ -151,7 +151,7 @@ export function BundlePickerModal({ open, bundles, rooms, activeRoomId, onClose,
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="h-10 w-full rounded-md border border-slate-300 pl-8 pr-3 text-sm"
+                className="h-10 w-full rounded-md border border-slate-300 pl-10 pr-3 text-sm"
                 placeholder="Search bundles by name or category"
               />
             </div>

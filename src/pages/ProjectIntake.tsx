@@ -3150,7 +3150,7 @@ export function ProjectIntake() {
                   value={catalogSearch}
                   onChange={(e) => setCatalogSearch(e.target.value)}
                   placeholder="Search SKU, description, or category"
-                  className="w-full h-9 pl-8 pr-2 rounded border border-slate-300 text-sm"
+                  className="w-full h-9 pl-10 pr-2 rounded border border-slate-300 text-sm"
                 />
               </div>
             </div>

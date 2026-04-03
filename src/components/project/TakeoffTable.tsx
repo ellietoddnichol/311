@@ -499,7 +499,7 @@ export function TakeoffTable({ project, estimate, onUpdate }: Props) {
                   type="text"
                   autoFocus
                   placeholder="Search by description, SKU, or category..."
-                  className="w-full pl-12 pr-4 py-4 bg-white border-transparent rounded-2xl shadow-sm focus:ring-2 focus:ring-blue-500 transition-all text-lg"
+                  className="w-full pl-14 pr-4 py-4 bg-white border-transparent rounded-2xl shadow-sm focus:ring-2 focus:ring-blue-500 transition-all text-lg"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />

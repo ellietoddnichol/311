@@ -15,6 +15,12 @@ import {
 import { extractDocumentWithGemini } from '../geminiExtractionService.ts';
 import { intakeAsText, normalizeComparableText } from '../metadataExtractorService.ts';
 import { inferCategoryFromText, normalizeExtractedCategory } from '../rowClassifierService.ts';
+import {
+  compactDescription,
+  extractManufacturerModelFinish,
+  inferUnitFromDescription,
+  parseLineLeadingQtyUnit,
+} from './lineFieldHeuristics.ts';
 import type { PdfChunk } from './pdfParser.ts';
 
 const PDF_LLM_CHUNK_LIMIT = 12;
@@ -37,15 +43,6 @@ function pdfDeterministicLineQualifiesForScopeRow(
   return desc.length >= 36;
 }
 
-function parseQuantityPrefix(text: string): { quantity: number | null; description: string } {
-  const matched = text.trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*[xX-]?\s+(.*)$/);
-  if (!matched) return { quantity: null, description: text.trim() };
-  return {
-    quantity: Number(matched[1]) || null,
-    description: intakeAsText(matched[2]),
-  };
-}
-
 function detectItemType(text: string): string | null {
   const normalized = normalizeComparableText(text);
   if (!normalized) return null;
@@ -60,22 +57,6 @@ function detectAlternate(text: string): boolean {
 
 function detectExclusion(text: string): boolean {
   return /(exclude|excluded|not included|exclusion)/i.test(text);
-}
-
-function extractLabeledValue(text: string, patterns: RegExp[]): string | null {
-  for (const pattern of patterns) {
-    const matched = text.match(pattern);
-    if (matched?.[1]) return intakeAsText(matched[1]) || null;
-  }
-  return null;
-}
-
-function extractManufacturerModelFinish(text: string): Pick<NormalizedIntakeItem, 'manufacturer' | 'model' | 'finish'> {
-  return {
-    manufacturer: extractLabeledValue(text, [/manufacturer\s*[:\-]\s*([^,;]+)/i, /mfr\s*[:\-]\s*([^,;]+)/i, /brand\s*[:\-]\s*([^,;]+)/i]),
-    model: extractLabeledValue(text, [/model\s*[:\-]\s*([^,;]+)/i, /series\s*[:\-]\s*([^,;]+)/i]),
-    finish: extractLabeledValue(text, [/finish\s*[:\-]\s*([^,;]+)/i, /color\s*[:\-]\s*([^,;]+)/i, /(powder coat[^,;]*)/i]),
-  };
 }
 
 function detectBundleCandidates(text: string, category: string | null): string[] {
@@ -98,7 +79,21 @@ export function normalizeSpreadsheetRows(input: {
   metadata: Partial<IntakeProjectMetadata>;
 }): NormalizedIntakeItem[] {
   return input.rows.map((row) => {
-    const text = row.mappedFields.itemDescription || Object.values(row.rawRow).map((value) => intakeAsText(value)).filter(Boolean).join(' ');
+    let text = row.mappedFields.itemDescription || Object.values(row.rawRow).map((value) => intakeAsText(value)).filter(Boolean).join(' ');
+    text = compactDescription(text);
+    let quantity = row.mappedFields.quantity ?? null;
+    let unit = row.mappedFields.unit || null;
+    if (quantity === null && text) {
+      const parsed = parseLineLeadingQtyUnit(text);
+      if (parsed.quantity !== null) {
+        quantity = parsed.quantity;
+        unit = parsed.unit ?? unit;
+        text = compactDescription(parsed.description || text);
+      }
+    }
+    if (!unit && text) {
+      unit = inferUnitFromDescription(text);
+    }
     const labeled = extractManufacturerModelFinish(text);
     const category = normalizeExtractedCategory('', text) || inferCategoryFromText(text) || null;
     const itemType = detectItemType(`${text} ${row.mappedFields.notes || ''}`);
@@ -106,8 +101,8 @@ export function normalizeSpreadsheetRows(input: {
     const exclusion = detectExclusion(`${text} ${row.mappedFields.notes || ''}`);
     const confidence = 0.56
       + (row.mappedFields.itemDescription ? 0.12 : 0)
-      + (row.mappedFields.quantity !== null && row.mappedFields.quantity !== undefined ? 0.08 : 0)
-      + (row.mappedFields.unit ? 0.06 : 0)
+      + (quantity !== null && quantity !== undefined ? 0.08 : 0)
+      + (unit ? 0.06 : 0)
       + (category ? 0.08 : 0)
       - (row.parsingNotes.length * 0.05);
 
@@ -123,8 +118,8 @@ export function normalizeSpreadsheetRows(input: {
       category,
       roomName: row.mappedFields.roomName || null,
       description: text || 'Unresolved spreadsheet line',
-      quantity: row.mappedFields.quantity ?? null,
-      unit: row.mappedFields.unit || null,
+      quantity,
+      unit,
       manufacturer: row.mappedFields.manufacturer || labeled.manufacturer,
       model: row.mappedFields.model || labeled.model,
       finish: row.mappedFields.finish || labeled.finish,
@@ -178,8 +173,12 @@ export function normalizePdfLinesDeterministically(
         return;
       }
 
-      const { quantity, description } = parseQuantityPrefix(line);
+      const parsed = parseLineLeadingQtyUnit(line);
+      let quantity = parsed.quantity;
+      let unit = parsed.unit;
+      let description = compactDescription(parsed.description);
       if (!description) return;
+      if (!unit) unit = inferUnitFromDescription(description);
       if (strict && !pdfDeterministicLineQualifiesForScopeRow(line, quantity, description, inferredItemType)) {
         return;
       }
@@ -239,11 +238,24 @@ export async function normalizePdfChunks(input: {
       });
 
       result.parsedLines.forEach((line) => {
-        const text = intakeAsText(line.description || line.itemName);
+        const rawText = intakeAsText(line.description || line.itemName);
+        const text = compactDescription(rawText);
         if (!text || looksLikePdfExtractionNoiseLine(text) || looksLikePdfProposalBoilerplateLine(text)) return;
         const labeled = extractManufacturerModelFinish(`${line.itemName} ${line.description} ${line.notes}`);
         const category = normalizeExtractedCategory(line.category || '', `${line.itemName} ${line.description}`) || inferCategoryFromText(text) || null;
         const itemType = detectItemType(`${text} ${line.notes || ''}`);
+        let qty = Number.isFinite(line.quantity) ? Number(line.quantity) : null;
+        let unit = intakeAsText(line.unit) || null;
+        let description = text;
+        if (qty === null && text) {
+          const p = parseLineLeadingQtyUnit(text);
+          if (p.quantity !== null) {
+            qty = p.quantity;
+            unit = p.unit ?? unit;
+            description = compactDescription(p.description);
+          }
+        }
+        if (!unit) unit = inferUnitFromDescription(description);
         llmItems.push({
           sourceType: 'pdf',
           sourceRef: {
@@ -254,18 +266,20 @@ export async function normalizePdfChunks(input: {
           itemType,
           category,
           roomName: line.roomArea || null,
-          description: text,
-          quantity: Number.isFinite(line.quantity) ? Number(line.quantity) : null,
-          unit: intakeAsText(line.unit) || null,
+          description,
+          quantity: qty,
+          unit,
           manufacturer: labeled.manufacturer,
           model: labeled.model,
           finish: labeled.finish,
-          modifiers: itemType === 'modifier' ? [text] : [],
-          bundleCandidates: detectBundleCandidates(text, category),
-          notes: [line.notes || `Normalized from PDF chunk ${chunk.chunkId}.`].filter(Boolean),
-          alternate: detectAlternate(`${text} ${line.notes || ''}`),
-          exclusion: detectExclusion(`${text} ${line.notes || ''}`),
-          confidence: clampConfidence(0.62 + (category ? 0.08 : 0) + (line.roomArea ? 0.05 : 0)),
+          modifiers: itemType === 'modifier' ? [description] : [],
+          bundleCandidates: detectBundleCandidates(description, category),
+          notes: line.notes ? [compactDescription(line.notes)] : [],
+          alternate: detectAlternate(`${description} ${line.notes || ''}`),
+          exclusion: detectExclusion(`${description} ${line.notes || ''}`),
+          confidence: clampConfidence(
+            0.62 + (category ? 0.08 : 0) + (line.roomArea ? 0.05 : 0) + (unit ? 0.03 : 0)
+          ),
         });
       });
     } catch (_error) {
