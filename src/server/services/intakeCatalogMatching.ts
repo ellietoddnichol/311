@@ -86,7 +86,10 @@ function buildCatalogSearchText(item: CatalogItem): string {
     item.subcategory,
     item.family,
     item.manufacturer,
+    item.brand,
     item.model,
+    item.modelNumber,
+    item.series,
     item.notes,
     ...(item.tags || []),
   ]

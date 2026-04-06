@@ -1,7 +1,10 @@
 import type { CatalogItem } from '../../../types.ts';
 import type { CatalogMatchCandidate, IntakeCatalogMatch, NormalizedIntakeItem } from '../../../shared/types/intake.ts';
-import { normalizeComparableText } from '../metadataExtractorService.ts';
-import { interpretTakeoffHeader } from './headerInterpreter.ts';
+import { intakeAsText, normalizeComparableText } from '../metadataExtractorService.ts';
+import { interpretTakeoffHeader, normalizeTakeoffHeader } from './headerInterpreter.ts';
+
+/** Ranked alternatives returned per header — scoring still runs over the full catalog. */
+export const MAX_CATALOG_MATCH_CANDIDATES = 30;
 
 function clamp(value: number): number {
   return Number(Math.max(0, Math.min(1, value)).toFixed(2));
@@ -29,7 +32,7 @@ function tokenize(value: unknown): string[] {
 }
 
 function extractDimensionsFromCatalog(item: CatalogItem): number[] {
-  const text = `${item.sku} ${item.description} ${item.model || ''}`;
+  const text = `${item.sku} ${item.description} ${item.model || ''} ${item.modelNumber || ''}`;
   const output: number[] = [];
   text.match(/\b\d{2}(?:x\d{2})?\b/gi)?.forEach((token) => {
     token.split('x').forEach((part) => {
@@ -68,10 +71,73 @@ function buildSearchText(item: CatalogItem): string {
     item.subcategory,
     item.family,
     item.manufacturer,
+    item.brand,
     item.model,
+    item.modelNumber,
+    item.series,
     item.notes,
     ...(item.tags || []),
   ].filter(Boolean).join(' ');
+}
+
+/** Matrix-style shorthand (GB 36, CH B212) — family gating applies. Long Excel descriptions use full-text scoring. */
+function isNarrowMatrixShorthand(rawHeader: string): boolean {
+  const t = intakeAsText(rawHeader);
+  if (!t || t.length > 96) return false;
+  const tokens = normalizeComparableText(t).split(/\s+/).filter(Boolean);
+  return tokens.length <= 12;
+}
+
+/**
+ * When the matrix-style scorer finds nothing, score every catalog row on lexical overlap + description containment.
+ * Matches full spreadsheet lines against your full catalog (SKU, mfr, model, tags, etc. in buildSearchText).
+ */
+function lexicalCatalogCandidates(rawHeader: string, catalogItems: CatalogItem[]): CatalogMatchCandidate[] {
+  const normalized = normalizeTakeoffHeader(rawHeader);
+  if (normalized.length < 8) return [];
+  const queryTokens = tokenize(normalized);
+  if (queryTokens.length < 2) return [];
+
+  const candidates: CatalogMatchCandidate[] = [];
+
+  for (const item of catalogItems) {
+    const itemTokens = tokenize(buildSearchText(item));
+    const ov = overlap(queryTokens, itemTokens);
+    const normDesc = normalizeComparableText(item.description).slice(0, 240);
+    const sub =
+      normalized.length >= 10 &&
+      (normDesc.includes(normalized) ||
+        normalized.includes(normDesc.slice(0, Math.min(140, normDesc.length))));
+
+    let score = 0.1;
+    if (sub) score += 0.52;
+    score += 0.44 * Math.min(1, ov);
+    if (score < 0.2) continue;
+
+    const reasons: string[] = [];
+    if (sub) reasons.push('Catalog description aligns with takeoff line text');
+    if (ov > 0.12) reasons.push(`Token overlap with catalog fields (${Math.round(ov * 100)}%)`);
+
+    candidates.push(
+      toCandidate(
+        item,
+        Math.min(0.92, score),
+        'fuzzy',
+        reasons,
+        {
+          parsedFamily: null,
+          parsedModelTokens: [],
+          parsedDimensions: [],
+          familyOnly: false,
+          catalogCoverageGap: false,
+        }
+      )
+    );
+  }
+
+  return candidates
+    .sort((left, right) => right.confidence - left.confidence)
+    .slice(0, MAX_CATALOG_MATCH_CANDIDATES);
 }
 
 function overlap(left: string[], right: string[]): number {
@@ -137,6 +203,9 @@ function buildCoverageGapCandidate(rawHeader: string, input: {
 
 export function matchMatrixHeaderToCatalog(rawHeader: string, catalogItems: CatalogItem[]): CatalogMatchCandidate[] {
   const interpretation = interpretTakeoffHeader(rawHeader);
+  const narrowShorthand = isNarrowMatrixShorthand(rawHeader);
+  const minScoreToInclude =
+    interpretation.normalizedSearchText.length > 72 ? 0.18 : narrowShorthand ? 0.28 : 0.22;
   const rawCode = normalizeCode(rawHeader);
   const expandedTokens = interpretation.expandedTokens;
   const rawTokens = tokenize(rawHeader);
@@ -150,9 +219,15 @@ export function matchMatrixHeaderToCatalog(rawHeader: string, catalogItems: Cata
   const exactModelInFamily = familyCandidates.some((item) => {
     const normalizedModel = normalizeCode(item.model);
     const normalizedSku = normalizeCode(item.sku);
+    const normalizedModelNum = normalizeCode(item.modelNumber);
     return parsedModelTokens.some((token) => {
       const normalizedToken = normalizeCode(token);
-      return normalizedToken && (normalizedToken === normalizedModel || normalizedToken === normalizedSku);
+      return (
+        Boolean(normalizedToken) &&
+        (normalizedToken === normalizedModel ||
+          normalizedToken === normalizedSku ||
+          Boolean(normalizedModelNum && normalizedToken === normalizedModelNum))
+      );
     });
   });
 
@@ -163,11 +238,15 @@ export function matchMatrixHeaderToCatalog(rawHeader: string, catalogItems: Cata
     const itemTokens = tokenize(itemSearchText);
     const itemModel = normalizeCode(item.model);
     const itemSku = normalizeCode(item.sku);
+    const itemModelNumber = normalizeCode(item.modelNumber);
     const itemFamilies = extractCatalogFamilies(item);
-    const modelExact = rawCode && (rawCode === itemModel || rawCode === itemSku);
+    const modelExact = rawCode && (rawCode === itemModel || rawCode === itemSku || (itemModelNumber && rawCode === itemModelNumber));
     const modelTokenMatch = interpretation.modelTokens.some((token) => {
       const normalized = normalizeCode(token);
-      return normalized && (normalized === itemModel || normalized === itemSku);
+      return (
+        Boolean(normalized) &&
+        (normalized === itemModel || normalized === itemSku || Boolean(itemModelNumber && normalized === itemModelNumber))
+      );
     });
     const modelFamilyMatch = isModelFamilyMatch(parsedModelTokens, item) && !modelTokenMatch;
     const tokenOverlap = overlap(expandedTokens, itemTokens);
@@ -186,7 +265,8 @@ export function matchMatrixHeaderToCatalog(rawHeader: string, catalogItems: Cata
     const accessoryMatch = interpretation.accessoryTokens.some((token) => normalizedItemSearchText.includes(normalizeComparableText(token)));
     const familyOnly = Boolean(familyAliasMatch || modelFamilyMatch) && !modelExact && !modelTokenMatch;
     const coverageGapPenalty = familyOnly && parsedModelTokens.length > 0 && !exactModelInFamily ? 0.1 : 0;
-    const unrelatedFamilyPenalty = parsedFamily && !familyAliasMatch && !modelFamilyMatch && !categoryMatch ? 0.32 : 0;
+    const unrelatedFamilyPenalty =
+      narrowShorthand && parsedFamily && !familyAliasMatch && !modelFamilyMatch && !categoryMatch ? 0.32 : 0;
 
     let score = 0;
     if (modelExact) {
@@ -255,11 +335,11 @@ export function matchMatrixHeaderToCatalog(rawHeader: string, catalogItems: Cata
               ? 'fuzzy'
               : 'unmatched';
 
-    if (score >= 0.28 || familyOnly) {
+    if (score >= minScoreToInclude || familyOnly) {
       const boundedScore = familyOnly && !modelExact && !modelTokenMatch
         ? Math.min(Math.max(score, 0.46), 0.74)
         : score;
-      if (parsedFamily && boundedScore < 0.28 && !familyOnly) {
+      if (narrowShorthand && parsedFamily && boundedScore < 0.28 && !familyOnly) {
         return;
       }
       candidates.push(toCandidate(item, boundedScore, method, reasons, {
@@ -273,6 +353,10 @@ export function matchMatrixHeaderToCatalog(rawHeader: string, catalogItems: Cata
   });
 
   if (!candidates.length) {
+    const lexical = lexicalCatalogCandidates(rawHeader, catalogItems);
+    if (lexical.length) {
+      return lexical;
+    }
     if (parsedFamily) {
       return [buildCoverageGapCandidate(rawHeader, {
         parsedFamily,
@@ -291,9 +375,30 @@ export function matchMatrixHeaderToCatalog(rawHeader: string, catalogItems: Cata
     })];
   }
 
-  return candidates
+  let merged = candidates
     .sort((left, right) => right.confidence - left.confidence || Number(Boolean(right.catalogCoverageGap)) - Number(Boolean(left.catalogCoverageGap)))
-    .slice(0, 3);
+    .slice(0, MAX_CATALOG_MATCH_CANDIDATES);
+
+  const bestConf = merged[0]?.confidence ?? 0;
+  if (bestConf < 0.42 && catalogItems.length > 0) {
+    const lexical = lexicalCatalogCandidates(rawHeader, catalogItems);
+    const byId = new Map<string, CatalogMatchCandidate>();
+    for (const c of merged) {
+      if (c.catalogItemId) byId.set(c.catalogItemId, c);
+    }
+    for (const c of lexical) {
+      if (!c.catalogItemId) continue;
+      const prev = byId.get(c.catalogItemId);
+      if (!prev || c.confidence > prev.confidence) {
+        byId.set(c.catalogItemId, c);
+      }
+    }
+    merged = Array.from(byId.values())
+      .sort((left, right) => right.confidence - left.confidence || Number(Boolean(right.catalogCoverageGap)) - Number(Boolean(left.catalogCoverageGap)))
+      .slice(0, MAX_CATALOG_MATCH_CANDIDATES);
+  }
+
+  return merged;
 }
 
 export function candidateToIntakeCatalogMatch(candidate: CatalogMatchCandidate | null | undefined): IntakeCatalogMatch | null {

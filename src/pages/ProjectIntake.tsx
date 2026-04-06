@@ -27,6 +27,7 @@ import {
   uniqueSortedCatalogCategories,
 } from '../shared/utils/catalogCategories';
 import { computeCatalogPeerPricingSuggestion } from '../shared/utils/catalogPeerSuggestions';
+import { catalogItemMatchesQuery } from '../shared/utils/catalogItemSearch';
 
 function IntakeFieldBadge({ kind }: { kind: 'required' | 'optional' | 'office' }) {
   if (kind === 'required') {
@@ -1281,15 +1282,10 @@ export function ProjectIntake() {
     [lineSuggestions]
   );
 
-  const filteredCatalog = useMemo(() => {
-    const q = catalogSearch.toLowerCase();
-    if (!q) return catalog;
-    return catalog.filter((item) =>
-      item.description.toLowerCase().includes(q) ||
-      item.sku.toLowerCase().includes(q) ||
-      item.category.toLowerCase().includes(q)
-    );
-  }, [catalog, catalogSearch]);
+  const filteredCatalog = useMemo(
+    () => catalog.filter((item) => catalogItemMatchesQuery(item, catalogSearch)),
+    [catalog, catalogSearch]
+  );
 
   const scopeCategoryOptions = useMemo(
     () => Array.from(new Set([
@@ -3518,10 +3514,14 @@ export function ProjectIntake() {
                 <input
                   value={catalogSearch}
                   onChange={(e) => setCatalogSearch(e.target.value)}
-                  placeholder="Search SKU, description, or category"
+                  placeholder="Search SKU, description, category, family, manufacturer, model, tags…"
                   className="w-full h-9 pl-10 pr-2 rounded border border-slate-300 text-sm"
                 />
               </div>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Showing {filteredCatalog.length} of {catalog.length} catalog {catalog.length === 1 ? 'item' : 'items'}
+                {catalogSearch.trim() ? ' (filtered)' : ''}.
+              </p>
             </div>
             <div className="p-3 max-h-[60vh] overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-2">
               {filteredCatalog.map((item) => (

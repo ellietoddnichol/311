@@ -44,6 +44,7 @@ import { ProposalPreview } from '../components/workspace/ProposalPreview';
 import { BundlePickerModal } from '../components/workspace/BundlePickerModal';
 import { formatCurrencySafe, formatKilobytesSafe, formatLaborDurationMinutes, formatNumberSafe } from '../utils/numberFormat';
 import { getDistanceInMiles } from '../utils/geo';
+import { catalogItemMatchesQuery } from '../shared/utils/catalogItemSearch';
 import { CatalogCategorySelect } from '../components/intake/CatalogCategorySelect';
 import { useTransientNumericField } from '../hooks/useTransientNumericField';
 
@@ -93,10 +94,27 @@ function isWorkspaceTab(value: string | null): value is WorkspaceTab {
   return !!value && WORKSPACE_TABS.includes(value as WorkspaceTab);
 }
 
-/** Stable JSON for autosave dirty checks (timestamps excluded). */
-function fingerprintProjectPayload(p: ProjectRecord): string {
+/** Canonical JSON for autosave dirty checks — avoids missed saves when key order or nested shapes differ. */
+function fingerprintProjectStable(p: ProjectRecord): string {
   const { updatedAt: _u, createdAt: _c, ...rest } = p;
-  return JSON.stringify(rest);
+  const normalized = {
+    ...rest,
+    jobConditions: normalizeProjectJobConditions(rest.jobConditions),
+    selectedScopeCategories: [...(rest.selectedScopeCategories || [])].sort(),
+  };
+  return stableStringify(normalized);
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => stableStringify(v)).join(',')}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
 }
 
 const DEFAULT_ROOM_CREATION_DRAFT: RoomCreationDraft = {
@@ -146,6 +164,8 @@ export function ProjectWorkspace() {
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPersistedFingerprintRef = useRef<string | null>(null);
   const projectRef = useRef<ProjectRecord | null>(null);
+  const autosaveGenerationRef = useRef(0);
+  const saveProjectRef = useRef<() => Promise<void>>(async () => {});
   projectRef.current = project;
 
   const [activeRoomId, setActiveRoomId] = useState('');
@@ -203,31 +223,37 @@ export function ProjectWorkspace() {
     return () => clearTimeout(timer);
   }, [project?.address]);
 
+  const projectFingerprint = useMemo(() => (project ? fingerprintProjectStable(project) : ''), [project]);
+
   useEffect(() => {
     if (!project || loading) return;
-    const fp = fingerprintProjectPayload(project);
+    const fp = projectFingerprint;
     if (lastPersistedFingerprintRef.current === null) {
       lastPersistedFingerprintRef.current = fp;
       return;
     }
     if (fp === lastPersistedFingerprintRef.current) return;
 
+    autosaveGenerationRef.current += 1;
+    const gen = autosaveGenerationRef.current;
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(() => {
       autosaveTimerRef.current = null;
       void (async () => {
+        if (gen !== autosaveGenerationRef.current) return;
         const p = projectRef.current;
-        if (!p) return;
-        const sent = fingerprintProjectPayload(p);
+        if (!p || loading) return;
+        const sent = fingerprintProjectStable(p);
         if (sent === lastPersistedFingerprintRef.current) return;
 
         setSyncState('syncing');
         try {
           const saved = await api.updateV1Project(p.id, p);
+          if (gen !== autosaveGenerationRef.current) return;
           const localNow = projectRef.current;
-          const serverFp = fingerprintProjectPayload(saved);
+          const serverFp = fingerprintProjectStable(saved);
 
-          if (localNow && fingerprintProjectPayload(localNow) === sent) {
+          if (localNow && fingerprintProjectStable(localNow) === sent) {
             lastPersistedFingerprintRef.current = serverFp;
             setProject(saved);
             setLastSavedAt(saved.updatedAt);
@@ -241,14 +267,14 @@ export function ProjectWorkspace() {
           setSyncState('error');
         }
       })();
-    }, 800);
+    }, 500);
     return () => {
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = null;
       }
     };
-  }, [project, loading]);
+  }, [projectFingerprint, project, loading]);
 
   async function loadWorkspace(projectId: string) {
     try {
@@ -267,7 +293,7 @@ export function ProjectWorkspace() {
       ]);
 
       setProject(projectData);
-      lastPersistedFingerprintRef.current = fingerprintProjectPayload(projectData);
+      lastPersistedFingerprintRef.current = fingerprintProjectStable(projectData);
       setLastSavedAt(projectData.updatedAt);
       setSyncState('ok');
       setRooms(roomData);
@@ -388,8 +414,7 @@ export function ProjectWorkspace() {
 
   const filteredCatalog = useMemo(() => {
     return catalog.filter((item) => {
-      const q = catalogSearch.toLowerCase();
-      const searchMatch = item.description.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q);
+      const searchMatch = catalogItemMatchesQuery(item, catalogSearch);
       const categoryMatch = catalogCategory === 'all' || item.category === catalogCategory;
       return searchMatch && categoryMatch;
     });
@@ -461,7 +486,7 @@ export function ProjectWorkspace() {
     setSyncState('syncing');
     try {
       const saved = await api.updateV1Project(project.id, project);
-      lastPersistedFingerprintRef.current = fingerprintProjectPayload(saved);
+      lastPersistedFingerprintRef.current = fingerprintProjectStable(saved);
       setProject(saved);
       setLastSavedAt(saved.updatedAt);
       setSyncState('ok');
@@ -472,6 +497,31 @@ export function ProjectWorkspace() {
       window.alert(error instanceof Error ? error.message : 'Could not save project.');
     }
   }
+
+  saveProjectRef.current = saveProject;
+
+  useEffect(() => {
+    function flushPendingSave() {
+      const p = projectRef.current;
+      if (!p || loading) return;
+      const sent = fingerprintProjectStable(p);
+      if (sent === lastPersistedFingerprintRef.current) return;
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      void saveProjectRef.current();
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState === 'hidden') flushPendingSave();
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', flushPendingSave);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', flushPendingSave);
+    };
+  }, [loading]);
 
   async function deleteProjectPermanently() {
     if (!project) return;
@@ -652,7 +702,7 @@ export function ProjectWorkspace() {
 
     try {
       const updated = await api.updateV1Project(project.id, { status: nextStatus });
-      lastPersistedFingerprintRef.current = fingerprintProjectPayload(updated);
+      lastPersistedFingerprintRef.current = fingerprintProjectStable(updated);
       setProject(updated);
       setLastSavedAt(updated.updatedAt);
       setSyncState('ok');

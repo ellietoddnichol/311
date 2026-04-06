@@ -28,7 +28,14 @@ export function TopProjectHeader({
   onDeleteProject,
   statusActionLabel,
 }: Props) {
-  const syncLabel = syncState === 'syncing' ? 'Syncing...' : syncState === 'ok' ? 'Synced' : syncState === 'error' ? 'Sync Error' : 'Not Synced';
+  const syncLabel =
+    syncState === 'syncing'
+      ? 'Saving project…'
+      : syncState === 'ok'
+        ? 'Project saved'
+        : syncState === 'error'
+          ? 'Save failed'
+          : 'Not saved yet';
   const syncColor = syncState === 'ok' ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : syncState === 'error' ? 'text-red-700 bg-red-50 border-red-100' : 'text-slate-600 bg-slate-50 border-slate-200';
 
   return (

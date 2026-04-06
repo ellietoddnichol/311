@@ -217,7 +217,7 @@ export function ItemPicker({ open, rooms, bundles, activeRoomId, categories, sea
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative min-w-[220px] flex-1">
                   <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input value={search} onChange={(e) => onSearch(e.target.value)} className="h-10 w-full rounded-md border border-slate-300 pl-10 pr-3 text-sm" placeholder="Search catalog by SKU or description" />
+                  <input value={search} onChange={(e) => onSearch(e.target.value)} className="h-10 w-full rounded-md border border-slate-300 pl-10 pr-3 text-sm" placeholder="Search SKU, description, category, family, manufacturer, model, tags…" />
                 </div>
                 <select value={category} onChange={(e) => onCategory(e.target.value)} className="h-10 rounded-md border border-slate-300 px-3 text-sm">
                   {categories.map((entry) => <option key={entry} value={entry}>{entry === 'all' ? 'All Categories' : entry}</option>)}

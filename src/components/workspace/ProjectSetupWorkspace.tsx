@@ -130,42 +130,6 @@ export function ProjectSetupWorkspace({
 
   return (
     <div className="w-full min-w-0 space-y-10 pb-2">
-      {/* Project details — compact identity */}
-      <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm">
-        <details open className="group">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 [&::-webkit-details-marker]:hidden">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Project details</p>
-              <h2 className="mt-0.5 text-lg font-semibold text-slate-900">Identity &amp; client</h2>
-              <p className="mt-1 text-xs text-slate-500">Name, client, and site — used on proposals and distance.</p>
-            </div>
-            <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-180" />
-          </summary>
-          <div className="grid grid-cols-1 gap-3 px-5 pb-5 pt-2 md:grid-cols-2">
-            <label className="text-[11px] font-medium text-slate-700">
-              Project name
-              <input className="ui-input mt-1 h-9 w-full" value={project.projectName} onChange={(e) => setProject({ ...project, projectName: e.target.value })} />
-            </label>
-            <label className="text-[11px] font-medium text-slate-700">
-              Client
-              <input className="ui-input mt-1 h-9 w-full" value={project.clientName || ''} onChange={(e) => setProject({ ...project, clientName: e.target.value || null })} />
-            </label>
-            <label className="text-[11px] font-medium text-slate-700">
-              Project #
-              <input className="ui-input mt-1 h-9 w-full" value={project.projectNumber || ''} onChange={(e) => setProject({ ...project, projectNumber: e.target.value || null })} />
-            </label>
-            <label className="text-[11px] font-medium text-slate-700">
-              Estimator
-              <input className="ui-input mt-1 h-9 w-full" value={project.estimator || ''} onChange={(e) => setProject({ ...project, estimator: e.target.value || null })} />
-            </label>
-            <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
-              Address
-              <input className="ui-input mt-1 h-9 w-full" value={project.address || ''} onChange={(e) => setProject({ ...project, address: e.target.value || null })} />
-            </label>
-          </div>
-        </details>
-      </section>
-
       {/* 1 — Project inputs */}
       <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-5">
@@ -177,6 +141,33 @@ export function ProjectSetupWorkspace({
           <Legend />
         </div>
         <div className="space-y-6 px-5 py-5">
+          <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 p-4">
+            <p className="text-[11px] font-semibold text-slate-800">Identity &amp; site</p>
+            <p className="mt-1 text-xs text-slate-500">Used on proposals, exports, and travel distance.</p>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="text-[11px] font-medium text-slate-700">
+                Project name
+                <input className="ui-input mt-1 h-9 w-full" value={project.projectName} onChange={(e) => setProject({ ...project, projectName: e.target.value })} />
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">
+                Client
+                <input className="ui-input mt-1 h-9 w-full" value={project.clientName || ''} onChange={(e) => setProject({ ...project, clientName: e.target.value || null })} />
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">
+                Project #
+                <input className="ui-input mt-1 h-9 w-full" value={project.projectNumber || ''} onChange={(e) => setProject({ ...project, projectNumber: e.target.value || null })} />
+              </label>
+              <label className="text-[11px] font-medium text-slate-700">
+                Estimator
+                <input className="ui-input mt-1 h-9 w-full" value={project.estimator || ''} onChange={(e) => setProject({ ...project, estimator: e.target.value || null })} />
+              </label>
+              <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
+                Address
+                <input className="ui-input mt-1 h-9 w-full" value={project.address || ''} onChange={(e) => setProject({ ...project, address: e.target.value || null })} />
+              </label>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="text-[11px] font-medium text-slate-800">
               <span className="inline-flex items-center">
@@ -428,13 +419,13 @@ export function ProjectSetupWorkspace({
         </p>
       </section>
 
-      {/* 3 — Advanced pricing (collapsed) */}
-      <details className="group rounded-2xl border border-slate-300/80 bg-slate-50/50 shadow-sm open:bg-white">
+      {/* 3 — Advanced pricing */}
+      <details open className="group rounded-2xl border border-slate-300/80 bg-slate-50/50 shadow-sm open:bg-white">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 3</p>
             <h2 className="mt-0.5 text-xl font-semibold text-slate-900">Advanced pricing defaults</h2>
-            <p className="mt-1 text-sm text-slate-600">Office-style markups, burdens, field allowances, and adders. Collapsed by default — open when this job differs from your norms.</p>
+            <p className="mt-1 text-sm text-slate-600">Office-style markups, burdens, field allowances, and adders. Same grid as intake — collapse if you only need Section 1.</p>
           </div>
           <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" />
         </summary>

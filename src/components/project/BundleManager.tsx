@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Search, Layers, Box } from 'lucide-react';
 import { Project, Bundle, CatalogItem } from '../../types';
 import { api } from '../../services/api';
+import { catalogItemMatchesQuery } from '../../shared/utils/catalogItemSearch';
 
 interface Props {
   project: Project;
@@ -80,10 +81,7 @@ export function BundleManager({ project, onUpdate }: Props) {
   };
 
   const selectedBundle = project.bundles.find(b => b.id === selectedBundleId);
-  const filteredCatalog = catalog.filter(item => 
-    item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.sku.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredCatalog = catalog.filter((item) => catalogItemMatchesQuery(item, searchQuery));
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[calc(100vh-280px)]">
@@ -203,8 +201,8 @@ export function BundleManager({ project, onUpdate }: Props) {
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {filteredCatalog.slice(0, 10).map(item => (
+                <div className="grid max-h-[min(60vh,520px)] grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2">
+                  {filteredCatalog.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => handleAddItemToBundle(selectedBundle.id, item)}
