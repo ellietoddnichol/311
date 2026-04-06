@@ -129,6 +129,8 @@ export interface NormalizedIntakeItem {
   structureType?: 'flat' | 'matrix';
   catalogMatchCandidates?: CatalogMatchCandidate[];
   reviewRequired?: boolean;
+  /** Parser-derived flags (e.g. field_assembly, finish_modifier) for review and estimating. */
+  semanticTags?: string[];
 }
 
 export interface ValidationResult {
@@ -227,6 +229,15 @@ export interface IntakeCatalogMatch {
   reason: string;
 }
 
+export interface IntakeBundleMatch {
+  bundleId: string;
+  bundleName: string;
+  category: string | null;
+  score: number;
+  confidence: IntakeMatchConfidence;
+  reason: string;
+}
+
 export interface IntakeReviewLine {
   lineId: string;
   roomName: string;
@@ -247,7 +258,12 @@ export interface IntakeReviewLine {
   matchExplanation: string;
   catalogMatch: IntakeCatalogMatch | null;
   suggestedMatch: IntakeCatalogMatch | null;
+  /** Strong alignment with a catalog bundle (room + scope vs bundle name/category). */
+  bundleMatch: IntakeBundleMatch | null;
+  /** Weaker bundle candidate for review. */
+  suggestedBundle: IntakeBundleMatch | null;
   warnings: string[];
+  semanticTags?: string[];
 }
 
 export interface IntakeRoomCandidate {

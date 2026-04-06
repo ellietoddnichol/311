@@ -21,6 +21,10 @@ export interface GeminiExtractionLine {
   quantity: number;
   unit: string;
   notes: string;
+  /** When true, line calls out on-site / field assembly (KD, RTA, assemble on site). */
+  fieldAssembly?: boolean;
+  /** item | modifier | bundle — scope adders vs primary lines when obvious. */
+  lineKind?: string;
 }
 
 export interface GeminiExtractionResult {
@@ -71,6 +75,8 @@ function sanitizeResult(value: any): GeminiExtractionResult {
           quantity: asNumber(line?.quantity, 1),
           unit: asText(line?.unit) || 'EA',
           notes: asText(line?.notes),
+          fieldAssembly: Boolean(line?.fieldAssembly),
+          lineKind: asText(line?.lineKind).toLowerCase(),
         }))
         .filter((line: GeminiExtractionLine) => line.description || line.itemName)
         .filter((line: GeminiExtractionLine) => {
@@ -238,6 +244,9 @@ export async function extractIntakeFromGemini(input: ExtractInput): Promise<Gemi
     'When structured fields are present in the source, split them into roomArea, category, itemName, description, quantity, unit, notes, and labor/material flags instead of dumping whole rows into description.',
     'For PDFs/messy docs: infer room area, item, quantity, and unit when explicitly stated or strongly implied by schedules and scope tables; avoid junk records.',
     'Interpret common construction proposal and invitation-to-bid structures, including schedules, room finish legends, keyed notes, and bid package references.',
+    'Classify parsedLines rows: primary scope quantities (lineKind item), finish/adder/deduct lines (lineKind modifier), or grouped accessory packages (lineKind bundle).',
+    'Set fieldAssembly true when the line states KD, RTA, knock-down, or that fixtures (e.g. lockers, benches) must be assembled on site — those are still scope items, not modifiers.',
+    'Do not set lineKind modifier for a product line whose only special need is field assembly; use fieldAssembly true and lineKind item instead.',
     'Extract assumptions and commercial clues when present, including pricing basis, tax, delivery, freight, shipment, bond, unload, site visit, clarifications, exclusions, and alternates.',
     'Produce a short proposal assist object with intro, scope summary, clarifications, and exclusions when the source contains enough context.',
     '',

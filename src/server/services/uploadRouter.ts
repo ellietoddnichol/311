@@ -10,6 +10,7 @@ import type {
   UploadParseResult,
   UploadParseStatus,
 } from '../../shared/types/intake.ts';
+import { listBundles } from '../repos/bundlesRepo.ts';
 import { classifyIntakeSourceType } from './fileClassifierService.ts';
 import { buildParseConfidenceSummary } from './intake/confidence.ts';
 import { candidateToIntakeCatalogMatch, enrichItemsWithCatalogMatches } from './intake/catalogMatcher.ts';
@@ -149,9 +150,10 @@ function toLegacyIntakeResult(input: {
   extractedMetadata: Partial<IntakeProjectMetadata>;
 }): IntakeParseResult {
   const catalog = listActiveCatalogItems();
+  const bundles = listBundles();
   const items = input.upload.validation.correctedItems || input.upload.extractedItems;
   const metadata = buildMetadata({ extractedMetadata: input.extractedMetadata, items, fileName: input.request.fileName });
-  const reviewLines = toReviewLines(toLegacyNormalizedLines(items), catalog, input.request.matchCatalog !== false);
+  const reviewLines = toReviewLines(toLegacyNormalizedLines(items), catalog, input.request.matchCatalog !== false, bundles);
   const warnings = Array.from(new Set([...input.upload.parseWarnings, ...input.upload.validation.warnings]));
   const sourceKind = deriveSourceKind(input.upload.fileType, items);
   const proposalAssist = buildProposalAssist({

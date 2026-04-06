@@ -34,6 +34,8 @@ export interface NormalizedIntakeLine {
   unitWasDefaulted?: boolean;
   catalogMatch?: IntakeCatalogMatch | null;
   suggestedMatch?: IntakeCatalogMatch | null;
+  semanticTags?: string[];
+  bundleCandidates?: string[];
 }
 
 export interface StructuredSpreadsheetResult {

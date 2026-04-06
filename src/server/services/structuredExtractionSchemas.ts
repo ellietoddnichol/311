@@ -53,6 +53,8 @@ export const intakeGeminiResponseSchema = {
           quantity: { type: Type.NUMBER },
           unit: { type: Type.STRING },
           notes: { type: Type.STRING },
+          fieldAssembly: { type: Type.BOOLEAN },
+          lineKind: { type: Type.STRING },
         },
         required: ['description', 'quantity', 'unit'],
       },

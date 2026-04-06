@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto';
 import type { CatalogItem } from '../../types.ts';
+import type { BundleRecord } from '../../shared/types/estimator.ts';
 import type { IntakeReviewLine, IntakeRoomCandidate } from '../../shared/types/intake.ts';
+import { prepareBundleMatch } from './intake/bundleIntakeMatching.ts';
+import { detectBundleCandidates } from './intake/normalizer.ts';
 import { prepareCatalogMatch } from './catalogMatchService.ts';
 import { intakeAsText } from './metadataExtractorService.ts';
 import type { NormalizedIntakeLine } from './spreadsheetInterpreterService.ts';
@@ -30,7 +33,7 @@ export function buildRoomCandidates(lines: IntakeReviewLine[]): IntakeRoomCandid
     .sort((left, right) => right.lineCount - left.lineCount || left.roomName.localeCompare(right.roomName));
 }
 
-export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogItem[], matchCatalog: boolean): IntakeReviewLine[] {
+export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogItem[], matchCatalog: boolean, bundles: BundleRecord[] = []): IntakeReviewLine[] {
   return lines.map((line) => {
     const description = line.description || line.itemName;
     const seededMatch = line.catalogMatch || null;
@@ -58,6 +61,25 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
     const unmatchedReason = warnings.find((warning) => /catalog coverage may be missing|no catalog candidate found/i.test(warning));
     const matchExplanation = catalogMatch?.reason || suggestedMatch?.reason || unmatchedReason || 'No confident catalog candidate was found.';
 
+    const bundleCandidates =
+      line.bundleCandidates && line.bundleCandidates.length > 0
+        ? line.bundleCandidates
+        : detectBundleCandidates(description, resolvedCategory || line.category || null);
+
+    const bundleInput = {
+      roomName: normalizeRoomName(line.roomName),
+      itemName: line.itemName || '',
+      description,
+      category: resolvedCategory || line.category || '',
+      bundleCandidates,
+    };
+    const { bundleMatch, suggestedBundle } = bundles.length ? prepareBundleMatch(bundleInput, bundles) : { bundleMatch: null, suggestedBundle: null };
+    if (bundleMatch) {
+      warnings.push(`Room/scope aligns with catalog bundle “${bundleMatch.bundleName}” — apply bundle in workspace when this scope is a package.`);
+    } else if (suggestedBundle) {
+      warnings.push(`Possible catalog bundle: “${suggestedBundle.bundleName}” (${suggestedBundle.reason}).`);
+    }
+
     return {
       lineId: randomUUID(),
       roomName: normalizeRoomName(line.roomName),
@@ -78,7 +100,10 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
       matchExplanation,
       catalogMatch,
       suggestedMatch,
+      bundleMatch,
+      suggestedBundle,
       warnings: Array.from(new Set(warnings)),
+      semanticTags: line.semanticTags,
     };
   });
 }

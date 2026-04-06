@@ -12,6 +12,7 @@ import type {
   IntakeSourceKind,
   IntakeSourceType,
 } from '../../shared/types/intake.ts';
+import { listBundles } from '../repos/bundlesRepo.ts';
 import { listActiveCatalogItems } from '../repos/catalogRepo.ts';
 import { buildIntakeDiagnostics } from './intakeDiagnosticsService.ts';
 import { buildProposalAssist, extractAssumptionsFromText, inferPricingBasis, mergeAssumptions } from './proposalAssistService.ts';
@@ -30,9 +31,10 @@ import {
   normalizeDateValue as normalizeDateValueFromService,
 } from './metadataExtractorService.ts';
 import { buildRoomCandidates as buildRoomCandidatesFromService, toReviewLines as toReviewLinesFromService } from './matchPreparationService.ts';
-import { prepareCatalogMatch } from './catalogMatchService.ts';
 import { classifyParsedChunk as classifyParsedChunkFromService, normalizeExtractedCategory as normalizeExtractedCategoryFromService, shouldKeepNormalizedLine as shouldKeepNormalizedLineFromService } from './rowClassifierService.ts';
 import { parseSpreadsheetInput, extractSpreadsheetStructuredMetadata, type NormalizedIntakeLine as NormalizedIntakeLineFromService } from './spreadsheetInterpreterService.ts';
+import { detectBundleCandidates } from './intake/normalizer.ts';
+import { enrichIntakeServiceLineNotes } from './intake/intakeSemantics.ts';
 
 interface NormalizedIntakeLine {
   roomName: string;
@@ -51,6 +53,8 @@ interface NormalizedIntakeLine {
   warnings: string[];
   quantityWasDefaulted?: boolean;
   unitWasDefaulted?: boolean;
+  semanticTags?: string[];
+  bundleCandidates?: string[];
 }
 
 interface StructuredSpreadsheetResult {
@@ -872,53 +876,6 @@ function buildRoomCandidates(lines: IntakeReviewLine[]): IntakeRoomCandidate[] {
     .sort((left, right) => right.lineCount - left.lineCount || left.roomName.localeCompare(right.roomName));
 }
 
-function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogItem[], matchCatalog: boolean): IntakeReviewLine[] {
-  return lines.map((line) => {
-    const description = line.description || line.itemName;
-    const { catalogMatch, suggestedMatch } = matchCatalog
-      ? prepareCatalogMatch({
-          itemCode: line.itemCode,
-          itemName: line.itemName,
-          description,
-          category: line.category,
-          notes: line.notes,
-          unit: line.unit,
-        }, catalog)
-      : { catalogMatch: null, suggestedMatch: null };
-
-    const resolvedCategory = line.category || catalogMatch?.category || suggestedMatch?.category || '';
-    const completeness = description && line.quantity > 0 && line.unit ? 'complete' : 'partial';
-    const warnings = [...line.warnings];
-    if (!resolvedCategory) warnings.push('Category could not be confidently inferred.');
-    if (!catalogMatch && !suggestedMatch) warnings.push('No catalog match identified.');
-    const matchStatus = catalogMatch ? 'matched' : suggestedMatch ? 'suggested' : 'needs_match';
-    const matchExplanation = catalogMatch?.reason || suggestedMatch?.reason || 'No confident catalog candidate was found.';
-
-    return {
-      lineId: randomUUID(),
-      roomName: normalizeRoomName(line.roomName),
-      itemName: line.itemName || description,
-      description,
-      category: resolvedCategory,
-      itemCode: line.itemCode,
-      quantity: line.quantity,
-      unit: line.unit || 'EA',
-      notes: line.notes,
-      sourceReference: line.sourceReference,
-      laborIncluded: line.laborIncluded,
-      materialIncluded: line.materialIncluded,
-      confidence: Number(line.confidence.toFixed(2)),
-      completeness,
-      matchStatus,
-      matchedCatalogItemId: catalogMatch?.catalogItemId || suggestedMatch?.catalogItemId || null,
-      matchExplanation,
-      catalogMatch,
-      suggestedMatch,
-      warnings: Array.from(new Set(warnings)),
-    };
-  });
-}
-
 function buildDiagnostics(sourceKind: IntakeSourceKind, parserStrategy: string, metadata: IntakeProjectMetadata, reviewLines: IntakeReviewLine[], warnings: string[]) {
   return buildIntakeDiagnostics({
     sourceKind,
@@ -945,6 +902,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
   const sourceType = classifyIntakeSourceType(fileName, mimeType, input.sourceType);
   const matchCatalog = input.matchCatalog !== false;
   const catalog = matchCatalog ? listActiveCatalogItems() : [];
+  const bundles = listBundles();
   const warnings: string[] = [];
 
   if (sourceType === 'spreadsheet') {
@@ -957,7 +915,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       const fallbackText = flattenedText || decodeDocumentText(input.dataBase64, fileName, mimeType);
       const fallbackLines = detectScopeLinesFromText(fallbackText, fileName);
       const metadata = mergeResolvedMetadataFromService(extractMetadataFromTextFromService(fallbackText), structuredMetadata, ['spreadsheet-fallback', 'text-heuristics']);
-      const reviewLines = toReviewLinesFromService(fallbackLines as unknown as NormalizedIntakeLineFromService[], catalog, matchCatalog);
+      const reviewLines = toReviewLinesFromService(fallbackLines as unknown as NormalizedIntakeLineFromService[], catalog, matchCatalog, bundles);
       const proposalAssist = buildProposalAssist({
         metadata,
         assumptions: metadata.assumptions,
@@ -1003,22 +961,40 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       );
 
       warnings.push(...filterSpreadsheetGeminiWarnings(gemini.warnings));
-      const geminiLines = gemini.parsedLines.map((line) => ({
-        roomName: normalizeRoomName(line.roomArea || 'General'),
-        category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
-        itemCode: line.itemCode || '',
-        itemName: line.itemName || line.description || '',
-        description: line.description || line.itemName || '',
-        quantity: parsePositiveNumber(line.quantity, 1),
-        unit: line.unit || 'EA',
-        notes: line.notes || '',
-        sourceReference: fileName,
-        laborIncluded: null,
-        materialIncluded: null,
-        confidence: 0.88,
-        parserTag: 'gemini-spreadsheet',
-        warnings: [],
-      })).filter((line, index) => shouldKeepNormalizedLineFromService(line, index, structuredMetadata));
+      const geminiLines = gemini.parsedLines
+        .map((line) => {
+          const description = line.description || line.itemName || '';
+          const enriched = enrichIntakeServiceLineNotes({
+            description,
+            itemName: line.itemName || '',
+            category: line.category || '',
+            notes: line.notes || '',
+            fieldAssemblyHint: line.fieldAssembly === true,
+          });
+          const semanticTags = [...enriched.semanticTags];
+          const lk = (line.lineKind || '').toLowerCase();
+          if (lk === 'modifier') semanticTags.push('gemini_line_kind_modifier');
+          if (lk === 'bundle') semanticTags.push('gemini_line_kind_bundle');
+          return {
+            roomName: normalizeRoomName(line.roomArea || 'General'),
+            category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
+            itemCode: line.itemCode || '',
+            itemName: line.itemName || description,
+            description,
+            quantity: parsePositiveNumber(line.quantity, 1),
+            unit: line.unit || 'EA',
+            notes: enriched.notes,
+            sourceReference: fileName,
+            laborIncluded: null,
+            materialIncluded: null,
+            confidence: 0.88,
+            parserTag: 'gemini-spreadsheet',
+            warnings: [],
+          semanticTags: semanticTags.length ? Array.from(new Set(semanticTags)) : undefined,
+          bundleCandidates: detectBundleCandidates(description, line.category || ''),
+        };
+      })
+        .filter((line, index) => shouldKeepNormalizedLineFromService(line, index, structuredMetadata));
 
       const alignmentSafe = geminiLines.length === deterministicRows.length && deterministicRows.every((row, index) => lineAlignmentLooksSafe(row, gemini.parsedLines[index]));
       if (alignmentSafe) {
@@ -1038,6 +1014,8 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
             parserTag: 'spreadsheet-structure+gemini',
             quantityWasDefaulted: false,
             unitWasDefaulted: false,
+            semanticTags: Array.from(new Set([...(row.semanticTags || []), ...(enriched.semanticTags || [])])),
+            bundleCandidates: Array.from(new Set([...(row.bundleCandidates || []), ...(enriched.bundleCandidates || [])])),
           };
         });
         metadataSources.push('gemini-enrichment');
@@ -1063,7 +1041,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         structuredMetadata,
         [...metadataSources, 'text-heuristics']
       );
-      const reviewLines = toReviewLinesFromService(normalizedLines, catalog, matchCatalog);
+      const reviewLines = toReviewLinesFromService(normalizedLines, catalog, matchCatalog, bundles);
       const enrichedMetadata = mergeResolvedMetadataFromService(metadata, extractMetadataFromTextFromService(`${preludeText}\n${flattenedText}`), [...metadata.sources, 'text-heuristics']);
       const proposalAssist = buildProposalAssist({
         metadata: enrichedMetadata,
@@ -1086,7 +1064,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
     } catch (error: any) {
       warnings.push(error.message || 'Gemini enrichment failed for spreadsheet parsing.');
       const metadata = mergeResolvedMetadataFromService(structuredMetadata, extractMetadataFromTextFromService(`${preludeText}\n${flattenedText}`), ['spreadsheet-structure', 'text-heuristics']);
-      const reviewLines = toReviewLinesFromService(normalizedLines, catalog, matchCatalog);
+      const reviewLines = toReviewLinesFromService(normalizedLines, catalog, matchCatalog, bundles);
       const proposalAssist = buildProposalAssist({
         metadata,
         assumptions: metadata.assumptions,
@@ -1122,22 +1100,40 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
     });
 
     warnings.push(...gemini.warnings);
-    const geminiLines: NormalizedIntakeLine[] = gemini.parsedLines.map((line) => ({
-      roomName: normalizeRoomName(line.roomArea || 'General'),
-      category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
-      itemCode: line.itemCode || '',
-      itemName: line.itemName || line.description || '',
-      description: line.description || line.itemName || '',
-      quantity: parsePositiveNumber(line.quantity, 1),
-      unit: line.unit || 'EA',
-      notes: line.notes || '',
-      sourceReference: fileName,
-      laborIncluded: null,
-      materialIncluded: null,
-      confidence: 0.9,
-      parserTag: sourceType === 'pdf' ? 'gemini-pdf' : 'gemini-document',
-      warnings: [],
-    })).filter((line, index) => shouldKeepNormalizedLineFromService(line, index, heuristicMetadata));
+    const geminiLines: NormalizedIntakeLine[] = gemini.parsedLines
+      .map((line) => {
+        const description = line.description || line.itemName || '';
+        const enriched = enrichIntakeServiceLineNotes({
+          description,
+          itemName: line.itemName || '',
+          category: line.category || '',
+          notes: line.notes || '',
+          fieldAssemblyHint: line.fieldAssembly === true,
+        });
+        const semanticTags = [...enriched.semanticTags];
+        const lk = (line.lineKind || '').toLowerCase();
+        if (lk === 'modifier') semanticTags.push('gemini_line_kind_modifier');
+        if (lk === 'bundle') semanticTags.push('gemini_line_kind_bundle');
+        return {
+          roomName: normalizeRoomName(line.roomArea || 'General'),
+          category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
+          itemCode: line.itemCode || '',
+          itemName: line.itemName || description,
+          description,
+          quantity: parsePositiveNumber(line.quantity, 1),
+          unit: line.unit || 'EA',
+          notes: enriched.notes,
+          sourceReference: fileName,
+          laborIncluded: null,
+          materialIncluded: null,
+          confidence: 0.9,
+          parserTag: sourceType === 'pdf' ? 'gemini-pdf' : 'gemini-document',
+          warnings: [],
+          semanticTags: semanticTags.length ? Array.from(new Set(semanticTags)) : undefined,
+          bundleCandidates: detectBundleCandidates(description, line.category || ''),
+        };
+      })
+      .filter((line, index) => shouldKeepNormalizedLineFromService(line, index, heuristicMetadata));
 
     const usableGeminiLines = geminiLines.filter((line) => line.description && line.quantity > 0);
     const normalizedLines = usableGeminiLines.length ? usableGeminiLines : fallbackLines;
@@ -1161,7 +1157,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       heuristicMetadata,
       ['gemini', 'text-heuristics']
     );
-    const reviewLines = toReviewLinesFromService(normalizedLines as unknown as NormalizedIntakeLineFromService[], catalog, matchCatalog);
+    const reviewLines = toReviewLinesFromService(normalizedLines as unknown as NormalizedIntakeLineFromService[], catalog, matchCatalog, bundles);
     const proposalAssist = buildProposalAssist({
       metadata,
       assumptions: metadata.assumptions,
@@ -1183,7 +1179,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
   } catch (error: any) {
     warnings.push(error.message || 'Gemini extraction failed; fallback text parsing used.');
     const metadata = mergeResolvedMetadataFromService({ ...heuristicMetadata, sourceFiles: [fileName] }, {}, ['text-heuristics']);
-    const reviewLines = toReviewLinesFromService(fallbackLines as unknown as NormalizedIntakeLineFromService[], catalog, matchCatalog);
+    const reviewLines = toReviewLinesFromService(fallbackLines as unknown as NormalizedIntakeLineFromService[], catalog, matchCatalog, bundles);
     const proposalAssist = buildProposalAssist({
       metadata,
       assumptions: metadata.assumptions,

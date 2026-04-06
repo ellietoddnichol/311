@@ -91,12 +91,14 @@ export function ProjectSetupWorkspace({
   const officeProfit = settings?.defaultProfitPercent;
   const officeTax = settings?.defaultTaxPercent;
 
-  const matchesOffice = (field: 'burden' | 'overhead' | 'profit' | 'tax'): boolean => {
+  const matchesOffice = (field: 'burden' | 'overhead' | 'profit' | 'tax' | 'laborOverhead' | 'laborProfit'): boolean => {
     if (!settings) return false;
     if (field === 'burden') return project.laborBurdenPercent === officeBurden;
     if (field === 'overhead') return project.overheadPercent === officeOverhead;
     if (field === 'profit') return project.profitPercent === officeProfit;
     if (field === 'tax') return project.taxPercent === officeTax;
+    if (field === 'laborOverhead') return project.laborOverheadPercent === officeOverhead;
+    if (field === 'laborProfit') return project.laborProfitPercent === officeProfit;
     return false;
   };
 
@@ -142,23 +144,23 @@ export function ProjectSetupWorkspace({
           <div className="grid grid-cols-1 gap-3 px-5 pb-5 pt-2 md:grid-cols-2">
             <label className="text-[11px] font-medium text-slate-700">
               Project name
-              <input className="ui-input mt-1 h-9" value={project.projectName} onChange={(e) => setProject({ ...project, projectName: e.target.value })} />
+              <input className="ui-input mt-1 h-9 w-full" value={project.projectName} onChange={(e) => setProject({ ...project, projectName: e.target.value })} />
             </label>
             <label className="text-[11px] font-medium text-slate-700">
               Client
-              <input className="ui-input mt-1 h-9" value={project.clientName || ''} onChange={(e) => setProject({ ...project, clientName: e.target.value || null })} />
+              <input className="ui-input mt-1 h-9 w-full" value={project.clientName || ''} onChange={(e) => setProject({ ...project, clientName: e.target.value || null })} />
             </label>
             <label className="text-[11px] font-medium text-slate-700">
               Project #
-              <input className="ui-input mt-1 h-9" value={project.projectNumber || ''} onChange={(e) => setProject({ ...project, projectNumber: e.target.value || null })} />
+              <input className="ui-input mt-1 h-9 w-full" value={project.projectNumber || ''} onChange={(e) => setProject({ ...project, projectNumber: e.target.value || null })} />
             </label>
             <label className="text-[11px] font-medium text-slate-700">
               Estimator
-              <input className="ui-input mt-1 h-9" value={project.estimator || ''} onChange={(e) => setProject({ ...project, estimator: e.target.value || null })} />
+              <input className="ui-input mt-1 h-9 w-full" value={project.estimator || ''} onChange={(e) => setProject({ ...project, estimator: e.target.value || null })} />
             </label>
             <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
               Address
-              <input className="ui-input mt-1 h-9" value={project.address || ''} onChange={(e) => setProject({ ...project, address: e.target.value || null })} />
+              <input className="ui-input mt-1 h-9 w-full" value={project.address || ''} onChange={(e) => setProject({ ...project, address: e.target.value || null })} />
             </label>
           </div>
         </details>
@@ -337,7 +339,7 @@ export function ProjectSetupWorkspace({
                 <label className="text-[11px] font-medium text-slate-700">
                   Delivery mode
                   <select
-                    className="ui-input mt-1 h-9"
+                    className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                     value={jobConditions.deliveryPricingMode}
                     onChange={(e) =>
                       patchJobConditions({
@@ -356,7 +358,7 @@ export function ProjectSetupWorkspace({
                   <input
                     type="number"
                     step="0.01"
-                    className="ui-input mt-1 h-9"
+                    className="ui-input mt-1 h-9 w-full max-w-[7rem]"
                     value={jobConditions.deliveryValue}
                     onChange={(e) => patchJobConditions({ deliveryValue: Number(e.target.value) || 0, deliveryAutoCalculated: false })}
                   />
@@ -366,7 +368,7 @@ export function ProjectSetupWorkspace({
                   <input
                     type="number"
                     min={0}
-                    className="ui-input mt-1 h-9"
+                    className="ui-input mt-1 h-9 w-full max-w-[7rem]"
                     value={jobConditions.deliveryLeadDays}
                     onChange={(e) => patchJobConditions({ deliveryLeadDays: Number(e.target.value) || 0 })}
                   />
@@ -437,28 +439,29 @@ export function ProjectSetupWorkspace({
           <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" />
         </summary>
 
-        <div className="space-y-6 border-t border-slate-200 px-5 pb-6 pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-slate-600">
-              Values here usually match your <strong className="font-medium text-slate-800">Settings → estimate defaults</strong>. Edit only when this job needs an exception.
+        <div className="space-y-4 border-t border-slate-200 px-5 pb-4 pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="max-w-3xl text-xs leading-snug text-slate-600">
+              These fields mirror <strong className="font-medium text-slate-800">Settings → estimate defaults</strong> until you change them for this job.
+              <span className="text-slate-500"> Office default</span> means the project still matches that saved profile for that field.
             </p>
             <button
               type="button"
               onClick={resetAdvancedPricingToOfficeDefaults}
               disabled={!settings}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+              className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
             >
               Reset to office defaults
             </button>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 md:grid-cols-3">
             <label className="text-[11px] font-medium text-slate-700">
               Labor burden % (sub)
               {matchesOffice('burden') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
               <input
                 type="number"
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={project.laborBurdenPercent}
                 onChange={(e) => setProject({ ...project, laborBurdenPercent: Number(e.target.value) || 0 })}
               />
@@ -468,7 +471,7 @@ export function ProjectSetupWorkspace({
               {matchesOffice('overhead') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
               <input
                 type="number"
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={project.overheadPercent}
                 onChange={(e) => setProject({ ...project, overheadPercent: Number(e.target.value) || 0 })}
               />
@@ -478,7 +481,7 @@ export function ProjectSetupWorkspace({
               {matchesOffice('profit') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
               <input
                 type="number"
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={project.profitPercent}
                 onChange={(e) => setProject({ ...project, profitPercent: Number(e.target.value) || 0 })}
               />
@@ -489,18 +492,18 @@ export function ProjectSetupWorkspace({
                 {matchesOffice('tax') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
                 <input
                   type="number"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={project.taxPercent}
                   onChange={(e) => setProject({ ...project, taxPercent: Number(e.target.value) || 0 })}
                 />
               </label>
             ) : null}
-            <label className="text-[11px] font-medium text-slate-700">
+            <label className="text-[11px] font-medium text-slate-700 sm:col-span-2 md:col-span-1">
               Location tax override %
               <FieldBadge kind="optional" />
               <input
                 type="number"
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-full md:max-w-[12rem]"
                 value={jobConditions.locationTaxPercent ?? ''}
                 onChange={(e) => patchJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) || 0 })}
                 placeholder="Leave blank to use material tax"
@@ -512,7 +515,7 @@ export function ProjectSetupWorkspace({
               <input
                 type="number"
                 step="0.01"
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={jobConditions.laborRateMultiplier}
                 onChange={(e) => patchJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })}
               />
@@ -523,27 +526,27 @@ export function ProjectSetupWorkspace({
               <input
                 type="number"
                 min={1}
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={jobConditions.installerCount}
                 onChange={(e) => patchJobConditions({ installerCount: Number(e.target.value) || 1 })}
               />
             </label>
             <label className="text-[11px] font-medium text-slate-700">
               Labor overhead % (sub)
-              <FieldBadge kind="optional" />
+              {matchesOffice('laborOverhead') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
               <input
                 type="number"
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={project.laborOverheadPercent}
                 onChange={(e) => setProject({ ...project, laborOverheadPercent: Number(e.target.value) || 0 })}
               />
             </label>
             <label className="text-[11px] font-medium text-slate-700">
               Labor profit % (sub)
-              <FieldBadge kind="optional" />
+              {matchesOffice('laborProfit') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
               <input
                 type="number"
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={project.laborProfitPercent}
                 onChange={(e) => setProject({ ...project, laborProfitPercent: Number(e.target.value) || 0 })}
               />
@@ -554,7 +557,7 @@ export function ProjectSetupWorkspace({
               <input
                 type="number"
                 step="0.01"
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={jobConditions.estimateAdderPercent}
                 onChange={(e) => patchJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })}
               />
@@ -565,17 +568,17 @@ export function ProjectSetupWorkspace({
               <input
                 type="number"
                 step="0.01"
-                className="ui-input mt-1 h-9"
+                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={jobConditions.estimateAdderAmount}
                 onChange={(e) => patchJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })}
               />
             </label>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
             <p className="text-xs font-semibold text-slate-900">Field day &amp; material pad</p>
-            <p className="mt-1 text-[11px] text-slate-600">Paid day, breaks, learning curve, waste, and field supplies — typical commercial-fit assumptions.</p>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+            <p className="mt-0.5 text-[11px] text-slate-600">Paid day, breaks, learning curve, waste, and field supplies — typical commercial-fit assumptions.</p>
+            <div className="mt-2 grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 md:grid-cols-3">
               <label className="text-[11px] font-medium text-slate-700">
                 Paid day (hr/installer)
                 <input
@@ -583,7 +586,7 @@ export function ProjectSetupWorkspace({
                   step="0.25"
                   min={4}
                   max={12}
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.installerPaidDayHours}
                   onChange={(e) => patchJobConditions({ installerPaidDayHours: Number(e.target.value) || RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.installerPaidDayHours })}
                 />
@@ -595,7 +598,7 @@ export function ProjectSetupWorkspace({
                   step="0.25"
                   min={0}
                   max={4}
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.dailyBreakHoursPerInstaller}
                   onChange={(e) => patchJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })}
                 />
@@ -606,7 +609,7 @@ export function ProjectSetupWorkspace({
                   type="number"
                   step="0.5"
                   min={0}
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.laborLearningCurvePercent}
                   onChange={(e) => patchJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })}
                 />
@@ -619,7 +622,7 @@ export function ProjectSetupWorkspace({
                       type="number"
                       step="0.5"
                       min={0}
-                      className="ui-input mt-1 h-9"
+                      className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                       value={jobConditions.materialWastePercent}
                       onChange={(e) => patchJobConditions({ materialWastePercent: Number(e.target.value) || 0 })}
                     />
@@ -630,7 +633,7 @@ export function ProjectSetupWorkspace({
                       type="number"
                       step="0.5"
                       min={0}
-                      className="ui-input mt-1 h-9"
+                      className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                       value={jobConditions.installerFieldSuppliesPercent}
                       onChange={(e) => patchJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })}
                     />
@@ -641,7 +644,7 @@ export function ProjectSetupWorkspace({
                       type="number"
                       step="1"
                       min={0}
-                      className="ui-input mt-1 h-9"
+                      className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                       value={jobConditions.installerFieldSuppliesFlat}
                       onChange={(e) => patchJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })}
                     />
@@ -689,7 +692,7 @@ export function ProjectSetupWorkspace({
                 <input
                   type="number"
                   step="0.01"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.floorMultiplierPerFloor}
                   onChange={(e) => patchJobConditions({ floorMultiplierPerFloor: Number(e.target.value) || 0 })}
                 />
@@ -697,7 +700,7 @@ export function ProjectSetupWorkspace({
               <label className="text-[11px] font-medium text-slate-700">
                 Delivery difficulty
                 <select
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[12rem]"
                   value={jobConditions.deliveryDifficulty}
                   onChange={(e) => patchJobConditions({ deliveryDifficulty: e.target.value as ProjectJobConditions['deliveryDifficulty'] })}
                 >
@@ -709,7 +712,7 @@ export function ProjectSetupWorkspace({
               <label className="text-[11px] font-medium text-slate-700">
                 Mobilization
                 <select
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[12rem]"
                   value={jobConditions.mobilizationComplexity}
                   onChange={(e) => patchJobConditions({ mobilizationComplexity: e.target.value as ProjectJobConditions['mobilizationComplexity'] })}
                 >
@@ -743,7 +746,7 @@ export function ProjectSetupWorkspace({
                 <input
                   type="number"
                   step="0.01"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.occupiedBuildingMultiplier}
                   onChange={(e) => patchJobConditions({ occupiedBuildingMultiplier: Number(e.target.value) || 0 })}
                 />
@@ -753,7 +756,7 @@ export function ProjectSetupWorkspace({
                 <input
                   type="number"
                   step="0.01"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.restrictedAccessMultiplier}
                   onChange={(e) => patchJobConditions({ restrictedAccessMultiplier: Number(e.target.value) || 0 })}
                 />
@@ -763,7 +766,7 @@ export function ProjectSetupWorkspace({
                 <input
                   type="number"
                   step="0.01"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.nightWorkLaborCostMultiplier}
                   onChange={(e) => patchJobConditions({ nightWorkLaborCostMultiplier: Number(e.target.value) || 0 })}
                 />
@@ -773,7 +776,7 @@ export function ProjectSetupWorkspace({
                 <input
                   type="number"
                   step="0.01"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.nightWorkLaborMinutesMultiplier}
                   onChange={(e) => patchJobConditions({ nightWorkLaborMinutesMultiplier: Number(e.target.value) || 0 })}
                 />
@@ -783,7 +786,7 @@ export function ProjectSetupWorkspace({
                 <input
                   type="number"
                   step="0.01"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.phasedWorkMultiplier}
                   onChange={(e) => patchJobConditions({ phasedWorkMultiplier: Number(e.target.value) || 0 })}
                 />
@@ -793,7 +796,7 @@ export function ProjectSetupWorkspace({
                 <input
                   type="number"
                   step="0.01"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.remoteTravelMultiplier}
                   onChange={(e) => patchJobConditions({ remoteTravelMultiplier: Number(e.target.value) || 0 })}
                 />
@@ -803,7 +806,7 @@ export function ProjectSetupWorkspace({
                 <input
                   type="number"
                   step="0.01"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.scheduleCompressionMultiplier}
                   onChange={(e) => patchJobConditions({ scheduleCompressionMultiplier: Number(e.target.value) || 0 })}
                 />
@@ -813,7 +816,7 @@ export function ProjectSetupWorkspace({
                 <input
                   type="number"
                   step="0.01"
-                  className="ui-input mt-1 h-9"
+                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                   value={jobConditions.smallJobMultiplier}
                   onChange={(e) => patchJobConditions({ smallJobMultiplier: Number(e.target.value) || 0 })}
                 />

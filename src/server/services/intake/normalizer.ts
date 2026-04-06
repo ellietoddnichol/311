@@ -7,6 +7,7 @@
  *   If LLM looks inflated, we use **strict** deterministic parsing on the **full document** (qty / numbered / unit / long phrase / modifiers).
  */
 import type { ExtractedSpreadsheetRow, IntakeProjectMetadata, NormalizedIntakeItem } from '../../../shared/types/intake.ts';
+import { analyzeIntakeLineSemantics, applyIntakeSemanticsToItem, type ParsedLineKind } from './intakeSemantics.ts';
 import {
   looksLikeIntakePricingSummaryOrDisclaimerLine,
   looksLikePdfExtractionNoiseLine,
@@ -30,10 +31,10 @@ function pdfDeterministicLineQualifiesForScopeRow(
   rawLine: string,
   quantity: number | null,
   description: string,
-  inferredItemType: string | null
+  lineKind: ParsedLineKind
 ): boolean {
   if (quantity != null && quantity > 0) return true;
-  if (inferredItemType === 'modifier' && description.replace(/\s+/g, ' ').trim().length >= 14) return true;
+  if (lineKind === 'modifier' && description.replace(/\s+/g, ' ').trim().length >= 14) return true;
   const t = rawLine.trim();
   if (/^\(?\d{1,4}[\.\)]\s+\S/.test(t)) return true;
   // Require a real word or common 2-letter unit after qty — avoids "6 lt qa f" PDF operators.
@@ -59,7 +60,7 @@ function detectExclusion(text: string): boolean {
   return /(exclude|excluded|not included|exclusion)/i.test(text);
 }
 
-function detectBundleCandidates(text: string, category: string | null): string[] {
+export function detectBundleCandidates(text: string, category: string | null): string[] {
   const normalized = normalizeComparableText(text);
   const output: string[] = [];
   if (/(restroom|toilet accessories|soap dispenser|paper towel|grab bar|mirror)/.test(normalized)) output.push('restroom-accessories');
@@ -96,7 +97,6 @@ export function normalizeSpreadsheetRows(input: {
     }
     const labeled = extractManufacturerModelFinish(text);
     const category = normalizeExtractedCategory('', text) || inferCategoryFromText(text) || null;
-    const itemType = detectItemType(`${text} ${row.mappedFields.notes || ''}`);
     const alternate = detectAlternate(`${text} ${row.mappedFields.notes || ''}`);
     const exclusion = detectExclusion(`${text} ${row.mappedFields.notes || ''}`);
     const confidence = 0.56
@@ -106,7 +106,7 @@ export function normalizeSpreadsheetRows(input: {
       + (category ? 0.08 : 0)
       - (row.parsingNotes.length * 0.05);
 
-    return {
+    const item: NormalizedIntakeItem = {
       sourceType: input.fileType,
       sourceRef: {
         fileName: input.fileName,
@@ -114,7 +114,7 @@ export function normalizeSpreadsheetRows(input: {
         rowNumber: row.sourceRowNumber,
         sourceColumn: row.sourceColumn,
       },
-      itemType,
+      itemType: 'item',
       category,
       roomName: row.mappedFields.roomName || null,
       description: text || 'Unresolved spreadsheet line',
@@ -123,7 +123,7 @@ export function normalizeSpreadsheetRows(input: {
       manufacturer: row.mappedFields.manufacturer || labeled.manufacturer,
       model: row.mappedFields.model || labeled.model,
       finish: row.mappedFields.finish || labeled.finish,
-      modifiers: itemType === 'modifier' ? [text] : [],
+      modifiers: [],
       bundleCandidates: detectBundleCandidates(text, category),
       notes: [...row.parsingNotes, ...(row.mappedFields.notes ? [row.mappedFields.notes] : [])],
       alternate,
@@ -136,6 +136,8 @@ export function normalizeSpreadsheetRows(input: {
       catalogMatchCandidates: row.catalogMatchCandidates,
       reviewRequired: false,
     };
+    applyIntakeSemanticsToItem(item);
+    return item;
   });
 }
 
@@ -157,7 +159,7 @@ export function normalizePdfLinesDeterministically(
       if (looksLikeIntakePricingSummaryOrDisclaimerLine(line)) return;
       if (/^(project|client|owner|gc|general contractor|address|site|bid date|proposal date|estimator|prepared by)\b/i.test(line)) return;
 
-      const inferredItemType = detectItemType(line);
+      const lineKindEarly = analyzeIntakeLineSemantics(line).kind;
 
       if (
         /^(room|area|phase)\b/i.test(line) ||
@@ -165,8 +167,8 @@ export function normalizePdfLinesDeterministically(
           /^[A-Z][A-Za-z0-9\-/ ]+$/.test(line) &&
           line.length <= 48 &&
           !/\d+\s+[xX-]?\s+/.test(line) &&
-          inferredItemType !== 'modifier' &&
-          inferredItemType !== 'bundle'
+          lineKindEarly !== 'modifier' &&
+          lineKindEarly !== 'bundle'
         )
       ) {
         currentRoom = line.replace(/^(room|area|phase)\s*[:\-]?\s*/i, '').trim() || line.trim();
@@ -179,20 +181,20 @@ export function normalizePdfLinesDeterministically(
       let description = compactDescription(parsed.description);
       if (!description) return;
       if (!unit) unit = inferUnitFromDescription(description);
-      if (strict && !pdfDeterministicLineQualifiesForScopeRow(line, quantity, description, inferredItemType)) {
+      const lineKind = analyzeIntakeLineSemantics(description).kind;
+      if (strict && !pdfDeterministicLineQualifiesForScopeRow(line, quantity, description, lineKind)) {
         return;
       }
       const labeled = extractManufacturerModelFinish(description);
       const category = normalizeExtractedCategory('', description) || inferCategoryFromText(description) || null;
-      const itemType = detectItemType(description);
-      items.push({
+      const pdfItem: NormalizedIntakeItem = {
         sourceType: 'pdf',
         sourceRef: {
           fileName: input.fileName,
           pageNumber: chunk.pageNumber,
           chunkId: chunk.chunkId,
         },
-        itemType,
+        itemType: 'item',
         category,
         roomName: currentRoom,
         description,
@@ -201,13 +203,15 @@ export function normalizePdfLinesDeterministically(
         manufacturer: labeled.manufacturer,
         model: labeled.model,
         finish: labeled.finish,
-        modifiers: itemType === 'modifier' ? [description] : [],
+        modifiers: [],
         bundleCandidates: detectBundleCandidates(description, category),
         notes: [`Derived from PDF chunk ${chunk.chunkId}.`],
         alternate: detectAlternate(description),
         exclusion: detectExclusion(description),
         confidence: clampConfidence(0.42 + (category ? 0.08 : 0) + (quantity ? 0.06 : 0)),
-      });
+      };
+      applyIntakeSemanticsToItem(pdfItem);
+      items.push(pdfItem);
     });
   });
 
@@ -243,7 +247,6 @@ export async function normalizePdfChunks(input: {
         if (!text || looksLikePdfExtractionNoiseLine(text) || looksLikePdfProposalBoilerplateLine(text)) return;
         const labeled = extractManufacturerModelFinish(`${line.itemName} ${line.description} ${line.notes}`);
         const category = normalizeExtractedCategory(line.category || '', `${line.itemName} ${line.description}`) || inferCategoryFromText(text) || null;
-        const itemType = detectItemType(`${text} ${line.notes || ''}`);
         let qty = Number.isFinite(line.quantity) ? Number(line.quantity) : null;
         let unit = intakeAsText(line.unit) || null;
         let description = text;
@@ -256,14 +259,14 @@ export async function normalizePdfChunks(input: {
           }
         }
         if (!unit) unit = inferUnitFromDescription(description);
-        llmItems.push({
+        const llmItem: NormalizedIntakeItem = {
           sourceType: 'pdf',
           sourceRef: {
             fileName: input.fileName,
             pageNumber: chunk.pageNumber,
             chunkId: chunk.chunkId,
           },
-          itemType,
+          itemType: 'item',
           category,
           roomName: line.roomArea || null,
           description,
@@ -272,7 +275,7 @@ export async function normalizePdfChunks(input: {
           manufacturer: labeled.manufacturer,
           model: labeled.model,
           finish: labeled.finish,
-          modifiers: itemType === 'modifier' ? [description] : [],
+          modifiers: [],
           bundleCandidates: detectBundleCandidates(description, category),
           notes: line.notes ? [compactDescription(line.notes)] : [],
           alternate: detectAlternate(`${description} ${line.notes || ''}`),
@@ -280,7 +283,9 @@ export async function normalizePdfChunks(input: {
           confidence: clampConfidence(
             0.62 + (category ? 0.08 : 0) + (line.roomArea ? 0.05 : 0) + (unit ? 0.03 : 0)
           ),
-        });
+        };
+        applyIntakeSemanticsToItem(llmItem);
+        llmItems.push(llmItem);
       });
     } catch (_error) {
       // Keep deterministic fallback items when LLM normalization is unavailable.

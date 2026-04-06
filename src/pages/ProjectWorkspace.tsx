@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
@@ -93,6 +93,12 @@ function isWorkspaceTab(value: string | null): value is WorkspaceTab {
   return !!value && WORKSPACE_TABS.includes(value as WorkspaceTab);
 }
 
+/** Stable JSON for autosave dirty checks (timestamps excluded). */
+function fingerprintProjectPayload(p: ProjectRecord): string {
+  const { updatedAt: _u, createdAt: _c, ...rest } = p;
+  return JSON.stringify(rest);
+}
+
 const DEFAULT_ROOM_CREATION_DRAFT: RoomCreationDraft = {
   roomName: '',
   addStarterLine: false,
@@ -136,6 +142,11 @@ export function ProjectWorkspace() {
 
   const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPersistedFingerprintRef = useRef<string | null>(null);
+  const projectRef = useRef<ProjectRecord | null>(null);
+  projectRef.current = project;
 
   const [activeRoomId, setActiveRoomId] = useState('');
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
@@ -192,6 +203,53 @@ export function ProjectWorkspace() {
     return () => clearTimeout(timer);
   }, [project?.address]);
 
+  useEffect(() => {
+    if (!project || loading) return;
+    const fp = fingerprintProjectPayload(project);
+    if (lastPersistedFingerprintRef.current === null) {
+      lastPersistedFingerprintRef.current = fp;
+      return;
+    }
+    if (fp === lastPersistedFingerprintRef.current) return;
+
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      autosaveTimerRef.current = null;
+      void (async () => {
+        const p = projectRef.current;
+        if (!p) return;
+        const sent = fingerprintProjectPayload(p);
+        if (sent === lastPersistedFingerprintRef.current) return;
+
+        setSyncState('syncing');
+        try {
+          const saved = await api.updateV1Project(p.id, p);
+          const localNow = projectRef.current;
+          const serverFp = fingerprintProjectPayload(saved);
+
+          if (localNow && fingerprintProjectPayload(localNow) === sent) {
+            lastPersistedFingerprintRef.current = serverFp;
+            setProject(saved);
+            setLastSavedAt(saved.updatedAt);
+            await refreshTakeoff(saved.id);
+          } else {
+            lastPersistedFingerprintRef.current = serverFp;
+          }
+          setSyncState('ok');
+        } catch (error) {
+          console.error('Autosave failed', error);
+          setSyncState('error');
+        }
+      })();
+    }, 800);
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [project, loading]);
+
   async function loadWorkspace(projectId: string) {
     try {
       setLoading(true);
@@ -209,6 +267,9 @@ export function ProjectWorkspace() {
       ]);
 
       setProject(projectData);
+      lastPersistedFingerprintRef.current = fingerprintProjectPayload(projectData);
+      setLastSavedAt(projectData.updatedAt);
+      setSyncState('ok');
       setRooms(roomData);
       setLines(lineData);
       setCatalog(catalogData);
@@ -393,10 +454,23 @@ export function ProjectWorkspace() {
 
   async function saveProject() {
     if (!project) return;
-    const saved = await api.updateV1Project(project.id, project);
-    setProject(saved);
-    setLastSavedAt(new Date().toISOString());
-    await refreshTakeoff(saved.id);
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    setSyncState('syncing');
+    try {
+      const saved = await api.updateV1Project(project.id, project);
+      lastPersistedFingerprintRef.current = fingerprintProjectPayload(saved);
+      setProject(saved);
+      setLastSavedAt(saved.updatedAt);
+      setSyncState('ok');
+      await refreshTakeoff(saved.id);
+    } catch (error) {
+      console.error('Failed to save project', error);
+      setSyncState('error');
+      window.alert(error instanceof Error ? error.message : 'Could not save project.');
+    }
   }
 
   async function deleteProjectPermanently() {
@@ -578,8 +652,10 @@ export function ProjectWorkspace() {
 
     try {
       const updated = await api.updateV1Project(project.id, { status: nextStatus });
+      lastPersistedFingerprintRef.current = fingerprintProjectPayload(updated);
       setProject(updated);
-      setLastSavedAt(new Date().toISOString());
+      setLastSavedAt(updated.updatedAt);
+      setSyncState('ok');
     } catch (error) {
       console.error('Failed to update project status', error);
       window.alert('Unable to update project status right now.');
@@ -597,6 +673,7 @@ export function ProjectWorkspace() {
     setSyncState('syncing');
     try {
       await api.syncSheets();
+      setCatalog(await api.getCatalog());
       setSyncState('ok');
     } catch (error) {
       console.error(error);

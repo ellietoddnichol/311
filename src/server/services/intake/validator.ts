@@ -1,4 +1,5 @@
 import type { NormalizedIntakeItem, ValidationResult } from '../../../shared/types/intake.ts';
+import { looksLikeModifierLine } from './intakeSemantics.ts';
 import {
   looksLikeIntakePricingSummaryOrDisclaimerLine,
   looksLikeIntakeSectionHeaderOrTitleLine,
@@ -27,10 +28,6 @@ function coalescePdfRooms(items: NormalizedIntakeItem[], warnings: string[]): vo
 }
 
 const VALID_UNITS = new Set(['EA', 'EACH', 'LF', 'FT', 'SF', 'SY', 'LS', 'SET', 'PAIR', 'PR', 'HR', 'DAY', 'WK', 'MO', 'BOX', 'PKG', 'CASE', 'CS', 'GAL', 'LB']);
-
-function looksLikeModifier(text: string): boolean {
-  return /(finish add|powder coat|security screws|add on|adder|upgrade|extra labor|extra material)/i.test(text);
-}
 
 function looksLikeRoomHeader(text: string): boolean {
   const normalized = normalizeComparableText(text);
@@ -119,7 +116,11 @@ export function validateNormalizedItems(items: NormalizedIntakeItem[]): Validati
       if (isPdf) pdfBulk.unitNoQty += 1;
       else warnings.push(`Item ${sourceLabel} has a unit but no quantity.`);
     }
-    if (looksLikeModifier(item.description) && item.itemType !== 'modifier') {
+    if (
+      looksLikeModifierLine(item.description) &&
+      item.itemType !== 'modifier' &&
+      !item.semanticTags?.includes('field_assembly')
+    ) {
       item.itemType = 'modifier';
       item.notes.push('Validator reclassified this line as a modifier.');
       if (isPdf) pdfBulk.modifierReclass += 1;

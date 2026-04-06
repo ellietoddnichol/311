@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileUp, FolderInput, PlusCircle, Save, Search, Upload, WandSparkles } from 'lucide-react';
+import { ArrowLeft, ChevronDown, FileUp, FolderInput, Info, PlusCircle, Save, Search, Upload, WandSparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { PricingMode, ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
@@ -9,6 +9,7 @@ import { CatalogItem } from '../types';
 import {
   createDefaultProjectJobConditions,
   normalizeProjectJobConditions,
+  RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
   recommendDeliveryPlan,
   recommendedPhasedWorkMultiplier,
 } from '../shared/utils/jobConditions';
@@ -26,6 +27,48 @@ import {
   uniqueSortedCatalogCategories,
 } from '../shared/utils/catalogCategories';
 import { computeCatalogPeerPricingSuggestion } from '../shared/utils/catalogPeerSuggestions';
+
+function IntakeFieldBadge({ kind }: { kind: 'required' | 'optional' | 'office' }) {
+  if (kind === 'required') {
+    return (
+      <span className="ml-1.5 inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-900">
+        Required
+      </span>
+    );
+  }
+  if (kind === 'optional') {
+    return (
+      <span className="ml-1.5 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-900">
+        Optional
+      </span>
+    );
+  }
+  return (
+    <span className="ml-1.5 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600">
+      Office default
+    </span>
+  );
+}
+
+function IntakeFieldLegend() {
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-200/80 bg-slate-50/80 px-3 py-2.5 text-[11px] text-slate-600">
+      <span className="font-semibold text-slate-700">Field types:</span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-blue-600" aria-hidden />
+        Required for this estimate
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden />
+        Optional adjustment
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-slate-300" aria-hidden />
+        Usually office default
+      </span>
+    </div>
+  );
+}
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
 type IntakeStep = 1 | 2 | 3 | 4 | 5;
@@ -72,6 +115,8 @@ interface LineSuggestion {
   matched: boolean;
   matchConfidence?: 'strong' | 'possible' | 'none';
   matchReason?: string;
+  suggestedBundleId?: string | null;
+  suggestedBundleName?: string | null;
 }
 
 type SourceKind =
@@ -862,7 +907,8 @@ function mapIntakeSourceKind(sourceKind: IntakeParseResult['sourceKind']): Sourc
 
 function buildIntakeLineSuggestion(line: IntakeReviewLine, fallbackSource: string): LineSuggestion {
   const preferredMatch = line.catalogMatch ?? line.suggestedMatch;
-  const notes = [line.notes, ...line.warnings].filter(Boolean).join(' | ');
+  const bundle = line.bundleMatch ?? line.suggestedBundle;
+  const notes = [line.notes, ...line.warnings, bundle ? `Bundle hint: ${bundle.bundleName}` : ''].filter(Boolean).join(' | ');
 
   return {
     id: makeId('line-suggest'),
@@ -885,6 +931,8 @@ function buildIntakeLineSuggestion(line: IntakeReviewLine, fallbackSource: strin
     matched: !!preferredMatch,
     matchConfidence: preferredMatch?.confidence || 'none',
     matchReason: preferredMatch?.reason || '',
+    suggestedBundleId: bundle?.bundleId ?? null,
+    suggestedBundleName: bundle?.bundleName ?? null,
   };
 }
 
@@ -1312,6 +1360,47 @@ export function ProjectIntake() {
         ...updates,
       }),
     }));
+  }
+
+  const draftJob = useMemo(
+    () => normalizeProjectJobConditions(projectDraft.jobConditions),
+    [projectDraft.jobConditions]
+  );
+
+  function resetIntakeAdvancedPricingToOfficeDefaults() {
+    if (!settingsDefaults) return;
+    setProjectDraft((prev) => ({
+      ...prev,
+      laborBurdenPercent: settingsDefaults.defaultLaborBurdenPercent,
+      overheadPercent: settingsDefaults.defaultOverheadPercent,
+      profitPercent: settingsDefaults.defaultProfitPercent,
+      taxPercent: settingsDefaults.defaultTaxPercent,
+      laborOverheadPercent: settingsDefaults.defaultOverheadPercent,
+      laborProfitPercent: settingsDefaults.defaultProfitPercent,
+      jobConditions: normalizeProjectJobConditions({
+        ...(prev.jobConditions || createDefaultProjectJobConditions()),
+        ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
+        laborRateMultiplier: 1,
+        installerCount: 1,
+        estimateAdderPercent: 0,
+        estimateAdderAmount: 0,
+      }),
+    }));
+  }
+
+  function matchesIntakeOffice(
+    field: 'burden' | 'overhead' | 'profit' | 'tax' | 'laborOverhead' | 'laborProfit'
+  ): boolean {
+    if (!settingsDefaults) return false;
+    if (field === 'burden') return Number(projectDraft.laborBurdenPercent) === settingsDefaults.defaultLaborBurdenPercent;
+    if (field === 'overhead') return Number(projectDraft.overheadPercent) === settingsDefaults.defaultOverheadPercent;
+    if (field === 'profit') return Number(projectDraft.profitPercent) === settingsDefaults.defaultProfitPercent;
+    if (field === 'tax') return Number(projectDraft.taxPercent) === settingsDefaults.defaultTaxPercent;
+    if (field === 'laborOverhead')
+      return Number(projectDraft.laborOverheadPercent) === settingsDefaults.defaultOverheadPercent;
+    if (field === 'laborProfit')
+      return Number(projectDraft.laborProfitPercent) === settingsDefaults.defaultProfitPercent;
+    return false;
   }
 
   function applyDraftDeliveryRecommendation(distance: number | null, options?: { difficulty?: ProjectJobConditions['deliveryDifficulty']; force?: boolean }) {
@@ -2238,38 +2327,54 @@ export function ProjectIntake() {
   }, [projectDraft.bidDate, projectDraft.proposalDate, projectDraft.dueDate]);
 
   return (
-    <div className="ui-page space-y-4">
-      <div className="flex items-center gap-3">
-        <button type="button" onClick={() => navigate('/')} className="ui-btn-secondary h-9 w-9 grid place-items-center px-0" aria-label="Back to dashboard">
-          <ArrowLeft className="w-4 h-4" />
-        </button>
-        <div>
-          <p className="ui-label">New Project</p>
-          <h1 className="ui-title mt-1">Create New Project</h1>
-          <p className="ui-subtitle mt-1">Choose a start type and confirm project details.</p>
+    <div className="ui-page space-y-8">
+      <div className="mx-auto w-full max-w-[1600px]">
+        <div className="flex flex-wrap items-start gap-4">
+          <button type="button" onClick={() => navigate('/')} className="ui-btn-secondary h-9 w-9 shrink-0 grid place-items-center px-0" aria-label="Back to dashboard">
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <header className="min-w-0 flex-1 rounded-2xl border border-slate-200/70 bg-white px-5 py-4 shadow-sm">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">New project</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Create New Project</h1>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600">Guided steps: pick how you start, add source files if needed, then confirm basics and estimate setup before review.</p>
+          </header>
         </div>
-      </div>
 
-      <div className="ui-surface flex flex-wrap items-center gap-1 p-1.5 text-xs font-medium">
-        {[
-          '1. Start Type',
-          '2. Source',
-          '3. Project Basics',
-          '4. Pricing + Scope',
-          '5. Review Items',
-        ].map((label, index) => {
-          const active = step >= index + 1;
-          return (
-            <span key={label} className={`rounded-md px-2.5 py-1 font-semibold ${active ? 'bg-blue-700 text-white shadow-sm' : 'bg-slate-100 text-slate-600'}`}>
-              {label}
-            </span>
-          );
-        })}
+        <nav className="mt-6 flex flex-wrap gap-2" aria-label="Creation steps">
+          {[
+            '1. Start type',
+            '2. Source',
+            '3. Project basics',
+            '4. Estimate setup',
+            '5. Review items',
+          ].map((label, index) => {
+            const current = step === index + 1;
+            const done = step > index + 1;
+            return (
+              <span
+                key={label}
+                className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition ${
+                  current
+                    ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                    : done
+                      ? 'border-slate-200 bg-slate-50 text-slate-700'
+                      : 'border-slate-200 bg-white text-slate-500'
+                }`}
+              >
+                {label}
+              </span>
+            );
+          })}
+        </nav>
       </div>
 
       {step === 1 && (
-        <section className="ui-surface p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-slate-800">How do you want to start?</h2>
+        <section className="mx-auto w-full max-w-[1600px] rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-4">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Step 1</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-900">How do you want to start?</h2>
+            <p className="mt-1 text-sm text-slate-600">Pick one path; you can still edit everything before the project is created.</p>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
             {[
               { key: 'blank', label: 'Blank Project', desc: 'Start clean and add scope manually.', icon: PlusCircle },
@@ -2306,8 +2411,12 @@ export function ProjectIntake() {
       )}
 
       {step === 2 && (
-        <section className="ui-surface p-5 space-y-5">
-          <h2 className="text-sm font-semibold text-slate-800">Source Details</h2>
+        <section className="mx-auto w-full max-w-[1600px] rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-5">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Step 2</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-900">Source details</h2>
+            <p className="mt-1 text-sm text-slate-600">Upload or paste based on the start type you chose.</p>
+          </div>
 
           {mode === 'takeoff' && (
             <>
@@ -2463,16 +2572,23 @@ export function ProjectIntake() {
       )}
 
       {(step === 3 || step === 4 || step === 5) && (
-        <section className="space-y-5">
+        <section className="mx-auto w-full max-w-[1600px] space-y-5">
           {(step === 3 || step === 4) && (
-            <div className="ui-surface p-5 space-y-3">
-              <h2 className="text-sm font-semibold text-slate-800">{step === 3 ? 'Project Basics' : 'Pricing + Scope Setup'}</h2>
-              <p className="text-xs text-slate-500">{step === 3 ? 'Enter required project details.' : 'Set pricing, active scope, and job conditions.'}</p>
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)]">
+            <div className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{step === 3 ? 'Step 3' : 'Step 4'}</p>
+                <h2 className="mt-1 text-lg font-semibold text-slate-900">{step === 3 ? 'Project basics' : 'Estimate setup'}</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  {step === 3
+                    ? 'Identity, schedule, and site address — required before estimate setup.'
+                    : 'Aligns with Project Setup: core inputs first, light job-condition toggles, pricing defaults collapsed unless you need them.'}
+                </p>
+              </div>
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)]">
                 <div className="space-y-4">
                   {step === 3 ? (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Job Basics</p>
+                <div className="rounded-2xl border border-slate-200/70 bg-slate-50/50 p-4">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Job basics</p>
                   <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
                     <label className="text-xs text-slate-600">Project Name<input className="ui-input mt-1" value={projectDraft.projectName || ''} onChange={(e) => patchProjectDraft({ projectName: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">Bid Package / Job #<input className="ui-input mt-1" value={projectDraft.projectNumber || ''} onChange={(e) => patchProjectDraft({ projectNumber: e.target.value })} /></label>
@@ -2509,69 +2625,283 @@ export function ProjectIntake() {
 
                   {step === 4 ? (
                     <>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Pricing</p>
-                      <p className="mt-1 text-xs text-slate-500">Set markups, crew size, and adders.</p>
-                    </div>
-                    <span className="rounded-full bg-white px-3 py-1 text-[11px] font-medium text-slate-600 shadow-sm ring-1 ring-slate-200">Defaults loaded</span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    <label className="text-xs text-slate-600">Price Mode
-                      <select className="ui-input mt-1" value={(projectDraft.pricingMode as PricingMode) || 'labor_and_material'} onChange={(e) => patchProjectDraft({ pricingMode: e.target.value as PricingMode })}>
-                        <option value="material_only">Material Only</option>
-                        <option value="labor_only">Install Only</option>
-                        <option value="labor_and_material">Material + Install</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600">Burden %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.laborBurdenPercent ?? ''} onChange={(e) => patchProjectDraft({ laborBurdenPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-xs text-slate-600">Overhead %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.overheadPercent ?? ''} onChange={(e) => patchProjectDraft({ overheadPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-xs text-slate-600">Profit %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.profitPercent ?? ''} onChange={(e) => patchProjectDraft({ profitPercent: Number(e.target.value) || 0 })} /></label>
-                    {(projectDraft.pricingMode as PricingMode) !== 'labor_only' ? (
-                      <label className="text-xs text-slate-600">Material tax %<input type="number" step="0.01" className="ui-input mt-1" value={projectDraft.taxPercent ?? ''} onChange={(e) => patchProjectDraft({ taxPercent: Number(e.target.value) || 0 })} /></label>
-                    ) : null}
-                    <label className="text-xs text-slate-600">Labor Factor<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).laborRateMultiplier} onChange={(e) => patchDraftJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })} /></label>
-                    <label className="text-xs text-slate-600">Adder %<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderPercent} onChange={(e) => patchDraftJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-xs text-slate-600">Adder $<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderAmount} onChange={(e) => patchDraftJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-xs text-slate-600">Crew Size<input type="number" min={1} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerCount} onChange={(e) => patchDraftJobConditions({ installerCount: Number(e.target.value) || 1 })} /></label>
-                    <label className="text-xs text-slate-600">Paid day (hr/installer)<input type="number" step="0.25" min={4} max={12} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerPaidDayHours} onChange={(e) => patchDraftJobConditions({ installerPaidDayHours: Number(e.target.value) || 8 })} /></label>
-                    <label className="text-xs text-slate-600">Breaks/lunch (hr/installer/day)<input type="number" step="0.25" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).dailyBreakHoursPerInstaller} onChange={(e) => patchDraftJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-xs text-slate-600">Learning curve %<input type="number" step="0.5" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).laborLearningCurvePercent} onChange={(e) => patchDraftJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })} /></label>
-                    {(projectDraft.pricingMode as PricingMode) !== 'labor_only' ? (
-                      <>
-                        <label className="text-xs text-slate-600">Material waste %<input type="number" step="0.5" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).materialWastePercent} onChange={(e) => patchDraftJobConditions({ materialWastePercent: Number(e.target.value) || 0 })} /></label>
-                        <label className="text-xs text-slate-600">Field supplies % (after waste)<input type="number" step="0.5" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerFieldSuppliesPercent} onChange={(e) => patchDraftJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })} /></label>
-                        <label className="text-xs text-slate-600">Field supplies flat $<input type="number" step="1" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerFieldSuppliesFlat} onChange={(e) => patchDraftJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })} /></label>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
+                      <div className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-6">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 1</p>
+                          <h3 className="mt-1 text-lg font-semibold text-slate-900">Project inputs</h3>
+                          <p className="mt-2 text-sm text-slate-600">Price mode, scope, site context, and delivery — same priorities as Project Setup.</p>
+                          <IntakeFieldLegend />
+                        </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Scope Categories</p>
-                  <p className="mt-1 text-xs text-slate-500">Select active scope categories.</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {scopeCategoryOptions.map((category) => {
-                      const active = (projectDraft.selectedScopeCategories || []).includes(category);
-                      return (
-                        <button
-                          key={category}
-                          type="button"
-                          onClick={() => patchProjectDraft({
-                            selectedScopeCategories: active
-                              ? (projectDraft.selectedScopeCategories || []).filter((entry) => entry !== category)
-                              : [...(projectDraft.selectedScopeCategories || []), category].sort(),
-                          })}
-                          className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${active ? 'bg-blue-700 text-white shadow-sm' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'}`}
-                        >
-                          {category}
-                        </button>
-                      );
-                    })}
-                    {scopeCategoryOptions.length === 0 ? <p className="text-xs text-slate-500">Categories come from your catalog after sync.</p> : null}
-                  </div>
-                </div>
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                          <label className="text-[11px] font-medium text-slate-800">
+                            <span className="inline-flex items-center">
+                              Price mode
+                              <IntakeFieldBadge kind="required" />
+                            </span>
+                            <select
+                              className="ui-input mt-1.5 h-10"
+                              value={(projectDraft.pricingMode as PricingMode) || 'labor_and_material'}
+                              onChange={(e) => patchProjectDraft({ pricingMode: e.target.value as PricingMode })}
+                            >
+                              <option value="material_only">Material only</option>
+                              <option value="labor_only">Install only</option>
+                              <option value="labor_and_material">Material + install</option>
+                            </select>
+                            <span className="mt-1 block text-[10px] text-slate-500">Controls material vs labor in the bid.</span>
+                          </label>
+
+                          <label className="text-[11px] font-medium text-slate-800">
+                            <span className="inline-flex items-center">
+                              Project size
+                              <IntakeFieldBadge kind="optional" />
+                            </span>
+                            <select className="ui-input mt-1.5 h-10" value={projectDraft.projectSize || 'Medium'} onChange={(e) => patchProjectDraft({ projectSize: e.target.value })}>
+                              <option value="Small">Small</option>
+                              <option value="Medium">Medium</option>
+                              <option value="Large">Large</option>
+                            </select>
+                          </label>
+
+                          <label className="text-[11px] font-medium text-slate-800">
+                            <span className="inline-flex items-center">
+                              Floor level
+                              <IntakeFieldBadge kind="optional" />
+                            </span>
+                            <select className="ui-input mt-1.5 h-10" value={projectDraft.floorLevel || 'Ground'} onChange={(e) => patchProjectDraft({ floorLevel: e.target.value })}>
+                              <option value="Ground">Ground</option>
+                              <option value="2-3">2–3</option>
+                              <option value="4+">4+</option>
+                            </select>
+                          </label>
+
+                          <label className="text-[11px] font-medium text-slate-800">
+                            <span className="inline-flex items-center">
+                              Floors (building)
+                              <IntakeFieldBadge kind="optional" />
+                            </span>
+                            <input type="number" min={1} className="ui-input mt-1.5 h-10" value={draftJob.floors} onChange={(e) => patchDraftJobConditions({ floors: Number(e.target.value) || 1 })} />
+                          </label>
+
+                          <label className="text-[11px] font-medium text-slate-800">
+                            <span className="inline-flex items-center">
+                              Wall substrate
+                              <IntakeFieldBadge kind="optional" />
+                            </span>
+                            <select className="ui-input mt-1.5 h-10" value={projectDraft.wallSubstrate || 'Drywall'} onChange={(e) => patchProjectDraft({ wallSubstrate: e.target.value })}>
+                              <option value="Drywall">Drywall</option>
+                              <option value="CMU">CMU</option>
+                              <option value="Concrete">Concrete</option>
+                              <option value="Tile">Tile</option>
+                            </select>
+                          </label>
+
+                          <label className="text-[11px] font-medium text-slate-800 sm:col-span-2 lg:col-span-2">
+                            <span className="inline-flex items-center">
+                              Location / region note
+                              <IntakeFieldBadge kind="optional" />
+                            </span>
+                            <input
+                              className="ui-input mt-1.5 h-10"
+                              value={draftJob.locationLabel || ''}
+                              onChange={(e) => patchDraftJobConditions({ locationLabel: e.target.value })}
+                              placeholder="e.g. Austin metro"
+                            />
+                          </label>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                          <p className="text-[11px] font-semibold text-slate-800">
+                            <span className="inline-flex items-center">
+                              Optional site context
+                              <IntakeFieldBadge kind="optional" />
+                            </span>
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">Helps metadata and assumptions; not required for every job.</p>
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Access difficulty
+                              <select className="ui-input mt-1 h-9" value={projectDraft.accessDifficulty || 'Easy'} onChange={(e) => patchProjectDraft({ accessDifficulty: e.target.value })}>
+                                <option value="Easy">Easy</option>
+                                <option value="Moderate">Moderate</option>
+                                <option value="Difficult">Difficult</option>
+                              </select>
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Install height
+                              <select className="ui-input mt-1 h-9" value={projectDraft.installHeight || 'Standard'} onChange={(e) => patchProjectDraft({ installHeight: e.target.value })}>
+                                <option value="Standard">Standard</option>
+                                <option value="Ladder">Ladder</option>
+                                <option value="Lift">Lift</option>
+                                <option value="Scaffold">Scaffold</option>
+                              </select>
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Material handling
+                              <select className="ui-input mt-1 h-9" value={projectDraft.materialHandling || 'Standard'} onChange={(e) => patchProjectDraft({ materialHandling: e.target.value })}>
+                                <option value="Standard">Standard</option>
+                                <option value="Manual">Manual</option>
+                                <option value="Multiple Moves">Multiple moves</option>
+                              </select>
+                            </label>
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-[11px] font-semibold text-slate-800">
+                            <span className="inline-flex items-center">
+                              Scope categories
+                              <IntakeFieldBadge kind="required" />
+                            </span>
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">Which catalog trades are in play for this bid.</p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {scopeCategoryOptions.map((category) => {
+                              const active = (projectDraft.selectedScopeCategories || []).includes(category);
+                              return (
+                                <button
+                                  key={category}
+                                  type="button"
+                                  onClick={() =>
+                                    patchProjectDraft({
+                                      selectedScopeCategories: active
+                                        ? (projectDraft.selectedScopeCategories || []).filter((entry) => entry !== category)
+                                        : [...(projectDraft.selectedScopeCategories || []), category].sort(),
+                                    })
+                                  }
+                                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                    active ? 'border-blue-400 bg-blue-50 text-blue-900 shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {category}
+                                </button>
+                              );
+                            })}
+                            {scopeCategoryOptions.length === 0 ? <p className="text-xs text-slate-500">Categories load after catalog sync.</p> : null}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                          <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-800">
+                            <input
+                              type="checkbox"
+                              className="mt-1 h-4 w-4 rounded border-slate-300"
+                              checked={draftJob.deliveryRequired}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  const miles = draftJob.travelDistanceMiles;
+                                  if (miles !== null && miles !== undefined && Number.isFinite(miles)) {
+                                    patchDraftJobConditions({
+                                      ...recommendDeliveryPlan(miles, draftJob.deliveryDifficulty),
+                                      deliveryRequired: true,
+                                      deliveryAutoCalculated: true,
+                                    });
+                                  } else {
+                                    patchDraftJobConditions({ deliveryRequired: true, deliveryAutoCalculated: false });
+                                  }
+                                } else {
+                                  patchDraftJobConditions({
+                                    deliveryRequired: false,
+                                    deliveryQuotedSeparately: false,
+                                    deliveryAutoCalculated: false,
+                                  });
+                                }
+                              }}
+                            />
+                            <span>
+                              <span className="font-semibold">Delivery required / included in this estimate</span>
+                              <span className="mt-0.5 block text-xs font-normal text-slate-600">Turn on to price freight or jobsite delivery. Details stay hidden until this is on.</span>
+                            </span>
+                          </label>
+                          {draftJob.deliveryRequired ? (
+                            <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-200/80 pt-4 sm:grid-cols-3">
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Delivery mode
+                                <select
+                                  className="ui-input mt-1 h-9"
+                                  value={draftJob.deliveryPricingMode}
+                                  onChange={(e) => patchDraftJobConditions({ deliveryPricingMode: e.target.value as ProjectJobConditions['deliveryPricingMode'], deliveryAutoCalculated: false })}
+                                >
+                                  <option value="included">Included / no charge</option>
+                                  <option value="flat">Flat amount</option>
+                                  <option value="percent">Percent of base</option>
+                                </select>
+                              </label>
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Delivery $ or %
+                                <input type="number" step="0.01" className="ui-input mt-1 h-9" value={draftJob.deliveryValue} onChange={(e) => patchDraftJobConditions({ deliveryValue: Number(e.target.value) || 0, deliveryAutoCalculated: false })} />
+                              </label>
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Lead time (days)
+                                <input type="number" min={0} className="ui-input mt-1 h-9" value={draftJob.deliveryLeadDays} onChange={(e) => patchDraftJobConditions({ deliveryLeadDays: Number(e.target.value) || 0 })} />
+                              </label>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 2</p>
+                        <h3 className="mt-1 text-lg font-semibold text-slate-900">Job conditions</h3>
+                        <p className="mt-2 text-sm text-slate-600">Toggle what applies. Delivery is set under project inputs.</p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {(
+                            [
+                              ['occupiedBuilding', 'Occupied building', draftJob.occupiedBuilding],
+                              ['restrictedAccess', 'Restricted access', draftJob.restrictedAccess],
+                              ['nightWork', 'Night work', draftJob.nightWork],
+                              ['phasedWork', 'Phased work', draftJob.phasedWork],
+                              ['remoteTravel', 'Remote travel', draftJob.remoteTravel],
+                              ['scheduleCompression', 'Schedule compression', draftJob.scheduleCompression],
+                              ['smallJobFactor', 'Small job factor', draftJob.smallJobFactor],
+                            ] as const
+                          ).map(([key, label, on]) => (
+                            <button
+                              key={key}
+                              type="button"
+                              role="switch"
+                              aria-checked={on}
+                              onClick={() => {
+                                if (key === 'phasedWork') {
+                                  promptForPhasedWorkDraft(!on);
+                                  return;
+                                }
+                                patchDraftJobConditions({ [key]: !on } as Partial<ProjectJobConditions>);
+                              }}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                on ? 'border-slate-800 bg-slate-900 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-4 flex items-start gap-2 text-[11px] text-slate-500">
+                          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+                          Markups, crew, and field allowances live under <strong className="font-medium text-slate-700">Advanced pricing defaults</strong> on the right.
+                        </p>
+                        {draftJob.phasedWork ? (
+                          <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2">
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Phase count
+                              <input
+                                type="number"
+                                min={2}
+                                className="ui-input mt-1 h-9"
+                                value={draftJob.phasedWorkPhases}
+                                onChange={(e) => {
+                                  const phaseCount = Math.max(2, Number(e.target.value) || 2);
+                                  patchDraftJobConditions({ phasedWorkPhases: phaseCount, phasedWorkMultiplier: recommendedPhasedWorkMultiplier(phaseCount) });
+                                }}
+                              />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Phased labor multiplier
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={draftJob.phasedWorkMultiplier} onChange={(e) => patchDraftJobConditions({ phasedWorkMultiplier: Number(e.target.value) || 0 })} />
+                            </label>
+                          </div>
+                        ) : null}
+                      </div>
                     </>
                   ) : null}
                 </div>
@@ -2622,174 +2952,212 @@ export function ProjectIntake() {
 
                   {step === 4 ? (
                     <>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Travel Distance</p>
-                      <p className="mt-1 text-xs text-slate-500">Office: {OFFICE_ADDRESS}</p>
-                    </div>
-                    {distanceCalculating ? <span className="text-[11px] font-semibold text-blue-700">Calculating...</span> : null}
-                  </div>
-                  <div className="mt-3 rounded-2xl bg-slate-50/80 p-3 text-sm text-slate-700 ring-1 ring-slate-200/80">
-                    <p className="font-medium text-slate-900">{normalizeProjectJobConditions(projectDraft.jobConditions).travelDistanceMiles !== null ? `${formatNumberSafe(normalizeProjectJobConditions(projectDraft.jobConditions).travelDistanceMiles, 1)} miles from office.` : distanceMessage}</p>
-                    {distanceError ? <p className="mt-1 text-xs text-red-600">{distanceError}</p> : null}
-                  </div>
-                </div>
+                      <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Travel</p>
+                            <p className="mt-1 text-xs text-slate-500">Office: {OFFICE_ADDRESS}</p>
+                          </div>
+                          {distanceCalculating ? <span className="text-[11px] font-semibold text-blue-700">Calculating…</span> : null}
+                        </div>
+                        <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-sm text-slate-700">
+                          <p className="font-medium text-slate-900">
+                            {draftJob.travelDistanceMiles !== null
+                              ? `${formatNumberSafe(draftJob.travelDistanceMiles, 1)} miles from office.`
+                              : distanceMessage}
+                          </p>
+                          {distanceError ? <p className="mt-1 text-xs text-red-600">{distanceError}</p> : null}
+                        </div>
+                        {draftJob.deliveryRequired ? (
+                          <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-[11px] text-slate-600">
+                            <p className="font-medium text-slate-800">Delivery summary</p>
+                            <p className="mt-1 text-slate-500">
+                              Under 50 mi — typically no fee; 50–100 mi — $100 flat; over 100 mi — often priced separately. Adjust under project inputs if needed.
+                            </p>
+                            <p className="mt-1 text-slate-700">
+                              {!draftJob.deliveryQuotedSeparately
+                                ? `${formatNumberSafe(draftJob.travelDistanceMiles || 0, 1)} mi · ${draftJob.deliveryLeadDays} day lead · ${draftJob.deliveryPricingMode === 'flat' ? `${formatCurrencySafe(draftJob.deliveryValue)} flat` : draftJob.deliveryPricingMode === 'percent' ? `${formatNumberSafe(draftJob.deliveryValue, 2)}%` : 'included'}`
+                                : `${formatNumberSafe(draftJob.travelDistanceMiles || 0, 1)} mi — quoted separately (not in estimate total).`}
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Job Conditions</p>
-                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <label className="text-xs text-slate-600">Project Size
-                      <select className="ui-input mt-1" value={projectDraft.projectSize || 'Medium'} onChange={(e) => patchProjectDraft({ projectSize: e.target.value })}>
-                        <option value="Small">Small</option>
-                        <option value="Medium">Medium</option>
-                        <option value="Large">Large</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600">Floor Level
-                      <select className="ui-input mt-1" value={projectDraft.floorLevel || 'Ground'} onChange={(e) => patchProjectDraft({ floorLevel: e.target.value })}>
-                        <option value="Ground">Ground</option>
-                        <option value="2-3">2-3</option>
-                        <option value="4+">4+</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600">Access Difficulty
-                      <select className="ui-input mt-1" value={projectDraft.accessDifficulty || 'Easy'} onChange={(e) => patchProjectDraft({ accessDifficulty: e.target.value })}>
-                        <option value="Easy">Easy</option>
-                        <option value="Moderate">Moderate</option>
-                        <option value="Difficult">Difficult</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600">Install Height
-                      <select className="ui-input mt-1" value={projectDraft.installHeight || 'Standard'} onChange={(e) => patchProjectDraft({ installHeight: e.target.value })}>
-                        <option value="Standard">Standard</option>
-                        <option value="Ladder">Ladder</option>
-                        <option value="Lift">Lift</option>
-                        <option value="Scaffold">Scaffold</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600">Material Handling
-                      <select className="ui-input mt-1" value={projectDraft.materialHandling || 'Standard'} onChange={(e) => patchProjectDraft({ materialHandling: e.target.value })}>
-                        <option value="Standard">Standard</option>
-                        <option value="Manual">Manual</option>
-                        <option value="Multiple Moves">Multiple Moves</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600">Wall Substrate
-                      <select className="ui-input mt-1" value={projectDraft.wallSubstrate || 'Drywall'} onChange={(e) => patchProjectDraft({ wallSubstrate: e.target.value })}>
-                        <option value="Drywall">Drywall</option>
-                        <option value="CMU">CMU</option>
-                        <option value="Concrete">Concrete</option>
-                        <option value="Tile">Tile</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600">Floors<input type="number" min={1} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).floors} onChange={(e) => patchDraftJobConditions({ floors: Number(e.target.value) || 1 })} /></label>
-                    <label className="text-xs text-slate-600">Tax / Location Note<input className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).locationLabel || ''} onChange={(e) => patchDraftJobConditions({ locationLabel: e.target.value })} /></label>
-                    <label className="text-xs text-slate-600">Tax Override %<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).locationTaxPercent ?? ''} onChange={(e) => patchDraftJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) })} /></label>
-                  </div>
-                </div>
+                      <details className="group rounded-2xl border border-slate-300/80 bg-slate-50/50 shadow-sm open:bg-white">
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 [&::-webkit-details-marker]:hidden">
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 3</p>
+                            <p className="text-sm font-semibold text-slate-900">Advanced pricing defaults</p>
+                            <p className="mt-0.5 text-xs text-slate-500">Burden, O&amp;P, crew, field day, adders — usually matches Settings.</p>
+                          </div>
+                          <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180" aria-hidden />
+                        </summary>
+                        <div className="space-y-4 border-t border-slate-200 px-4 pb-4 pt-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs text-slate-600">Open when this bid differs from office norms.</p>
+                            <button
+                              type="button"
+                              onClick={resetIntakeAdvancedPricingToOfficeDefaults}
+                              disabled={!settingsDefaults}
+                              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              Reset to office defaults
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Labor burden % (sub)
+                              {matchesIntakeOffice('burden') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.laborBurdenPercent ?? ''} onChange={(e) => patchProjectDraft({ laborBurdenPercent: Number(e.target.value) || 0 })} />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Material overhead %
+                              {matchesIntakeOffice('overhead') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.overheadPercent ?? ''} onChange={(e) => patchProjectDraft({ overheadPercent: Number(e.target.value) || 0 })} />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Material profit %
+                              {matchesIntakeOffice('profit') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.profitPercent ?? ''} onChange={(e) => patchProjectDraft({ profitPercent: Number(e.target.value) || 0 })} />
+                            </label>
+                            {(projectDraft.pricingMode as PricingMode) !== 'labor_only' ? (
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Material tax %
+                                {matchesIntakeOffice('tax') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                                <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.taxPercent ?? ''} onChange={(e) => patchProjectDraft({ taxPercent: Number(e.target.value) || 0 })} />
+                              </label>
+                            ) : null}
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Location tax override %
+                              <IntakeFieldBadge kind="optional" />
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="ui-input mt-1 h-9"
+                                value={draftJob.locationTaxPercent ?? ''}
+                                onChange={(e) => patchDraftJobConditions({ locationTaxPercent: e.target.value === '' ? null : Number(e.target.value) })}
+                                placeholder="Blank = use material tax"
+                              />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Labor factor
+                              <IntakeFieldBadge kind="optional" />
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={draftJob.laborRateMultiplier} onChange={(e) => patchDraftJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })} />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Crew size
+                              <IntakeFieldBadge kind="optional" />
+                              <input type="number" min={1} className="ui-input mt-1 h-9" value={draftJob.installerCount} onChange={(e) => patchDraftJobConditions({ installerCount: Number(e.target.value) || 1 })} />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Labor overhead % (sub)
+                              {matchesIntakeOffice('laborOverhead') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.laborOverheadPercent ?? ''} onChange={(e) => patchProjectDraft({ laborOverheadPercent: Number(e.target.value) || 0 })} />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Labor profit % (sub)
+                              {matchesIntakeOffice('laborProfit') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.laborProfitPercent ?? ''} onChange={(e) => patchProjectDraft({ laborProfitPercent: Number(e.target.value) || 0 })} />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Project adder %
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={draftJob.estimateAdderPercent} onChange={(e) => patchDraftJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Project adder $
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={draftJob.estimateAdderAmount} onChange={(e) => patchDraftJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} />
+                            </label>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                            <p className="text-xs font-semibold text-slate-900">Field day &amp; material pad</p>
+                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Paid day (hr/installer)
+                                <input type="number" step="0.25" min={4} max={12} className="ui-input mt-1 h-9" value={draftJob.installerPaidDayHours} onChange={(e) => patchDraftJobConditions({ installerPaidDayHours: Number(e.target.value) || RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.installerPaidDayHours })} />
+                              </label>
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Breaks / lunch (hr/installer/day)
+                                <input type="number" step="0.25" min={0} className="ui-input mt-1 h-9" value={draftJob.dailyBreakHoursPerInstaller} onChange={(e) => patchDraftJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })} />
+                              </label>
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Learning curve %
+                                <input type="number" step="0.5" min={0} className="ui-input mt-1 h-9" value={draftJob.laborLearningCurvePercent} onChange={(e) => patchDraftJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })} />
+                              </label>
+                              {(projectDraft.pricingMode as PricingMode) !== 'labor_only' ? (
+                                <>
+                                  <label className="text-[11px] font-medium text-slate-700">
+                                    Material waste %
+                                    <input type="number" step="0.5" min={0} className="ui-input mt-1 h-9" value={draftJob.materialWastePercent} onChange={(e) => patchDraftJobConditions({ materialWastePercent: Number(e.target.value) || 0 })} />
+                                  </label>
+                                  <label className="text-[11px] font-medium text-slate-700">
+                                    Field supplies % (after waste)
+                                    <input type="number" step="0.5" min={0} className="ui-input mt-1 h-9" value={draftJob.installerFieldSuppliesPercent} onChange={(e) => patchDraftJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })} />
+                                  </label>
+                                  <label className="text-[11px] font-medium text-slate-700">
+                                    Field supplies flat $
+                                    <input type="number" step="1" min={0} className="ui-input mt-1 h-9" value={draftJob.installerFieldSuppliesFlat} onChange={(e) => patchDraftJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })} />
+                                  </label>
+                                </>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-white p-3">
+                            <p className="text-xs font-semibold text-slate-900">Sub labor management fee</p>
+                            <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-700">
+                              <input type="checkbox" checked={Boolean(projectDraft.subLaborManagementFeeEnabled)} onChange={(e) => patchProjectDraft({ subLaborManagementFeeEnabled: e.target.checked })} />
+                              Enable on loaded subcontractor labor
+                            </label>
+                            <label className="mt-2 block text-[11px] font-medium text-slate-700">
+                              Fee %
+                              <input type="number" step="0.01" className="ui-input mt-1 h-9 max-w-[200px]" value={projectDraft.subLaborManagementFeePercent ?? 5} onChange={(e) => patchProjectDraft({ subLaborManagementFeePercent: Number(e.target.value) || 0 })} />
+                            </label>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                            <p className="text-xs font-semibold text-slate-900">Delivery logistics (for auto rules)</p>
+                            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Delivery difficulty
+                                <select className="ui-input mt-1 h-9" value={draftJob.deliveryDifficulty} onChange={(e) => patchDraftJobConditions({ deliveryDifficulty: e.target.value as ProjectJobConditions['deliveryDifficulty'] })}>
+                                  <option value="standard">Standard</option>
+                                  <option value="constrained">Constrained</option>
+                                  <option value="difficult">Difficult</option>
+                                </select>
+                              </label>
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Floor labor add / floor
+                                <input type="number" step="0.01" className="ui-input mt-1 h-9" value={draftJob.floorMultiplierPerFloor} onChange={(e) => patchDraftJobConditions({ floorMultiplierPerFloor: Number(e.target.value) || 0 })} />
+                              </label>
+                              <label className="text-[11px] font-medium text-slate-700">
+                                Mobilization
+                                <select className="ui-input mt-1 h-9" value={draftJob.mobilizationComplexity} onChange={(e) => patchDraftJobConditions({ mobilizationComplexity: e.target.value as ProjectJobConditions['mobilizationComplexity'] })}>
+                                  <option value="low">Low</option>
+                                  <option value="medium">Medium</option>
+                                  <option value="high">High</option>
+                                </select>
+                              </label>
+                              <label className="flex items-center gap-2 text-[11px] text-slate-700 md:col-span-2">
+                                <input type="checkbox" checked={draftJob.elevatorAvailable} onChange={(e) => patchDraftJobConditions({ elevatorAvailable: e.target.checked })} />
+                                Elevator available
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      </details>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Job Adders</p>
-                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {[
-                      ['occupiedBuilding', 'Occupied building'],
-                      ['restrictedAccess', 'Restricted access'],
-                      ['nightWork', 'Night work'],
-                      ['phasedWork', 'Phased work'],
-                      ['remoteTravel', 'Remote travel'],
-                      ['scheduleCompression', 'Schedule compression'],
-                      ['smallJobFactor', 'Small job factor'],
-                      ['deliveryRequired', 'Delivery required'],
-                    ].map(([key, label]) => {
-                      const active = Boolean(normalizeProjectJobConditions(projectDraft.jobConditions)[key as keyof ProjectJobConditions]);
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => {
-                            if (key === 'phasedWork') {
-                              promptForPhasedWorkDraft(!active);
-                              return;
-                            }
-
-                            if (key === 'deliveryRequired') {
-                              if (active) {
-                                patchDraftJobConditions({
-                                  deliveryRequired: false,
-                                  deliveryAutoCalculated: false,
-                                  deliveryQuotedSeparately: false,
-                                });
-                                return;
-                              }
-
-                              applyDraftDeliveryRecommendation(normalizeProjectJobConditions(projectDraft.jobConditions).travelDistanceMiles, { force: true });
-                              return;
-                            }
-
-                            patchDraftJobConditions({ [key]: !active } as Partial<ProjectJobConditions>);
-                          }}
-                          className={`flex items-center justify-between rounded-2xl px-3 py-3 text-left text-sm transition ${active ? 'bg-blue-50 text-blue-800 ring-1 ring-blue-200' : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100'}`}
-                        >
-                          <span>{label}</span>
-                          <span className={`h-2.5 w-2.5 rounded-full ${active ? 'bg-blue-700' : 'bg-slate-300'}`} />
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <label className="text-xs text-slate-600">Delivery Mode
-                      <select className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).deliveryPricingMode} onChange={(e) => patchDraftJobConditions({ deliveryPricingMode: e.target.value as ProjectJobConditions['deliveryPricingMode'], deliveryAutoCalculated: false })}>
-                        <option value="included">Included</option>
-                        <option value="flat">Flat</option>
-                        <option value="percent">Percent</option>
-                      </select>
-                    </label>
-                    <label className="text-xs text-slate-600">Delivery $<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).deliveryValue} onChange={(e) => patchDraftJobConditions({ deliveryValue: Number(e.target.value) || 0, deliveryAutoCalculated: false })} /></label>
-                    <label className="text-xs text-slate-600">Delivery Lead Time (business days)<input type="number" min={0} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).deliveryLeadDays} onChange={(e) => patchDraftJobConditions({ deliveryLeadDays: Number(e.target.value) || 0, deliveryAutoCalculated: false })} /></label>
-                    <div className="rounded-2xl bg-slate-50 px-3 py-3 text-xs text-slate-600 ring-1 ring-slate-200">
-                      <p className="font-medium text-slate-900">Delivery recommendation</p>
-                      <p className="mt-1 text-slate-500">
-                        Auto rule: under 50 mi — no delivery fee; 50–100 mi — $100 flat; over 100 mi — travel/delivery priced separately (not in estimate total).
-                      </p>
-                      <p className="mt-1">
-                        {(() => {
-                          const jc = normalizeProjectJobConditions(projectDraft.jobConditions);
-                          if (!jc.deliveryRequired) {
-                            return 'Import or add the job address to auto-fill delivery from distance.';
-                          }
-                          if (jc.deliveryQuotedSeparately) {
-                            return `${formatNumberSafe(jc.travelDistanceMiles || 0, 1)} miles: delivery and travel will be quoted separately — not included in the estimate total. Lead time ${jc.deliveryLeadDays} business day${jc.deliveryLeadDays === 1 ? '' : 's'}.`;
-                          }
-                          return `${formatNumberSafe(jc.travelDistanceMiles || 0, 1)} miles → ${jc.deliveryLeadDays} business day${jc.deliveryLeadDays === 1 ? '' : 's'} lead; ${jc.deliveryPricingMode === 'flat' ? `${formatCurrencySafe(jc.deliveryValue)} flat` : jc.deliveryPricingMode}.`;
-                        })()}
-                      </p>
-                    </div>
-                  </div>
-
-                  {normalizeProjectJobConditions(projectDraft.jobConditions).phasedWork ? (
-                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                      <label className="text-xs text-slate-600">Phase Count<input type="number" min={2} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).phasedWorkPhases} onChange={(e) => {
-                        const phaseCount = Math.max(2, Number(e.target.value) || 2);
-                        patchDraftJobConditions({ phasedWorkPhases: phaseCount, phasedWorkMultiplier: recommendedPhasedWorkMultiplier(phaseCount) });
-                      }} /></label>
-                      <label className="text-xs text-slate-600">Phased Labor Multiplier<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).phasedWorkMultiplier} onChange={(e) => patchDraftJobConditions({ phasedWorkMultiplier: Number(e.target.value) || 0 })} /></label>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Notes</p>
-                  <div className="mt-3 space-y-3">
-                    <label className="text-xs text-slate-600">Proposal Notes
-                      <textarea rows={4} className="ui-input mt-1 min-h-[112px] py-2" value={projectDraft.specialNotes || ''} onChange={(e) => patchProjectDraft({ specialNotes: e.target.value })} />
-                    </label>
-                    <label className="text-xs text-slate-600">Internal Notes
-                      <textarea rows={4} className="ui-input mt-1 min-h-[112px] py-2" value={projectDraft.notes || ''} onChange={(e) => patchProjectDraft({ notes: e.target.value })} />
-                    </label>
-                  </div>
-                </div>
+                      <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Notes</p>
+                        <h3 className="mt-1 text-sm font-semibold text-slate-900">Proposal &amp; internal</h3>
+                        <div className="mt-3 space-y-3">
+                          <label className="text-[11px] font-medium text-slate-700">
+                            Proposal notes
+                            <textarea rows={4} className="ui-input mt-1 min-h-[100px] py-2" value={projectDraft.specialNotes || ''} onChange={(e) => patchProjectDraft({ specialNotes: e.target.value })} />
+                          </label>
+                          <label className="text-[11px] font-medium text-slate-700">
+                            Internal notes
+                            <textarea rows={4} className="ui-input mt-1 min-h-[100px] py-2" value={projectDraft.notes || ''} onChange={(e) => patchProjectDraft({ notes: e.target.value })} />
+                          </label>
+                        </div>
+                      </div>
                     </>
                   ) : null}
                 </div>
@@ -2798,7 +3166,7 @@ export function ProjectIntake() {
               <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
                 <button type="button" onClick={() => setStep(step === 3 ? 2 : 3)} className="ui-btn-secondary">Back</button>
                 <button type="button" onClick={() => (step === 3 ? proceedToPricingSetup() : proceedToReviewItems())} className="ui-btn-primary h-9 px-4">
-                  {step === 3 ? 'Continue to Pricing' : 'Continue to Review'}
+                  {step === 3 ? 'Continue to estimate setup' : 'Continue to review'}
                 </button>
               </div>
             </div>
@@ -2938,10 +3306,11 @@ export function ProjectIntake() {
               ) : null}
             </div>
           ) : null}
-          <div className="grid grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)] gap-4">
-            <div className="ui-surface p-4">
-              <h3 className="text-sm font-semibold text-slate-800 mb-3">Rooms / Areas</h3>
-              <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+          <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+            <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Step 5</p>
+              <h3 className="mt-1 text-sm font-semibold text-slate-900">Rooms / areas</h3>
+              <div className="mt-3 space-y-2 max-h-[55vh] overflow-y-auto pr-1">
                 {roomSuggestions.map((room) => (
                   <div key={room.id} className="flex items-center gap-2">
                     <input type="checkbox" checked={room.include} onChange={(e) => setRoomSuggestions((prev) => prev.map((item) => item.id === room.id ? { ...item, include: e.target.checked } : item))} />
@@ -2952,9 +3321,9 @@ export function ProjectIntake() {
               </div>
             </div>
 
-            <div className="ui-surface p-4 space-y-4">
+            <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm space-y-4">
               <div>
-                <h3 className="text-sm font-semibold text-slate-800 mb-2">Matched Items</h3>
+                <h3 className="text-sm font-semibold text-slate-900">Matched items</h3>
                 <p className="text-xs text-slate-500 mb-3">These items were auto-linked to your catalog first. Suggested matches are prefilled but labeled for quick review.</p>
                 <div className="space-y-2 max-h-[36vh] overflow-y-auto pr-1">
                   {matchedSuggestions.map((line) => (
@@ -3113,7 +3482,7 @@ export function ProjectIntake() {
             </div>
           </div>
 
-          <div className="ui-surface p-4 sticky bottom-3 z-10 flex items-center justify-between gap-3">
+          <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-3 rounded-2xl border border-slate-200/70 bg-white p-4 shadow-md sticky bottom-3 z-10">
             <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
               <label className="flex items-center gap-2">
                 <input type="checkbox" checked={createConfirmedOnly} onChange={(e) => setCreateConfirmedOnly(e.target.checked)} />

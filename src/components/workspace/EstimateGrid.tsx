@@ -91,7 +91,7 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
   function modifierLine(names: string[]) {
     if (!names.length) return null;
     return (
-      <div className="mt-0.5 text-[10px] font-medium leading-snug text-indigo-800/90">
+      <div className="mt-px text-[10px] font-medium leading-snug text-indigo-800/90">
         {names.join(' · ')}
       </div>
     );
@@ -256,45 +256,45 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
             <tr>
               {isTakeoffView ? (
                 <>
-                  <th className="px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Item</th>
-                  <th className="px-2 py-1.5 w-[4.5rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                  <th className="px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Item</th>
+                  <th className="px-2 py-1 w-[4.5rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Qty</th>
                   <th
-                    className="px-2 py-1.5 w-[6.5rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600"
+                    className="px-2 py-1 w-[6.5rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600"
                     title="Catalog install minutes × qty (before project schedule multipliers)"
                   >
                     Install
                   </th>
-                  <th className="px-2 py-1.5 w-24 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Actions</th>
+                  <th className="px-2 py-1 w-24 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Actions</th>
                 </>
               ) : (
                 <>
-                  <th className="px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 min-w-0">Item</th>
-                  <th className="px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 w-[6.5rem]">Room</th>
-                  <th className="px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 w-28">Category</th>
-                  <th className="px-2.5 py-2 w-14 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Qty</th>
-                  <th className="px-2.5 py-2 w-12 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Unit</th>
+                  <th className="px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 min-w-0">Item</th>
+                  <th className="px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 w-[6.5rem]">Room</th>
+                  <th className="px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 w-28">Category</th>
+                  <th className="px-2 py-1 w-14 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                  <th className="px-2 py-1 w-12 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Unit</th>
                 </>
               )}
               {!isTakeoffView && showLabor ? (
-                <th className="px-2.5 py-2 w-[7rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600" title="Labor minutes × qty per line (before project schedule multipliers; see Labor time card for adjusted totals)">
+                <th className="px-2 py-1 w-[7rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600" title="Labor minutes × qty per line (before project schedule multipliers; see Labor time card for adjusted totals)">
                   Install time
                 </th>
               ) : null}
               {!isTakeoffView && showLabor ? (
-                <th className="w-24 border-l border-slate-200/80 px-2.5 py-2 pl-3 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                <th className="w-24 border-l border-slate-200/80 px-2 py-1 pl-2.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">
                   Labor $
                 </th>
               ) : null}
-              {!isTakeoffView && showMaterial ? <th className="px-2.5 py-2 w-[4.5rem] text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Material</th> : null}
-              {!isTakeoffView ? <th className="px-2.5 py-2 w-[4.5rem] text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Unit sell</th> : null}
-              {!isTakeoffView ? <th className="px-2.5 py-2 w-[4.5rem] text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Total</th> : null}
-              {!isTakeoffView ? <th className="px-2.5 py-2 w-24 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Actions</th> : null}
+              {!isTakeoffView && showMaterial ? <th className="px-2 py-1 w-[4.5rem] text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Material</th> : null}
+              {!isTakeoffView ? <th className="px-2 py-1 w-[4.5rem] text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Unit sell</th> : null}
+              {!isTakeoffView ? <th className="px-2 py-1 w-[4.5rem] text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Total</th> : null}
+              {!isTakeoffView ? <th className="px-2 py-1 w-24 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Actions</th> : null}
             </tr>
           </thead>
           <tbody>
             {displayRows.length === 0 ? (
               <tr>
-                <td colSpan={columnCount} className="px-3 py-8 text-center text-sm text-slate-500">No lines yet. Add from catalog, bundle, import, or manual entry.</td>
+                <td colSpan={columnCount} className="px-3 py-6 text-center text-sm text-slate-500">No lines yet. Add from catalog, bundle, import, or manual entry.</td>
               </tr>
             ) : (
               displayRows.map((row, index) => {
@@ -317,7 +317,7 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                   <React.Fragment key={row.id}>
                     {isBundleStart && row.bundleId ? (
                       <tr className="border-b border-violet-100 bg-violet-50/60">
-                        <td colSpan={columnCount} className={isTakeoffView ? 'px-2 py-1.5' : 'px-2.5 py-2'}>
+                        <td colSpan={columnCount} className="px-2 py-1">
                           <button
                             className={`inline-flex items-center gap-1.5 rounded-lg bg-white font-medium text-violet-800 shadow-sm ring-1 ring-violet-200/70 ${isTakeoffView ? 'px-2 py-1 text-xs' : 'gap-2 px-3 py-1.5 text-sm'}`}
                             onClick={() => {
@@ -348,7 +348,7 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                     >
                       {isTakeoffView ? (
                         <>
-                          <td className="px-2 py-1.5 align-top min-w-0">
+                          <td className="px-2 py-1 align-top min-w-0">
                             <div
                               className="text-xs font-semibold leading-snug text-slate-900"
                               title={[
@@ -364,29 +364,29 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                             >
                               {disp.title || row.description || '—'}
                             </div>
-                            {disp.subtitle ? <div className="mt-0.5 text-[10px] text-slate-500">{disp.subtitle}</div> : null}
+                            {disp.subtitle ? <div className="mt-px text-[10px] text-slate-500">{disp.subtitle}</div> : null}
                             {row.category ? (
-                              <div className="mt-0.5 text-[10px] text-slate-500">{row.category}</div>
+                              <div className="mt-px text-[10px] text-slate-500">{row.category}</div>
                             ) : null}
                             {organizeBy === 'item' && (row.roomHint || row.roomLabel) ? (
-                              <div className="mt-0.5 text-[10px] text-slate-500">{row.roomHint || row.roomLabel}</div>
+                              <div className="mt-px text-[10px] text-slate-500">{row.roomHint || row.roomLabel}</div>
                             ) : null}
                           </td>
-                          <td className="px-2 py-1.5 align-top text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                          <td className="px-2 py-1 align-top text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap">
                             <span>{formatNumberSafe(row.qty, row.qty % 1 === 0 ? 0 : 2)}</span>
                             <span className="ml-1 text-[11px] font-medium text-slate-600">{row.unit}</span>
                           </td>
-                          <td className="px-2 py-1.5 align-top text-xs tabular-nums text-slate-800">
+                          <td className="px-2 py-1 align-top text-xs tabular-nums text-slate-800">
                             <div className="font-medium leading-tight" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
                               {formatLaborDurationMinutes(row.laborMinutesExtended)}
                             </div>
                             {row.qty !== 1 ? (
-                              <div className="mt-0.5 text-[10px] font-normal text-slate-500">
+                              <div className="mt-px text-[10px] font-normal leading-tight text-slate-500">
                                 {formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)}/u
                               </div>
                             ) : null}
                           </td>
-                          <td className="px-2 py-1.5 text-right" onClick={stopRowEvent}>
+                          <td className="px-2 py-1 text-right" onClick={stopRowEvent}>
                             <div className="flex items-center justify-end gap-1">
                               <button type="button" onClick={() => onSelectLine(row.lineId)} className={`text-[11px] font-semibold px-2 py-1 rounded-md border transition ${selected ? 'border-teal-400 bg-teal-50 text-teal-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>{selected ? <span className="inline-flex items-center gap-0.5"><Sparkles className="h-3 w-3" /> Open</span> : organizeBy === 'item' ? 'View' : 'Edit'}</button>
                               {row.canDelete ? <button type="button" onClick={(e) => { e.stopPropagation(); onDeleteLine(row.lineId); }} className="text-[11px] font-semibold px-1.5 py-1 rounded-md border border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700" aria-label="Delete line">×</button> : null}
@@ -395,63 +395,63 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                         </>
                       ) : (
                         <>
-                      <td className="px-2.5 py-2 align-top min-w-0">
+                      <td className="px-2 py-1 align-top min-w-0">
                         <div
-                          className="line-clamp-2 text-sm font-semibold text-slate-900"
+                          className="line-clamp-2 text-sm font-semibold leading-tight text-slate-900"
                           title={[row.description, row.modifierNames?.length ? row.modifierNames.join(' · ') : '', row.sku ? `SKU ${row.sku}` : '', row.notes || ''].filter(Boolean).join(' · ')}
                         >
                           {disp.title || row.description || '—'}
                         </div>
-                        {disp.subtitle ? <div className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{disp.subtitle}</div> : null}
+                        {disp.subtitle ? <div className="mt-px line-clamp-2 text-[11px] text-slate-500">{disp.subtitle}</div> : null}
                         {modifierLine(row.modifierNames)}
                       </td>
-                      <td className="px-2.5 py-2 align-top">
+                      <td className="px-2 py-1 align-top">
                         <div className="truncate text-xs font-medium text-slate-800" title={row.roomHint || row.roomLabel}>
                           {row.roomLabel}
                         </div>
-                        {row.roomHint && row.roomHint !== row.roomLabel ? <div className="mt-0.5 truncate text-[10px] text-slate-500">{row.roomHint}</div> : null}
+                        {row.roomHint && row.roomHint !== row.roomLabel ? <div className="mt-px truncate text-[10px] text-slate-500">{row.roomHint}</div> : null}
                       </td>
-                      <td className="px-2.5 py-2 align-top">
+                      <td className="px-2 py-1 align-top">
                         <div className="truncate text-xs text-slate-600" title={row.category || 'Uncategorized'}>
                           {row.category || 'Uncategorized'}
                         </div>
                       </td>
-                      <td className="px-2.5 py-2 align-top text-xs font-semibold text-slate-800 tabular-nums">
+                      <td className="px-2 py-1 align-top text-xs font-semibold text-slate-800 tabular-nums">
                         {row.qty}
                       </td>
-                      <td className="px-2.5 py-2 align-top text-xs font-medium text-slate-700">
+                      <td className="px-2 py-1 align-top text-xs font-medium text-slate-700">
                         {row.unit}
                       </td>
                       {!isTakeoffView && showLabor ? (
-                        <td className="px-2.5 py-2 align-top text-xs tabular-nums text-slate-800">
-                          <div className="font-medium leading-snug" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
+                        <td className="px-2 py-1 align-top text-xs tabular-nums text-slate-800">
+                          <div className="font-medium leading-tight" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
                             {formatLaborDurationMinutes(row.laborMinutesExtended)}
                           </div>
                           {row.qty !== 1 ? (
-                            <div className="mt-0.5 text-[10px] font-normal text-slate-500">
+                            <div className="mt-px text-[10px] font-normal leading-tight text-slate-500">
                               {formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)} min/u
                             </div>
                           ) : null}
                         </td>
                       ) : null}
                       {!isTakeoffView && showLabor ? (
-                        <td className="border-l border-slate-200/80 px-2.5 py-2 pl-3 align-top text-right text-xs font-medium text-slate-800 tabular-nums">
+                        <td className="border-l border-slate-200/80 px-2 py-1 pl-2.5 align-top text-right text-xs font-medium text-slate-800 tabular-nums">
                           <div>{formatCurrencySafe(effectiveLaborCost)}</div>
-                          {laborMultiplier !== 1 ? <div className="text-[10px] text-slate-500">base {formatCurrencySafe(row.laborCost)}</div> : null}
+                          {laborMultiplier !== 1 ? <div className="mt-px text-[10px] leading-tight text-slate-500">base {formatCurrencySafe(row.laborCost)}</div> : null}
                         </td>
                       ) : null}
                       {!isTakeoffView && showMaterial ? (
-                        <td className="px-2.5 py-2 align-top text-right text-xs font-medium text-slate-800 tabular-nums">
+                        <td className="px-2 py-1 align-top text-right text-xs font-medium text-slate-800 tabular-nums">
                           {formatCurrencySafe(row.materialCost)}
                         </td>
                       ) : null}
                       {!isTakeoffView ? (
-                        <td className="px-2.5 py-2 align-top text-right text-xs font-medium text-slate-800 tabular-nums">
+                        <td className="px-2 py-1 align-top text-right text-xs font-medium text-slate-800 tabular-nums">
                           {formatCurrencySafe(row.unitSell)}
                         </td>
                       ) : null}
-                      {!isTakeoffView ? <td className="px-2.5 py-2 align-top text-right text-sm font-semibold text-slate-900 tabular-nums">{formatCurrencySafe(row.lineTotal)}</td> : null}
-                      <td className="px-2.5 py-2 text-right" onClick={stopRowEvent}>
+                      {!isTakeoffView ? <td className="px-2 py-1 align-top text-right text-sm font-semibold text-slate-900 tabular-nums">{formatCurrencySafe(row.lineTotal)}</td> : null}
+                      <td className="px-2 py-1 text-right" onClick={stopRowEvent}>
                         <div className="flex items-center justify-end gap-1">
                           <button type="button" onClick={() => onSelectLine(row.lineId)} className={`text-[11px] font-semibold px-2 py-1 rounded-md border transition ${selected ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>{selected ? <span className="inline-flex items-center gap-0.5"><Sparkles className="h-3 w-3" /> Open</span> : organizeBy === 'item' ? 'Inspect' : 'Edit'}</button>
                           {row.canDelete ? <button type="button" onClick={(e) => { e.stopPropagation(); onDeleteLine(row.lineId); }} className="text-[11px] font-semibold px-1.5 py-1 rounded-md border border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700" aria-label="Delete line">×</button> : null}
