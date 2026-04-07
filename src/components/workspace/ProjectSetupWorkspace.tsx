@@ -63,7 +63,7 @@ export interface ProjectSetupWorkspaceProps {
   selectedScopeCategories: string[];
   toggleScopeCategory: (category: string) => void;
   rooms: RoomRecord[];
-  setActiveTab: (tab: 'overview' | 'setup' | 'rooms' | 'takeoff' | 'estimate' | 'files' | 'proposal') => void;
+  setActiveTab: (tab: 'overview' | 'setup' | 'takeoff' | 'estimate' | 'files' | 'proposal') => void;
   summary: SummaryLite | null;
   settings: SettingsRecord | null;
   distanceError: string | null;
@@ -373,8 +373,8 @@ export function ProjectSetupWorkspace({
               <p className="text-sm font-medium text-slate-900">Rooms &amp; areas</p>
               <p className="text-xs text-slate-500">{rooms.length} room(s) — organize takeoff lines.</p>
             </div>
-            <button type="button" onClick={() => setActiveTab('rooms')} className="ui-btn-secondary h-9 px-4 text-xs font-semibold">
-              Manage rooms
+            <button type="button" onClick={() => setActiveTab('takeoff')} className="ui-btn-secondary h-9 px-4 text-xs font-semibold">
+              Rooms &amp; takeoff
             </button>
           </div>
         </div>

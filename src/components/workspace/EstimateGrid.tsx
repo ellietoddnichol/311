@@ -12,6 +12,8 @@ interface Props {
   pricingMode: 'material_only' | 'labor_only' | 'labor_and_material';
   viewMode: 'takeoff' | 'estimate';
   organizeBy: 'room' | 'item';
+  /** In takeoff view, show each line’s room under the item (e.g. when listing all rooms). */
+  takeoffShowRoom?: boolean;
   laborMultiplier?: number;
   selectedLineId: string | null;
   onSelectLine: (lineId: string) => void;
@@ -58,7 +60,21 @@ function normalizeGroupKey(line: TakeoffLineRecord): string {
     .join('|');
 }
 
-export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingMode, viewMode, organizeBy, laborMultiplier = 1, selectedLineId, onSelectLine, onPersistLine, onDeleteLine }: Props) {
+export function EstimateGrid({
+  lines,
+  rooms,
+  categories,
+  roomNamesById,
+  pricingMode,
+  viewMode,
+  organizeBy,
+  takeoffShowRoom = false,
+  laborMultiplier = 1,
+  selectedLineId,
+  onSelectLine,
+  onPersistLine,
+  onDeleteLine,
+}: Props) {
   const [collapsedBundles, setCollapsedBundles] = useState<Record<string, boolean>>({});
   const showMaterial = pricingMode !== 'labor_only';
   const showLabor = pricingMode !== 'material_only';
@@ -368,8 +384,8 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                             {row.category ? (
                               <div className="mt-px text-[10px] text-slate-500">{row.category}</div>
                             ) : null}
-                            {organizeBy === 'item' && (row.roomHint || row.roomLabel) ? (
-                              <div className="mt-px text-[10px] text-slate-500">{row.roomHint || row.roomLabel}</div>
+                            {((organizeBy === 'item' && (row.roomHint || row.roomLabel)) || (organizeBy === 'room' && takeoffShowRoom && row.roomLabel)) ? (
+                              <div className="mt-px text-[10px] font-medium text-teal-800/90">{row.roomHint || row.roomLabel}</div>
                             ) : null}
                           </td>
                           <td className="px-2 py-1 align-top text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap">

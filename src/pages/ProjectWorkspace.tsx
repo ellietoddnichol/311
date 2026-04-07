@@ -87,12 +87,20 @@ interface RoomCreationDraft {
   starterUnit: string;
 }
 
-type WorkspaceTab = 'overview' | 'setup' | 'rooms' | 'takeoff' | 'estimate' | 'files' | 'proposal';
+type WorkspaceTab = 'overview' | 'setup' | 'takeoff' | 'estimate' | 'files' | 'proposal';
 
-const WORKSPACE_TABS: WorkspaceTab[] = ['overview', 'setup', 'rooms', 'takeoff', 'estimate', 'files', 'proposal'];
+const WORKSPACE_TABS: WorkspaceTab[] = ['overview', 'setup', 'takeoff', 'estimate', 'files', 'proposal'];
+
+/** URL/searchParam value for “show every room’s lines” in takeoff (not a real room id). */
+const TAKEOFF_ALL_ROOMS = '__all__';
 
 function isWorkspaceTab(value: string | null): value is WorkspaceTab {
   return !!value && WORKSPACE_TABS.includes(value as WorkspaceTab);
+}
+
+function tabFromSearchParam(value: string | null): WorkspaceTab {
+  if (value === 'rooms') return 'takeoff';
+  return isWorkspaceTab(value) ? value : 'estimate';
 }
 
 /** Canonical JSON for autosave dirty checks — avoids missed saves when key order or nested shapes differ. */
@@ -132,10 +140,7 @@ export function ProjectWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>(() => {
-    const requestedTab = searchParams.get('tab');
-    return isWorkspaceTab(requestedTab) ? requestedTab : 'estimate';
-  });
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(() => tabFromSearchParam(searchParams.get('tab')));
 
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [rooms, setRooms] = useState<RoomRecord[]>([]);
@@ -170,12 +175,13 @@ export function ProjectWorkspace() {
   projectRef.current = project;
 
   const [activeRoomId, setActiveRoomId] = useState('');
+  /** `TAKEOFF_ALL_ROOMS` = combined view; otherwise a real room id (matches sidebar selection when drilling into one room). */
+  const [takeoffRoomFilter, setTakeoffRoomFilter] = useState<string>(TAKEOFF_ALL_ROOMS);
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
 
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [bundleModalOpen, setBundleModalOpen] = useState(false);
   const [modifiersModalOpen, setModifiersModalOpen] = useState(false);
-  const [takeoffRoomsModalOpen, setTakeoffRoomsModalOpen] = useState(false);
   const [roomCreateModalOpen, setRoomCreateModalOpen] = useState(false);
   const [roomCreationDraft, setRoomCreationDraft] = useState<RoomCreationDraft>(DEFAULT_ROOM_CREATION_DRAFT);
   const [creatingRoom, setCreatingRoom] = useState(false);
@@ -308,6 +314,8 @@ export function ProjectWorkspace() {
       setProjectFiles(filesData);
 
       if (roomData[0]) setActiveRoomId(roomData[0].id);
+      else setActiveRoomId('');
+      setTakeoffRoomFilter(TAKEOFF_ALL_ROOMS);
     } catch (error) {
       console.error('Failed to load project workspace', error);
       navigate('/');
@@ -363,6 +371,23 @@ export function ProjectWorkspace() {
     return byRoom;
   }, [lines]);
 
+  useEffect(() => {
+    if (!rooms.length) {
+      if (activeRoomId) setActiveRoomId('');
+      return;
+    }
+    const exists = rooms.some((r) => r.id === activeRoomId);
+    if (!activeRoomId || !exists) {
+      setActiveRoomId(rooms[0].id);
+    }
+  }, [rooms, activeRoomId]);
+
+  useEffect(() => {
+    if (takeoffRoomFilter === TAKEOFF_ALL_ROOMS) return;
+    const stillThere = rooms.some((r) => r.id === takeoffRoomFilter);
+    if (!stillThere) setTakeoffRoomFilter(TAKEOFF_ALL_ROOMS);
+  }, [rooms, takeoffRoomFilter]);
+
   const activeRoomQtyTotal = useMemo(
     () => activeRoomLines.reduce((sum, line) => sum + (Number(line.qty) || 0), 0),
     [activeRoomLines]
@@ -402,6 +427,39 @@ export function ProjectWorkspace() {
     });
     return out;
   }, [rooms]);
+
+  const takeoffGridLines = useMemo(() => {
+    const filtered =
+      takeoffRoomFilter === TAKEOFF_ALL_ROOMS
+        ? [...lines]
+        : lines.filter((line) => line.roomId === takeoffRoomFilter);
+    if (takeoffRoomFilter === TAKEOFF_ALL_ROOMS) {
+      filtered.sort((a, b) => {
+        const na = roomNamesById[a.roomId] || '';
+        const nb = roomNamesById[b.roomId] || '';
+        const byRoom = na.localeCompare(nb, undefined, { sensitivity: 'base' });
+        if (byRoom !== 0) return byRoom;
+        return (a.description || '').localeCompare(b.description || '', undefined, { sensitivity: 'base' });
+      });
+    }
+    return filtered;
+  }, [lines, takeoffRoomFilter, roomNamesById]);
+
+  const takeoffViewStats = useMemo(() => {
+    return takeoffGridLines.reduce(
+      (acc, line) => ({
+        lineCount: acc.lineCount + 1,
+        totalQty: acc.totalQty + (Number(line.qty) || 0),
+        laborMinutes: acc.laborMinutes + Number(line.laborMinutes || 0) * (Number(line.qty) || 0),
+      }),
+      { lineCount: 0, totalQty: 0, laborMinutes: 0 }
+    );
+  }, [takeoffGridLines]);
+
+  function selectWorkspaceRoom(roomId: string) {
+    setActiveRoomId(roomId);
+    setTakeoffRoomFilter(roomId);
+  }
 
   const categories = useMemo(() => {
     const all = new Set<string>();
@@ -751,7 +809,7 @@ export function ProjectWorkspace() {
     try {
       const room = await api.createV1Room({ projectId: project.id, roomName: roomCreationDraft.roomName.trim() });
       setRooms((prev) => [...prev, room]);
-      setActiveRoomId(room.id);
+      selectWorkspaceRoom(room.id);
 
       if (roomCreationDraft.addStarterLine && roomCreationDraft.starterDescription.trim()) {
         await api.createV1TakeoffLine({
@@ -786,6 +844,7 @@ export function ProjectWorkspace() {
     if (!project) return;
     const duplicated = await api.duplicateV1Room(room.id);
     setRooms((prev) => [...prev, duplicated]);
+    selectWorkspaceRoom(duplicated.id);
     await refreshTakeoff(project.id);
   }
 
@@ -1105,14 +1164,13 @@ export function ProjectWorkspace() {
         <div className="ui-surface flex items-center gap-1 overflow-x-auto whitespace-nowrap p-1.5 shadow-sm">
           <button type="button" onClick={() => setActiveTab('overview')} className={`ui-wtab ${activeTab === 'overview' ? 'ui-wtab-blue' : 'ui-wtab-idle'}`}>Overview</button>
           <button type="button" onClick={() => setActiveTab('setup')} className={`ui-wtab ${activeTab === 'setup' ? 'ui-wtab-blue' : 'ui-wtab-idle'}`}>Project Setup</button>
-          <button type="button" onClick={() => setActiveTab('rooms')} className={`ui-wtab ${activeTab === 'rooms' ? 'ui-wtab-blue' : 'ui-wtab-idle'}`}>Rooms</button>
           <button
             type="button"
-            title="Count quantities, match catalog, and build the scope list — pricing rollups are on Estimate."
+            title="Manage rooms and line-item takeoff in one place. Use Estimate for dollars and rollups."
             onClick={() => setActiveTab('takeoff')}
             className={`ui-wtab ${activeTab === 'takeoff' ? 'ui-wtab-teal' : 'ui-wtab-idle'}`}
           >
-            Takeoff
+            Rooms &amp; takeoff
           </button>
           <button
             type="button"
@@ -1384,9 +1442,9 @@ export function ProjectWorkspace() {
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Rooms</p>
-                    <p className="mt-1 text-xs text-slate-600">Manage areas on the Rooms tab.</p>
+                    <p className="mt-1 text-xs text-slate-600">Organize scope by area on Rooms &amp; takeoff.</p>
                   </div>
-                  <button type="button" onClick={() => setActiveTab('rooms')} className="ui-btn-secondary h-8 shrink-0 px-2.5 text-[11px] font-semibold">
+                  <button type="button" onClick={() => setActiveTab('takeoff')} className="ui-btn-secondary h-8 shrink-0 px-2.5 text-[11px] font-semibold">
                     Open
                   </button>
                 </div>
@@ -1405,35 +1463,43 @@ export function ProjectWorkspace() {
           </div>
         )}
 
-        {activeTab === 'rooms' && (
-          <div className="grid grid-cols-[320px_1fr] gap-4">
+        {activeTab === 'takeoff' && (
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,300px)_1fr]">
             <RoomManager
               rooms={rooms}
               activeRoomId={activeRoomId}
-              onSelectRoom={setActiveRoomId}
+              onSelectRoom={selectWorkspaceRoom}
               onOpenCreateRoom={openCreateRoomModal}
               onRenameRoom={(room) => void renameRoom(room)}
               onDuplicateRoom={(room) => void duplicateRoom(room)}
               onDeleteRoom={(room) => void deleteRoom(room)}
             />
-            <div className="bg-white border border-slate-200 rounded-lg p-4">
-              <h3 className="text-sm font-semibold text-slate-800 mb-2">Room Summary</h3>
-              <p className="text-sm text-slate-600">Select a room to review lines and totals.</p>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'takeoff' && (
-          <div className="space-y-2 min-w-0">
+            <div className="min-w-0 space-y-2">
               <div className="rounded-lg border border-teal-200/70 bg-white px-2.5 py-2 shadow-sm ring-1 ring-teal-100/60">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="text-xs font-semibold text-slate-900">Takeoff</span>
-                    <span className="text-[11px] text-slate-500">Qty here · <button type="button" onClick={() => setActiveTab('estimate')} className="font-medium text-teal-800 underline decoration-teal-200 underline-offset-2 hover:text-teal-950">Estimate</button> for $</span>
-                    <span className="hidden h-3 w-px bg-slate-200 sm:inline" aria-hidden />
-                    <span className="rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-700 ring-1 ring-slate-200/80">{activeRoomLines.length} ln</span>
-                    <span className="rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-700 ring-1 ring-slate-200/80">{formatNumberSafe(activeRoomQtyTotal, 1)} qty</span>
-                    <span className="rounded-md bg-teal-50/80 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-teal-900 ring-1 ring-teal-200/70">{formatLaborDurationMinutes(activeRoomLaborMinutes)}</span>
+                    <span className="text-xs font-semibold text-slate-900">Rooms &amp; takeoff</span>
+                    <span className="text-[11px] text-slate-500">
+                      Qty here ·{' '}
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('estimate')}
+                        className="font-medium text-teal-800 underline decoration-teal-200 underline-offset-2 hover:text-teal-950"
+                      >
+                        Estimate
+                      </button>{' '}
+                      for $
+                    </span>
+                    <span className="hidden h-3 w-px bg-slate-200 lg:inline" aria-hidden />
+                    <span className="rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-700 ring-1 ring-slate-200/80">
+                      {takeoffViewStats.lineCount} ln
+                    </span>
+                    <span className="rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-700 ring-1 ring-slate-200/80">
+                      {formatNumberSafe(takeoffViewStats.totalQty, 1)} qty
+                    </span>
+                    <span className="rounded-md bg-teal-50/80 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-teal-900 ring-1 ring-teal-200/70">
+                      {formatLaborDurationMinutes(takeoffViewStats.laborMinutes)}
+                    </span>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                     <button
@@ -1443,7 +1509,12 @@ export function ProjectWorkspace() {
                     >
                       Estimate <ArrowRight className="h-3 w-3" />
                     </button>
-                    <button onClick={() => void addManualLine()} className="inline-flex h-8 items-center gap-1 rounded-md bg-teal-700 px-2.5 text-[11px] font-semibold text-white hover:bg-teal-800">
+                    <button
+                      type="button"
+                      onClick={() => void addManualLine()}
+                      disabled={!activeRoomId}
+                      className="inline-flex h-8 items-center gap-1 rounded-md bg-teal-700 px-2.5 text-[11px] font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
                       <Sparkles className="h-3 w-3" /> Add line
                     </button>
                   </div>
@@ -1451,50 +1522,64 @@ export function ProjectWorkspace() {
               </div>
 
               <div className="space-y-2 rounded-lg border border-teal-200/60 bg-white p-2 shadow-sm">
-                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 overflow-x-auto pb-0.5">
-                    {rooms.map((room) => {
-                      const active = room.id === activeRoomId;
-                      const metric = roomMetrics[room.id] || { count: 0, subtotal: 0, totalQty: 0, laborMinutes: 0 };
-                      return (
-                        <button
-                          key={room.id}
-                          onClick={() => setActiveRoomId(room.id)}
-                          title={`${metric.count} lines · ${formatNumberSafe(metric.totalQty, 1)} qty`}
-                          className={`shrink-0 rounded-md px-2.5 py-1.5 text-left transition-all ${active ? 'bg-teal-900 text-white ring-1 ring-teal-800' : 'bg-slate-50 text-slate-800 ring-1 ring-slate-200/90 hover:bg-teal-50/50'}`}
-                        >
-                          <div className="min-w-[120px] max-w-[200px]">
-                            <div className={`truncate text-[11px] font-semibold leading-tight ${active ? 'text-white' : 'text-slate-900'}`}>{room.roomName}</div>
-                            <div className={`mt-0.5 flex items-center justify-between gap-2 text-[10px] ${active ? 'text-teal-100' : 'text-slate-600'}`}>
-                              <span>{metric.count} ln</span>
-                              <span className="tabular-nums font-medium">{formatNumberSafe(metric.totalQty, 1)} q</span>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                  <label className="block min-w-0 flex-1 text-[11px] font-medium text-slate-700">
+                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">View</span>
+                    <select
+                      className="ui-input h-9 w-full max-w-md text-sm font-medium text-slate-900"
+                      value={takeoffRoomFilter}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === TAKEOFF_ALL_ROOMS) setTakeoffRoomFilter(TAKEOFF_ALL_ROOMS);
+                        else selectWorkspaceRoom(v);
+                      }}
+                    >
+                      <option value={TAKEOFF_ALL_ROOMS}>
+                        All rooms ({lines.length} line{lines.length === 1 ? '' : 's'})
+                      </option>
+                      {rooms.map((room) => {
+                        const metric = roomMetrics[room.id] || { count: 0, subtotal: 0, totalQty: 0, laborMinutes: 0 };
+                        return (
+                          <option key={room.id} value={room.id}>
+                            {room.roomName} ({metric.count} ln)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
                   <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                    <button onClick={() => setCatalogOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-md bg-teal-700 px-2.5 text-[11px] font-semibold text-white hover:bg-teal-800">Catalog</button>
-                    <button onClick={() => setBundleModalOpen(true)} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium">Bundles</button>
-                    <button onClick={() => setTakeoffRoomsModalOpen(true)} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium">Rooms</button>
+                    <button type="button" onClick={() => setCatalogOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-md bg-teal-700 px-2.5 text-[11px] font-semibold text-white hover:bg-teal-800">
+                      Catalog
+                    </button>
+                    <button type="button" onClick={() => setBundleModalOpen(true)} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium">
+                      Bundles
+                    </button>
                   </div>
                 </div>
+                {takeoffRoomFilter === TAKEOFF_ALL_ROOMS ? (
+                  <p className="text-[10px] leading-snug text-slate-500">
+                    New lines and bundles go to the room highlighted in the list on the left (
+                    <span className="font-semibold text-slate-700">{roomNamesById[activeRoomId] || 'select a room'}</span>
+                    ).
+                  </p>
+                ) : null}
 
-              <EstimateGrid
-                lines={activeRoomLines}
-                rooms={rooms}
-                categories={categories}
-                roomNamesById={roomNamesById}
-                pricingMode={pricingMode}
-                viewMode="takeoff"
-                organizeBy="room"
-                laborMultiplier={summary?.conditionLaborMultiplier || 1}
-                selectedLineId={selectedLineId}
-                onSelectLine={openLineEditor}
-                onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
-                onDeleteLine={(lineId) => void deleteLine(lineId)}
-              />
+                <EstimateGrid
+                  lines={takeoffGridLines}
+                  rooms={rooms}
+                  categories={categories}
+                  roomNamesById={roomNamesById}
+                  pricingMode={pricingMode}
+                  viewMode="takeoff"
+                  organizeBy="room"
+                  takeoffShowRoom={takeoffRoomFilter === TAKEOFF_ALL_ROOMS}
+                  laborMultiplier={summary?.conditionLaborMultiplier || 1}
+                  selectedLineId={selectedLineId}
+                  onSelectLine={openLineEditor}
+                  onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
+                  onDeleteLine={(lineId) => void deleteLine(lineId)}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -1596,7 +1681,6 @@ export function ProjectWorkspace() {
                     </button>
                     <button onClick={() => setBundleModalOpen(true)} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium">Bundle</button>
                     <button onClick={() => setModifiersModalOpen(true)} disabled={!selectedLine} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium disabled:opacity-50">Edit line</button>
-                    <button onClick={() => setTakeoffRoomsModalOpen(true)} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium">Rooms</button>
                     <button onClick={() => setActiveTab('proposal')} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium inline-flex items-center gap-0.5">Proposal <ArrowRight className="h-3 w-3" /></button>
                 </div>
 
@@ -1615,7 +1699,7 @@ export function ProjectWorkspace() {
                       return (
                         <button
                           key={room.id}
-                          onClick={() => setActiveRoomId(room.id)}
+                          onClick={() => selectWorkspaceRoom(room.id)}
                           title={`${metric.count} lines · ${formatCurrencySafe(metric.subtotal)}`}
                           className={`shrink-0 rounded-lg px-3 py-2 text-left transition-all ${active ? 'bg-slate-900 text-white shadow-md ring-1 ring-slate-900' : 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50'}`}
                         >
@@ -2254,73 +2338,6 @@ export function ProjectWorkspace() {
                   onApplyModifier={(modifierId) => void applyModifier(modifierId)}
                   onRemoveModifier={(lineModifierId) => void removeModifier(lineModifierId)}
                 />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {takeoffRoomsModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 p-2 sm:p-4" onClick={() => setTakeoffRoomsModalOpen(false)}>
-          <div
-            className="mx-auto max-h-[min(90vh,820px)] max-w-4xl rounded-xl bg-white border border-slate-200 shadow-xl flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3 px-3 py-2.5 sm:px-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-slate-900">Manage Rooms</h2>
-                <p className="text-xs text-slate-500 leading-snug mt-0.5">Add or select rooms; grids filter by the active room.</p>
-              </div>
-              <button
-                onClick={() => setTakeoffRoomsModalOpen(false)}
-                className="h-8 shrink-0 px-2.5 rounded border border-slate-300 text-xs font-medium hover:bg-slate-50"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-3 p-3 sm:p-4 bg-slate-50/70">
-              <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm min-h-0">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">Rooms</p>
-                <h3 className="mt-0.5 text-sm font-semibold text-slate-900">Room list</h3>
-                <div className="mt-2 min-h-0">
-                  <RoomManager
-                    rooms={rooms}
-                    activeRoomId={activeRoomId}
-                    onSelectRoom={setActiveRoomId}
-                    onOpenCreateRoom={openCreateRoomModal}
-                    onRenameRoom={(room) => void renameRoom(room)}
-                    onDuplicateRoom={(room) => void duplicateRoom(room)}
-                    onDeleteRoom={(room) => void deleteRoom(room)}
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm space-y-3">
-                <div>
-                  <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active</p>
-                  <h3 className="mt-0.5 text-sm font-semibold text-slate-900">{roomNamesById[activeRoomId] || 'No room selected'}</h3>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                    <p className="text-[9px] uppercase tracking-[0.08em] text-slate-500">Rooms</p>
-                    <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900">{rooms.length}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                    <p className="text-[9px] uppercase tracking-[0.08em] text-slate-500">Lines</p>
-                    <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900">{activeRoomLines.length}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                    <p className="text-[9px] uppercase tracking-[0.08em] text-slate-500">Total</p>
-                    <p className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900">{formatCurrencySafe(roomSubtotal)}</p>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60 p-2.5">
-                  <p className="text-xs font-medium text-slate-900">Add room</p>
-                  <button onClick={openCreateRoomModal} className="mt-2 ui-btn-secondary h-8 px-2.5 text-[11px] font-semibold">New room…</button>
-                </div>
               </div>
             </div>
           </div>
