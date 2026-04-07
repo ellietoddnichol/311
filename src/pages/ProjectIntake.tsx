@@ -28,6 +28,7 @@ import {
 } from '../shared/utils/catalogCategories';
 import { computeCatalogPeerPricingSuggestion } from '../shared/utils/catalogPeerSuggestions';
 import { catalogItemMatchesQuery } from '../shared/utils/catalogItemSearch';
+import { computeReviewStepOverallConfidence } from '../shared/utils/reviewStepConfidence';
 
 function IntakeFieldBadge({ kind }: { kind: 'required' | 'optional' | 'office' }) {
   if (kind === 'required') {
@@ -1141,9 +1142,9 @@ function createInitialProjectDraft(settings?: SettingsRecord | null): Partial<Pr
     wallSubstrate: 'Drywall',
     laborBurdenPercent: settings?.defaultLaborBurdenPercent ?? 25,
     overheadPercent: settings?.defaultOverheadPercent ?? 15,
-    profitPercent: settings?.defaultProfitPercent ?? 10,
-    laborOverheadPercent: settings?.defaultOverheadPercent ?? 15,
-    laborProfitPercent: settings?.defaultProfitPercent ?? 10,
+    profitPercent: 0,
+    laborOverheadPercent: 0,
+    laborProfitPercent: 0,
     subLaborManagementFeeEnabled: false,
     subLaborManagementFeePercent: 5,
     taxPercent: settings?.defaultTaxPercent ?? 8.25,
@@ -1277,6 +1278,23 @@ export function ProjectIntake() {
     [intakeWarnings, parserReviewSummary]
   );
 
+  const parserReviewDisplayConfidence = useMemo(() => {
+    if (!parserReviewSummary) return null;
+    const baseline = parserReviewSummary.overallConfidence ?? 0;
+    const overall = computeReviewStepOverallConfidence(lineSuggestions, {
+      validationWarnings: parserReviewSummary.validationWarnings,
+      parseWarnings: parserReviewSummary.parseWarnings,
+      intakeWarnings,
+      validationErrors: parserReviewSummary.validationErrors,
+      baseline: parserReviewSummary.overallConfidence,
+    });
+    const hasIncluded = lineSuggestions.some((l) => l.include);
+    return {
+      overall,
+      adjustedFromReview: hasIncluded && Math.abs(overall - baseline) >= 0.02,
+    };
+  }, [parserReviewSummary, lineSuggestions, intakeWarnings]);
+
   const unmatchedSuggestions = useMemo(
     () => lineSuggestions.filter((line) => !line.matched),
     [lineSuggestions]
@@ -1385,17 +1403,19 @@ export function ProjectIntake() {
   }
 
   function matchesIntakeOffice(
-    field: 'burden' | 'overhead' | 'profit' | 'tax' | 'laborOverhead' | 'laborProfit'
+    field: 'burden' | 'materialOandP' | 'profit' | 'tax' | 'laborOverhead' | 'laborProfit'
   ): boolean {
     if (!settingsDefaults) return false;
     if (field === 'burden') return Number(projectDraft.laborBurdenPercent) === settingsDefaults.defaultLaborBurdenPercent;
-    if (field === 'overhead') return Number(projectDraft.overheadPercent) === settingsDefaults.defaultOverheadPercent;
+    if (field === 'materialOandP')
+      return (
+        Number(projectDraft.overheadPercent) === settingsDefaults.defaultOverheadPercent &&
+        Number(projectDraft.profitPercent) === 0
+      );
     if (field === 'profit') return Number(projectDraft.profitPercent) === settingsDefaults.defaultProfitPercent;
     if (field === 'tax') return Number(projectDraft.taxPercent) === settingsDefaults.defaultTaxPercent;
-    if (field === 'laborOverhead')
-      return Number(projectDraft.laborOverheadPercent) === settingsDefaults.defaultOverheadPercent;
-    if (field === 'laborProfit')
-      return Number(projectDraft.laborProfitPercent) === settingsDefaults.defaultProfitPercent;
+    if (field === 'laborOverhead') return Number(projectDraft.laborOverheadPercent) === 0;
+    if (field === 'laborProfit') return Number(projectDraft.laborProfitPercent) === 0;
     return false;
   }
 
@@ -1968,6 +1988,8 @@ export function ProjectIntake() {
           notes: `${line.notes}; matched to catalog ${item.sku}`,
           laborIncluded: line.laborIncluded,
           materialIncluded: line.materialIncluded,
+          matchConfidence: 'strong',
+          matchReason: 'User-selected catalog item',
         };
       })
     );
@@ -3006,15 +3028,21 @@ export function ProjectIntake() {
                               {matchesIntakeOffice('burden') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
                               <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.laborBurdenPercent ?? ''} onChange={(e) => patchProjectDraft({ laborBurdenPercent: Number(e.target.value) || 0 })} />
                             </label>
-                            <label className="text-[11px] font-medium text-slate-700">
-                              Material overhead %
-                              {matchesIntakeOffice('overhead') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
-                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.overheadPercent ?? ''} onChange={(e) => patchProjectDraft({ overheadPercent: Number(e.target.value) || 0 })} />
-                            </label>
-                            <label className="text-[11px] font-medium text-slate-700">
-                              Material profit %
-                              {matchesIntakeOffice('profit') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
-                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.profitPercent ?? ''} onChange={(e) => patchProjectDraft({ profitPercent: Number(e.target.value) || 0 })} />
+                            <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
+                              Material O&amp;P % (after tax on material)
+                              {matchesIntakeOffice('materialOandP') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="ui-input mt-1 h-9 max-w-[8rem]"
+                                value={projectDraft.overheadPercent ?? ''}
+                                onChange={(e) =>
+                                  patchProjectDraft({ overheadPercent: Number(e.target.value) || 0, profitPercent: 0 })
+                                }
+                              />
+                              <span className="mt-1 block max-w-xl text-[10px] font-normal leading-snug text-slate-500">
+                                Single sell-side markup on material. Hourly install rate is already loaded with typical labor margin.
+                              </span>
                             </label>
                             {(projectDraft.pricingMode as PricingMode) !== 'labor_only' ? (
                               <label className="text-[11px] font-medium text-slate-700">
@@ -3045,16 +3073,46 @@ export function ProjectIntake() {
                               <IntakeFieldBadge kind="optional" />
                               <input type="number" min={1} className="ui-input mt-1 h-9" value={draftJob.installerCount} onChange={(e) => patchDraftJobConditions({ installerCount: Number(e.target.value) || 1 })} />
                             </label>
-                            <label className="text-[11px] font-medium text-slate-700">
-                              Labor overhead % (sub)
-                              {matchesIntakeOffice('laborOverhead') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
-                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.laborOverheadPercent ?? ''} onChange={(e) => patchProjectDraft({ laborOverheadPercent: Number(e.target.value) || 0 })} />
-                            </label>
-                            <label className="text-[11px] font-medium text-slate-700">
-                              Labor profit % (sub)
-                              {matchesIntakeOffice('laborProfit') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
-                              <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.laborProfitPercent ?? ''} onChange={(e) => patchProjectDraft({ laborProfitPercent: Number(e.target.value) || 0 })} />
-                            </label>
+                            <details className="group rounded-xl border border-slate-200 bg-white/90 px-3 py-2 md:col-span-2">
+                              <summary className="cursor-pointer list-none text-[11px] font-semibold text-slate-800 [&::-webkit-details-marker]:hidden">
+                                Advanced: stacked material profit, sub labor markup (usually 0%)
+                              </summary>
+                              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                                <label className="text-[11px] font-medium text-slate-700">
+                                  Material profit % (after material O&amp;P)
+                                  {matchesIntakeOffice('profit') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    className="ui-input mt-1 h-9"
+                                    value={projectDraft.profitPercent ?? ''}
+                                    onChange={(e) => patchProjectDraft({ profitPercent: Number(e.target.value) || 0 })}
+                                  />
+                                </label>
+                                <label className="text-[11px] font-medium text-slate-700">
+                                  Labor overhead % (sub)
+                                  {matchesIntakeOffice('laborOverhead') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    className="ui-input mt-1 h-9"
+                                    value={projectDraft.laborOverheadPercent ?? ''}
+                                    onChange={(e) => patchProjectDraft({ laborOverheadPercent: Number(e.target.value) || 0 })}
+                                  />
+                                </label>
+                                <label className="text-[11px] font-medium text-slate-700">
+                                  Labor profit % (sub)
+                                  {matchesIntakeOffice('laborProfit') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    className="ui-input mt-1 h-9"
+                                    value={projectDraft.laborProfitPercent ?? ''}
+                                    onChange={(e) => patchProjectDraft({ laborProfitPercent: Number(e.target.value) || 0 })}
+                                  />
+                                </label>
+                              </div>
+                            </details>
                             <label className="text-[11px] font-medium text-slate-700">
                               Project adder %
                               <input type="number" step="0.01" className="ui-input mt-1 h-9" value={draftJob.estimateAdderPercent} onChange={(e) => patchDraftJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} />
@@ -3170,135 +3228,128 @@ export function ProjectIntake() {
 
           {step === 5 && (
             <>
-          {parserReviewSummary ? (
-            <div className={`rounded-2xl border p-5 shadow-sm ${
-              parserReviewSummary.recommendedAction === 'auto-import'
-                ? 'border-emerald-200 bg-emerald-50/80'
-                : parserReviewSummary.recommendedAction === 'manual-template'
+          {parserReviewSummary && parserReviewDisplayConfidence ? (
+            <div
+              className={`rounded-xl border p-4 shadow-sm ${
+                parserReviewSummary.recommendedAction === 'manual-template'
                   ? 'border-red-200 bg-red-50/80'
-                  : 'border-amber-200 bg-amber-50/80'
-            }`}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">Parser Review</p>
-                  <h3 className="mt-1 text-lg font-semibold text-slate-950">{formatRecommendedAction(parserReviewSummary.recommendedAction)}</h3>
-                  <p className="mt-2 text-sm text-slate-700">
-                    Strategy: <span className="font-medium">{formatParserStrategy(parserReviewSummary.parserStrategy)}</span>
-                    {' · '}
-                    Confidence: <span className="font-medium">{formatConfidencePercent(parserReviewSummary.overallConfidence)}</span>
-                    {' · '}
-                    File type: <span className="font-medium uppercase">{parserReviewSummary.fileType || 'unknown'}</span>
+                  : parserReviewSummary.validationErrors.length === 0 && parserReviewDisplayConfidence.overall >= 0.82
+                    ? 'border-emerald-200 bg-emerald-50/80'
+                    : parserReviewSummary.recommendedAction === 'auto-import'
+                      ? 'border-emerald-200 bg-emerald-50/80'
+                      : 'border-amber-200 bg-amber-50/80'
+              }`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Parser review</p>
+                  <h3 className="mt-0.5 text-base font-semibold text-slate-950">
+                    {formatRecommendedAction(parserReviewSummary.recommendedAction)}
+                  </h3>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-700">
+                    <span className="font-medium text-slate-800">{formatParserStrategy(parserReviewSummary.parserStrategy)}</span>
+                    <span className="text-slate-400"> · </span>
+                    <span className="uppercase">{parserReviewSummary.fileType || 'unknown'}</span>
+                    <span className="text-slate-400"> · </span>
+                    <span className="font-semibold text-slate-900">{formatConfidencePercent(parserReviewDisplayConfidence.overall)}</span>
+                    {parserReviewDisplayConfidence.adjustedFromReview ? (
+                      <span className="ml-1 font-normal text-emerald-800">after catalog picks</span>
+                    ) : null}
+                    <span className="text-slate-400"> · </span>
+                    Qty <span className="font-medium">{formatNumberSafe(parsedQuantityTotal)}</span>
+                    <span className="text-slate-400"> · </span>
+                    <span className={parserReviewSummary.validationErrors.length ? 'font-medium text-red-700' : ''}>
+                      {parserReviewSummary.validationErrors.length} err
+                    </span>
+                    <span className="text-slate-400"> · </span>
+                    {parserReviewSummary.validationWarnings.length +
+                      parserReviewSummary.parseWarnings.length +
+                      intakeWarnings.length}{' '}
+                    warn
+                  </p>
+                  <p
+                    className="mt-0.5 truncate text-[11px] text-slate-500"
+                    title={[
+                      parserReviewSummary.sourceSummary?.fileName || takeoffFileName || uploadedFileName || 'Current upload',
+                      parserReviewSummary.sourceSummary?.sheetsProcessed?.length
+                        ? `Sheets: ${parserReviewSummary.sourceSummary.sheetsProcessed.join(', ')}`
+                        : '',
+                      parserReviewSummary.sourceSummary?.pagesProcessed?.length
+                        ? `Pages: ${parserReviewSummary.sourceSummary.pagesProcessed.join(', ')}`
+                        : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  >
+                    {parserReviewSummary.sourceSummary?.fileName || takeoffFileName || uploadedFileName || 'Current upload'}
+                    {parserReviewSummary.sourceSummary?.sheetsProcessed?.length
+                      ? ` · Sheets: ${parserReviewSummary.sourceSummary.sheetsProcessed.join(', ')}`
+                      : ''}
+                    {parserReviewSummary.sourceSummary?.pagesProcessed?.length
+                      ? ` · Pages: ${parserReviewSummary.sourceSummary.pagesProcessed.join(', ')}`
+                      : ''}
                   </p>
                 </div>
-
                 {parserReviewSummary.recommendedAction === 'manual-template' ? (
-                  <button type="button" onClick={applyManualTemplateFallback} className="inline-flex h-10 items-center rounded-full bg-red-600 px-4 text-[11px] font-semibold text-white outline-none hover:bg-red-700 focus-visible:ring-2 focus-visible:ring-red-400/50">
+                  <button
+                    type="button"
+                    onClick={applyManualTemplateFallback}
+                    className="inline-flex h-9 shrink-0 items-center rounded-full bg-red-600 px-3 text-[11px] font-semibold text-white outline-none hover:bg-red-700 focus-visible:ring-2 focus-visible:ring-red-400/50"
+                  >
                     Use Manual Template
                   </button>
                 ) : null}
               </div>
 
-              <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-                  <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-3">
-                    <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Overall Confidence</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950">{formatConfidencePercent(parserReviewSummary.overallConfidence)}</p>
-                  </div>
-                  <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-3">
-                    <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Parsed Qty</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950">{formatNumberSafe(parsedQuantityTotal)}</p>
-                  </div>
-                  <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-3">
-                    <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Validation Errors</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950">{parserReviewSummary.validationErrors.length}</p>
-                  </div>
-                  <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-3">
-                    <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Validation Warnings</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950">{parserReviewSummary.validationWarnings.length}</p>
-                  </div>
-                  <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-3">
-                    <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">Parse Warnings</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950">{parserReviewSummary.parseWarnings.length}</p>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-white/70 bg-white/70 p-4 text-sm text-slate-700">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Source Summary</p>
-                  <div className="mt-3 space-y-1.5">
-                    <p><span className="font-medium text-slate-900">File:</span> {parserReviewSummary.sourceSummary?.fileName || takeoffFileName || uploadedFileName || 'Current upload'}</p>
-                    {parserReviewSummary.sourceSummary?.sheetsProcessed?.length ? <p><span className="font-medium text-slate-900">Sheets:</span> {parserReviewSummary.sourceSummary.sheetsProcessed.join(', ')}</p> : null}
-                    {parserReviewSummary.sourceSummary?.pagesProcessed?.length ? <p><span className="font-medium text-slate-900">Pages:</span> {parserReviewSummary.sourceSummary.pagesProcessed.join(', ')}</p> : null}
-                  </div>
-                </div>
-              </div>
-
-              {(parserReviewSummary.validationErrors.length > 0 || parserReviewSummary.validationWarnings.length > 0 || parserReviewSummary.parseWarnings.length > 0) ? (
-                <div className="mt-4 grid gap-4 xl:grid-cols-3">
-                  <div className="rounded-xl border border-white/70 bg-white/70 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Validation Errors</p>
-                    {parserReviewSummary.validationErrors.length > 0 ? (
-                      <ul className="mt-3 space-y-1 text-xs text-red-700">
-                        {parserReviewSummary.validationErrors.map((entry) => <li key={entry}>- {entry}</li>)}
-                      </ul>
-                    ) : <p className="mt-3 text-xs text-slate-500">No blocking validation errors.</p>}
-                  </div>
-                  <div className="rounded-xl border border-white/70 bg-white/70 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Validation Warnings</p>
-                    {parserReviewSummary.validationWarnings.length > 0 ? (
-                      <ul className="mt-3 space-y-1 text-xs text-amber-700">
-                        {parserReviewSummary.validationWarnings.map((entry) => <li key={entry}>- {entry}</li>)}
-                      </ul>
-                    ) : <p className="mt-3 text-xs text-slate-500">No validation warnings.</p>}
-                  </div>
-                  <div className="rounded-xl border border-white/70 bg-white/70 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Parser Warnings</p>
-                    {parserReviewSummary.parseWarnings.length > 0 ? (
-                      <ul className="mt-3 space-y-1 text-xs text-slate-700">
-                        {parserReviewSummary.parseWarnings.map((entry) => <li key={entry}>- {entry}</li>)}
-                      </ul>
-                    ) : <p className="mt-3 text-xs text-slate-500">No parser warnings.</p>}
-                  </div>
-                </div>
+              {parserReviewSummary.validationErrors.length > 0 ? (
+                <ul className="mt-3 space-y-1 border-t border-slate-200/60 pt-3 text-xs text-red-700">
+                  {parserReviewSummary.validationErrors.map((entry) => (
+                    <li key={entry}>• {entry}</li>
+                  ))}
+                </ul>
               ) : null}
 
               {groupedWarningSummaries.length > 0 ? (
-                <div className="mt-4 rounded-xl border border-white/70 bg-white/70 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Grouped Warnings</p>
-                      <p className="mt-1 text-xs text-slate-600">Repeated warning variants are collapsed into issue groups so review focuses on root causes.</p>
-                    </div>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                      {groupedWarningSummaries.length} groups
-                    </span>
-                  </div>
-                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                <div className="mt-3 border-t border-slate-200/60 pt-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    Warnings · {groupedWarningSummaries.length} group{groupedWarningSummaries.length === 1 ? '' : 's'}
+                  </p>
+                  <div className="mt-2 space-y-2">
                     {groupedWarningSummaries.map((group) => {
-                      const toneClass = group.tone === 'danger'
-                        ? 'border-red-200 bg-red-50/70 text-red-900'
-                        : group.tone === 'warning'
-                          ? 'border-amber-200 bg-amber-50/70 text-amber-900'
-                          : 'border-slate-200 bg-slate-50/80 text-slate-900';
-
+                      const toneClass =
+                        group.tone === 'danger'
+                          ? 'border-red-200 bg-red-50/60 text-red-900'
+                          : group.tone === 'warning'
+                            ? 'border-amber-200 bg-amber-50/60 text-amber-900'
+                            : 'border-slate-200 bg-slate-50/80 text-slate-800';
+                      const toneLabel = group.tone === 'danger' ? 'Error' : group.tone === 'warning' ? 'Warning' : 'Info';
                       return (
-                        <div key={group.key} className={`rounded-xl border p-3 ${toneClass}`}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-xs font-semibold">{group.label}</p>
-                              <p className="mt-1 text-[11px] opacity-80">{group.count} occurrence{group.count === 1 ? '' : 's'}</p>
-                            </div>
-                            <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                              {group.tone}
+                        <div key={group.key} className={`rounded-lg border px-3 py-2 ${toneClass}`}>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs font-semibold">{group.label}</p>
+                            <span className="shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                              {toneLabel} · {group.count}×
                             </span>
                           </div>
-                          <ul className="mt-3 space-y-1 text-[11px] opacity-90">
-                            {group.examples.map((example) => <li key={example}>- {example}</li>)}
+                          <ul className="mt-1.5 space-y-0.5 text-[11px] opacity-90">
+                            {group.examples.map((example) => (
+                              <li key={example}>• {example}</li>
+                            ))}
                           </ul>
                         </div>
                       );
                     })}
                   </div>
                 </div>
+              ) : parserReviewSummary.validationWarnings.length +
+                  parserReviewSummary.parseWarnings.length +
+                  intakeWarnings.length >
+                0 ? (
+                <ul className="mt-3 space-y-1 border-t border-slate-200/60 pt-3 text-xs text-amber-800">
+                  {[...parserReviewSummary.validationWarnings, ...parserReviewSummary.parseWarnings, ...intakeWarnings].map((entry) => (
+                    <li key={entry}>• {entry}</li>
+                  ))}
+                </ul>
               ) : null}
             </div>
           ) : null}

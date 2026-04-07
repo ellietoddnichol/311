@@ -91,14 +91,14 @@ export function ProjectSetupWorkspace({
   const officeProfit = settings?.defaultProfitPercent;
   const officeTax = settings?.defaultTaxPercent;
 
-  const matchesOffice = (field: 'burden' | 'overhead' | 'profit' | 'tax' | 'laborOverhead' | 'laborProfit'): boolean => {
+  const matchesOffice = (field: 'burden' | 'materialOandP' | 'profit' | 'tax' | 'laborOverhead' | 'laborProfit'): boolean => {
     if (!settings) return false;
     if (field === 'burden') return project.laborBurdenPercent === officeBurden;
-    if (field === 'overhead') return project.overheadPercent === officeOverhead;
+    if (field === 'materialOandP') return project.overheadPercent === officeOverhead && project.profitPercent === 0;
     if (field === 'profit') return project.profitPercent === officeProfit;
     if (field === 'tax') return project.taxPercent === officeTax;
-    if (field === 'laborOverhead') return project.laborOverheadPercent === officeOverhead;
-    if (field === 'laborProfit') return project.laborProfitPercent === officeProfit;
+    if (field === 'laborOverhead') return project.laborOverheadPercent === 0;
+    if (field === 'laborProfit') return project.laborProfitPercent === 0;
     return false;
   };
 
@@ -110,10 +110,10 @@ export function ProjectSetupWorkspace({
             ...prev,
             laborBurdenPercent: settings.defaultLaborBurdenPercent,
             overheadPercent: settings.defaultOverheadPercent,
-            profitPercent: settings.defaultProfitPercent,
+            profitPercent: 0,
             taxPercent: settings.defaultTaxPercent,
-            laborOverheadPercent: settings.defaultOverheadPercent,
-            laborProfitPercent: settings.defaultProfitPercent,
+            laborOverheadPercent: 0,
+            laborProfitPercent: 0,
           }
         : prev
     );
@@ -457,25 +457,20 @@ export function ProjectSetupWorkspace({
                 onChange={(e) => setProject({ ...project, laborBurdenPercent: Number(e.target.value) || 0 })}
               />
             </label>
-            <label className="text-[11px] font-medium text-slate-700">
-              Material overhead %
-              {matchesOffice('overhead') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
+            <label className="text-[11px] font-medium text-slate-700 sm:col-span-2 md:col-span-1">
+              Material O&amp;P % (after tax on material)
+              {matchesOffice('materialOandP') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
               <input
                 type="number"
                 className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
                 value={project.overheadPercent}
-                onChange={(e) => setProject({ ...project, overheadPercent: Number(e.target.value) || 0 })}
+                onChange={(e) =>
+                  setProject({ ...project, overheadPercent: Number(e.target.value) || 0, profitPercent: 0 })
+                }
               />
-            </label>
-            <label className="text-[11px] font-medium text-slate-700">
-              Material profit %
-              {matchesOffice('profit') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
-              <input
-                type="number"
-                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
-                value={project.profitPercent}
-                onChange={(e) => setProject({ ...project, profitPercent: Number(e.target.value) || 0 })}
-              />
+              <span className="mt-1 block max-w-md text-[10px] font-normal leading-snug text-slate-500">
+                Single sell-side markup on material. Hourly install rate is already loaded with typical labor margin.
+              </span>
             </label>
             {showMaterial ? (
               <label className="text-[11px] font-medium text-slate-700">
@@ -522,26 +517,43 @@ export function ProjectSetupWorkspace({
                 onChange={(e) => patchJobConditions({ installerCount: Number(e.target.value) || 1 })}
               />
             </label>
-            <label className="text-[11px] font-medium text-slate-700">
-              Labor overhead % (sub)
-              {matchesOffice('laborOverhead') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
-              <input
-                type="number"
-                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
-                value={project.laborOverheadPercent}
-                onChange={(e) => setProject({ ...project, laborOverheadPercent: Number(e.target.value) || 0 })}
-              />
-            </label>
-            <label className="text-[11px] font-medium text-slate-700">
-              Labor profit % (sub)
-              {matchesOffice('laborProfit') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
-              <input
-                type="number"
-                className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
-                value={project.laborProfitPercent}
-                onChange={(e) => setProject({ ...project, laborProfitPercent: Number(e.target.value) || 0 })}
-              />
-            </label>
+            <details className="group sm:col-span-2 md:col-span-3 rounded-xl border border-slate-200 bg-white/90 px-3 py-2">
+              <summary className="cursor-pointer list-none text-[11px] font-semibold text-slate-800 [&::-webkit-details-marker]:hidden">
+                Advanced: stacked material profit, sub labor markup (usually 0%)
+              </summary>
+              <div className="mt-3 grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 md:grid-cols-3">
+                <label className="text-[11px] font-medium text-slate-700">
+                  Material profit % (after material O&amp;P)
+                  {matchesOffice('profit') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
+                  <input
+                    type="number"
+                    className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
+                    value={project.profitPercent}
+                    onChange={(e) => setProject({ ...project, profitPercent: Number(e.target.value) || 0 })}
+                  />
+                </label>
+                <label className="text-[11px] font-medium text-slate-700">
+                  Labor overhead % (sub)
+                  {matchesOffice('laborOverhead') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
+                  <input
+                    type="number"
+                    className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
+                    value={project.laborOverheadPercent}
+                    onChange={(e) => setProject({ ...project, laborOverheadPercent: Number(e.target.value) || 0 })}
+                  />
+                </label>
+                <label className="text-[11px] font-medium text-slate-700">
+                  Labor profit % (sub)
+                  {matchesOffice('laborProfit') ? <FieldBadge kind="office" /> : <FieldBadge kind="optional" />}
+                  <input
+                    type="number"
+                    className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
+                    value={project.laborProfitPercent}
+                    onChange={(e) => setProject({ ...project, laborProfitPercent: Number(e.target.value) || 0 })}
+                  />
+                </label>
+              </div>
+            </details>
             <label className="text-[11px] font-medium text-slate-700">
               Project adder %
               <FieldBadge kind="optional" />

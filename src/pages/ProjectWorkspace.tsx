@@ -34,6 +34,7 @@ import {
   DEFAULT_PROPOSAL_TERMS,
   ensureProposalDefaults,
 } from '../shared/utils/proposalDefaults';
+import { PROPOSAL_FORMAT_OPTIONS } from '../shared/utils/proposalDocument';
 import { TopProjectHeader } from '../components/workspace/TopProjectHeader';
 import { ProjectSetupWorkspace } from '../components/workspace/ProjectSetupWorkspace';
 import { RoomManager } from '../components/workspace/RoomManager';
@@ -292,8 +293,9 @@ export function ProjectWorkspace() {
         api.getV1ProjectFiles(projectId),
       ]);
 
-      setProject(projectData);
-      lastPersistedFingerprintRef.current = fingerprintProjectStable(projectData);
+      const normalizedProject = { ...projectData, proposalFormat: projectData.proposalFormat ?? 'standard' };
+      setProject(normalizedProject);
+      lastPersistedFingerprintRef.current = fingerprintProjectStable(normalizedProject);
       setLastSavedAt(projectData.updatedAt);
       setSyncState('ok');
       setRooms(roomData);
@@ -1829,6 +1831,28 @@ export function ProjectWorkspace() {
                   <p className="mt-1 text-[10px] text-slate-500">Schedule model</p>
                 </div>
               </div>
+
+              <label className="mt-4 block max-w-md">
+                <span className="text-[11px] font-medium text-slate-700">Proposal layout</span>
+                <select
+                  className="ui-input mt-1.5 h-10 w-full"
+                  value={project.proposalFormat || 'standard'}
+                  onChange={(e) =>
+                    setProject((prev) =>
+                      prev ? { ...prev, proposalFormat: e.target.value as ProjectRecord['proposalFormat'] } : prev
+                    )
+                  }
+                >
+                  {PROPOSAL_FORMAT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value} title={opt.hint}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[10px] text-slate-500">
+                  {PROPOSAL_FORMAT_OPTIONS.find((o) => o.value === (project.proposalFormat || 'standard'))?.hint}
+                </span>
+              </label>
             </section>
 
             <details className="ui-surface group overflow-hidden open:shadow-md [&_summary::-webkit-details-marker]:hidden">

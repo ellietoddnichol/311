@@ -1,5 +1,6 @@
 export type ProjectStatus = 'Draft' | 'Submitted' | 'Awarded' | 'Lost' | 'Archived';
 export type PricingMode = 'material_only' | 'labor_only' | 'labor_and_material';
+export type ProposalFormat = 'standard' | 'condensed' | 'schedule_with_amounts' | 'executive_summary';
 export type DeliveryPricingMode = 'included' | 'flat' | 'percent';
 
 export interface ProjectConditions {
@@ -109,6 +110,8 @@ export interface ProjectRecord {
   specialNotes: string | null;
   /** When true, project special notes appear on proposal print/export. */
   proposalIncludeSpecialNotes: boolean;
+  /** Client-facing proposal layout (preview / print). */
+  proposalFormat: ProposalFormat;
   createdAt: string;
   updatedAt: string;
 }

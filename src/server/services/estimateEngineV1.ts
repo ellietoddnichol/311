@@ -45,8 +45,8 @@ export function calculateEstimateSummary(project: ProjectRecord, lines: TakeoffL
 
   const lineSubtotal = materialForBid + adjustedLaborForBid + effects.estimateAdderAmount;
 
-  const laborOHpct = Number(project.laborOverheadPercent ?? project.overheadPercent ?? 0);
-  const laborProfitpct = Number(project.laborProfitPercent ?? project.profitPercent ?? 0);
+  const laborOHpct = Number(project.laborOverheadPercent ?? 0);
+  const laborProfitpct = Number(project.laborProfitPercent ?? 0);
 
   const burdenAmount = Number((laborAdjustedCore * (project.laborBurdenPercent / 100)).toFixed(2));
   const afterBurden = laborAdjustedCore + burdenAmount;

@@ -4,6 +4,12 @@ import { ProjectRecord } from '../../shared/types/estimator.ts';
 import { coerceSafeProjectName } from '../../shared/utils/intakeTextGuards.ts';
 import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../../shared/utils/jobConditions.ts';
 
+function coerceProposalFormat(raw: unknown): ProjectRecord['proposalFormat'] {
+  const s = String(raw || '').trim();
+  if (s === 'condensed' || s === 'schedule_with_amounts' || s === 'executive_summary') return s;
+  return 'standard';
+}
+
 function mapProjectRow(row: any): ProjectRecord {
   let parsedJobConditions = createDefaultProjectJobConditions();
   let selectedScopeCategories: string[] = [];
@@ -43,8 +49,8 @@ function mapProjectRow(row: any): ProjectRecord {
     laborBurdenPercent: row.labor_burden_percent,
     overheadPercent: row.overhead_percent,
     profitPercent: row.profit_percent,
-    laborOverheadPercent: Number(row.labor_overhead_percent ?? row.overhead_percent ?? 15),
-    laborProfitPercent: Number(row.labor_profit_percent ?? row.profit_percent ?? 10),
+    laborOverheadPercent: Number(row.labor_overhead_percent ?? 0),
+    laborProfitPercent: Number(row.labor_profit_percent ?? 0),
     subLaborManagementFeeEnabled: Boolean(Number(row.sub_labor_management_fee_enabled ?? 0)),
     subLaborManagementFeePercent: Number(row.sub_labor_management_fee_percent ?? 5),
     taxPercent: row.tax_percent,
@@ -55,6 +61,7 @@ function mapProjectRow(row: any): ProjectRecord {
     notes: row.notes,
     specialNotes: row.special_notes,
     proposalIncludeSpecialNotes: Boolean(Number(row.proposal_include_special_notes ?? 0)),
+    proposalFormat: coerceProposalFormat(row.proposal_format),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -92,9 +99,9 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     wallSubstrate: input.wallSubstrate ?? null,
     laborBurdenPercent: input.laborBurdenPercent ?? 25,
     overheadPercent: input.overheadPercent ?? 15,
-    profitPercent: input.profitPercent ?? 10,
-    laborOverheadPercent: input.laborOverheadPercent ?? input.overheadPercent ?? 15,
-    laborProfitPercent: input.laborProfitPercent ?? input.profitPercent ?? 10,
+    profitPercent: input.profitPercent ?? 0,
+    laborOverheadPercent: input.laborOverheadPercent ?? 0,
+    laborProfitPercent: input.laborProfitPercent ?? 0,
     subLaborManagementFeeEnabled: input.subLaborManagementFeeEnabled ?? false,
     subLaborManagementFeePercent: input.subLaborManagementFeePercent ?? 5,
     taxPercent: input.taxPercent ?? 8.25,
@@ -107,6 +114,7 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     notes: input.notes ?? null,
     specialNotes: input.specialNotes ?? null,
     proposalIncludeSpecialNotes: Boolean(input.proposalIncludeSpecialNotes),
+    proposalFormat: coerceProposalFormat(input.proposalFormat),
     createdAt: now,
     updatedAt: now
   };
@@ -117,8 +125,8 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
       project_size, floor_level, access_difficulty, install_height, material_handling, wall_substrate,
       labor_burden_percent, overhead_percent, profit_percent, labor_overhead_percent, labor_profit_percent,
       sub_labor_management_fee_enabled, sub_labor_management_fee_percent,
-      tax_percent, pricing_mode, scope_categories_json, job_conditions_json, status, notes, special_notes, proposal_include_special_notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      tax_percent, pricing_mode, scope_categories_json, job_conditions_json, status, notes, special_notes, proposal_include_special_notes, proposal_format, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     project.id,
     project.projectNumber,
@@ -152,6 +160,7 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     project.notes,
     project.specialNotes,
     project.proposalIncludeSpecialNotes ? 1 : 0,
+    project.proposalFormat,
     project.createdAt,
     project.updatedAt
   );
@@ -166,6 +175,7 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
   const next: ProjectRecord = {
     ...existing,
     ...input,
+    proposalFormat: input.proposalFormat !== undefined ? coerceProposalFormat(input.proposalFormat) : existing.proposalFormat,
     selectedScopeCategories: Array.isArray(input.selectedScopeCategories)
       ? input.selectedScopeCategories.map((entry) => String(entry || '').trim()).filter(Boolean)
       : existing.selectedScopeCategories,
@@ -183,7 +193,7 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
       material_handling = ?, wall_substrate = ?, labor_burden_percent = ?, overhead_percent = ?,
       profit_percent = ?, labor_overhead_percent = ?, labor_profit_percent = ?,
       sub_labor_management_fee_enabled = ?, sub_labor_management_fee_percent = ?,
-      tax_percent = ?, pricing_mode = ?, scope_categories_json = ?, job_conditions_json = ?, status = ?, notes = ?, special_notes = ?, proposal_include_special_notes = ?, updated_at = ?
+      tax_percent = ?, pricing_mode = ?, scope_categories_json = ?, job_conditions_json = ?, status = ?, notes = ?, special_notes = ?, proposal_include_special_notes = ?, proposal_format = ?, updated_at = ?
     WHERE id = ?
   `).run(
     next.projectNumber,
@@ -217,6 +227,7 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
     next.notes,
     next.specialNotes,
     next.proposalIncludeSpecialNotes ? 1 : 0,
+    next.proposalFormat,
     next.updatedAt,
     projectId
   );

@@ -8,6 +8,35 @@ export function uniqueSortedCatalogCategories(catalog: { category?: string | nul
 }
 
 /**
+ * Tokens that appear inside many real scope names but must not map a vague import
+ * (e.g. section title "Specialties") onto a specific catalog category like "Fire Specialties".
+ */
+const VAGUE_CATEGORY_TOKENS = new Set([
+  'specialties',
+  'accessories',
+  'equipment',
+  'fixtures',
+  'systems',
+  'misc',
+  'miscellaneous',
+  'general',
+  'other',
+  'division',
+  'scope',
+  'work',
+]);
+
+function isOnlyVagueCategoryTokens(text: string): boolean {
+  const parts = text
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .filter((p) => p.length > 0 && !/^\d+(?:[./-]\d+)?$/.test(p));
+  if (parts.length === 0) return false;
+  return parts.every((p) => VAGUE_CATEGORY_TOKENS.has(p));
+}
+
+/**
  * Map imported / fuzzy text to a catalog category, or null if no safe match.
  */
 export function resolveImportedCategory(raw: string | null | undefined, allowed: string[]): string | null {
@@ -18,9 +47,17 @@ export function resolveImportedCategory(raw: string | null | undefined, allowed:
   for (const a of allowed) {
     if (a.toLowerCase() === lower) return a;
   }
+  if (isOnlyVagueCategoryTokens(t)) return null;
+
   for (const a of allowed) {
     const al = a.toLowerCase();
-    if (al.length >= 3 && (lower.includes(al) || al.includes(lower))) return a;
+    if (al.length >= 3 && lower.includes(al)) return a;
+  }
+  /** Require a longer needle so "fire" alone does not snap to "Fire Specialties". */
+  const minSubstringLen = 5;
+  for (const a of allowed) {
+    const al = a.toLowerCase();
+    if (al.length >= 3 && lower.length >= minSubstringLen && al.includes(lower)) return a;
   }
   return null;
 }

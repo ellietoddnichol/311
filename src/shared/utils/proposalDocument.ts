@@ -1,4 +1,11 @@
-import { PricingMode, TakeoffLineRecord } from '../types/estimator';
+import { EstimateSummary, PricingMode, ProposalFormat, TakeoffLineRecord } from '../types/estimator';
+
+export const PROPOSAL_FORMAT_OPTIONS: Array<{ value: ProposalFormat; label: string; hint: string }> = [
+  { value: 'standard', label: 'Standard', hint: 'Full schedule, detailed investment breakdown' },
+  { value: 'condensed', label: 'Condensed', hint: 'Tighter typography and spacing' },
+  { value: 'schedule_with_amounts', label: 'Schedule + amounts', hint: 'Each line shows extended material + labor $' },
+  { value: 'executive_summary', label: 'Executive', hint: 'Section rollups only, emphasis on pricing walkthrough' },
+];
 
 export interface ProposalScopeSection {
   section: string;
@@ -395,4 +402,104 @@ export function buildClientFacingPricingRows(
     { label: 'Material', amount: materialAmount },
     { label: 'Install', amount: Number((total - materialAmount).toFixed(2)) },
   ];
+}
+
+export interface InvestmentBreakdownRow {
+  label: string;
+  amount: number;
+  /** Strong border before this row */
+  isSectionBreak?: boolean;
+  /** Bold total line */
+  isTotal?: boolean;
+}
+
+/**
+ * Line items that explain how catalog scope costs become the proposal total
+ * (tax, material O&amp;P, labor burden / sub markup, project adders).
+ */
+export function buildInvestmentBreakdownRows(summary: EstimateSummary, pricingMode: PricingMode): InvestmentBreakdownRow[] {
+  const rows: InvestmentBreakdownRow[] = [];
+  const showM = pricingMode !== 'labor_only';
+  const showL = pricingMode !== 'material_only';
+
+  if (showM && summary.materialLoadedSubtotal > 0) {
+    const hasMatMarkup =
+      summary.taxAmount > 0 || summary.overheadAmount > 0 || summary.profitAmount > 0;
+    if (hasMatMarkup) {
+      rows.push({
+        label: 'Material & supplies (incl. waste & field pads, before tax)',
+        amount: summary.materialSubtotal,
+      });
+      if (summary.taxAmount > 0) {
+        rows.push({ label: 'Sales tax on material', amount: summary.taxAmount });
+      }
+      if (summary.overheadAmount > 0) {
+        rows.push({
+          label: summary.profitAmount > 0 ? 'Material overhead' : 'Material O&P (on material after tax)',
+          amount: summary.overheadAmount,
+        });
+      }
+      if (summary.profitAmount > 0) {
+        rows.push({ label: 'Material profit (stacked)', amount: summary.profitAmount });
+      }
+      rows.push({
+        label: 'Subtotal — materials (sell)',
+        amount: summary.materialLoadedSubtotal,
+        isSectionBreak: true,
+      });
+    } else {
+      rows.push({
+        label: 'Materials (catalog costs & field pads)',
+        amount: summary.materialLoadedSubtotal,
+        isSectionBreak: true,
+      });
+    }
+  }
+
+  if (showL && summary.laborLoadedSubtotal > 0) {
+    const hasLaborMarkup =
+      summary.burdenAmount > 0 ||
+      summary.laborOverheadAmount > 0 ||
+      summary.laborProfitAmount > 0 ||
+      summary.subLaborManagementFeeAmount > 0;
+    if (hasLaborMarkup) {
+      rows.push({
+        label: 'Install labor (est., before burden & sub markup)',
+        amount: summary.adjustedLaborSubtotal,
+      });
+      if (summary.burdenAmount > 0) {
+        rows.push({ label: 'Labor burden (subcontractor)', amount: summary.burdenAmount });
+      }
+      if (summary.laborOverheadAmount > 0) {
+        rows.push({ label: 'Labor overhead (sub)', amount: summary.laborOverheadAmount });
+      }
+      if (summary.laborProfitAmount > 0) {
+        rows.push({ label: 'Labor profit (sub)', amount: summary.laborProfitAmount });
+      }
+      if (summary.subLaborManagementFeeAmount > 0) {
+        rows.push({ label: 'Sub labor management fee', amount: summary.subLaborManagementFeeAmount });
+      }
+      rows.push({
+        label: 'Subtotal — install (sell)',
+        amount: summary.laborLoadedSubtotal,
+        isSectionBreak: true,
+      });
+    } else {
+      rows.push({
+        label: 'Install labor (loaded rate)',
+        amount: summary.laborLoadedSubtotal,
+        isSectionBreak: true,
+      });
+    }
+  }
+
+  const materialPart = showM ? summary.materialLoadedSubtotal : 0;
+  const laborPart = showL ? summary.laborLoadedSubtotal : 0;
+  const adder = Number((summary.baseBidTotal - materialPart - laborPart).toFixed(2));
+  if (Math.abs(adder) > 0.02) {
+    rows.push({ label: 'Project conditions / adders', amount: adder });
+  }
+
+  rows.push({ label: 'Total proposal', amount: summary.baseBidTotal, isTotal: true });
+  return rows;
 }

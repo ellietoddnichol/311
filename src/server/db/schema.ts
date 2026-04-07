@@ -282,6 +282,11 @@ export function initEstimatorSchema(db: Database) {
     db.exec('ALTER TABLE projects_v1 ADD COLUMN proposal_include_special_notes INTEGER NOT NULL DEFAULT 0');
   }
 
+  const hasProposalFormat = projectColumns.some((column) => column.name === 'proposal_format');
+  if (!hasProposalFormat) {
+    db.exec("ALTER TABLE projects_v1 ADD COLUMN proposal_format TEXT NOT NULL DEFAULT 'standard'");
+  }
+
   db.exec("UPDATE projects_v1 SET job_conditions_json = '{}' WHERE job_conditions_json IS NULL OR trim(job_conditions_json) = ''");
   db.exec("UPDATE projects_v1 SET scope_categories_json = '[]' WHERE scope_categories_json IS NULL OR trim(scope_categories_json) = ''");
   const hasBaseMaterialCost = takeoffColumns.some((column) => column.name === 'base_material_cost');
