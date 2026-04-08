@@ -23,7 +23,6 @@ import {
   createDefaultProjectJobConditions,
   isMeaningfulTravelDistanceMiles,
   normalizeProjectJobConditions,
-  RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
   recommendDeliveryPlan,
 } from '../shared/utils/jobConditions';
 import {
@@ -93,6 +92,34 @@ const WORKSPACE_TABS: WorkspaceTab[] = ['overview', 'setup', 'takeoff', 'estimat
 
 /** URL/searchParam value for “show every room’s lines” in takeoff (not a real room id). */
 const TAKEOFF_ALL_ROOMS = '__all__';
+
+/** Persist room / takeoff view / selection across reloads and dev HMR so work isn’t reset to “first room”. */
+const WORKSPACE_UI_STORAGE_PREFIX = 'estimator:workspaceUi:v1:';
+
+type WorkspaceUiSnapshot = {
+  activeRoomId?: string;
+  takeoffRoomFilter?: string;
+  selectedLineId?: string | null;
+};
+
+function readWorkspaceUi(projectId: string): WorkspaceUiSnapshot {
+  try {
+    const raw = sessionStorage.getItem(`${WORKSPACE_UI_STORAGE_PREFIX}${projectId}`);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as WorkspaceUiSnapshot;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeWorkspaceUi(projectId: string, snapshot: WorkspaceUiSnapshot) {
+  try {
+    sessionStorage.setItem(`${WORKSPACE_UI_STORAGE_PREFIX}${projectId}`, JSON.stringify(snapshot));
+  } catch {
+    // ignore quota / private mode
+  }
+}
 
 function isWorkspaceTab(value: string | null): value is WorkspaceTab {
   return !!value && WORKSPACE_TABS.includes(value as WorkspaceTab);
@@ -208,6 +235,11 @@ export function ProjectWorkspace() {
   }, [id]);
 
   useEffect(() => {
+    if (!id || loading) return;
+    writeWorkspaceUi(id, { activeRoomId, takeoffRoomFilter, selectedLineId });
+  }, [id, loading, activeRoomId, takeoffRoomFilter, selectedLineId]);
+
+  useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (activeTab === 'estimate') {
       next.delete('tab');
@@ -264,7 +296,10 @@ export function ProjectWorkspace() {
             lastPersistedFingerprintRef.current = serverFp;
             setProject(saved);
             setLastSavedAt(saved.updatedAt);
-            await refreshTakeoff(saved.id);
+            /** Project-only save: refresh summary only so the line grid doesn’t reload from the server. */
+            const summaryData = await api.getV1Summary(saved.id);
+            if (gen !== autosaveGenerationRef.current) return;
+            setSummary(summaryData as Summary);
           } else {
             lastPersistedFingerprintRef.current = serverFp;
           }
@@ -313,9 +348,22 @@ export function ProjectWorkspace() {
       setBundles(bundlesData);
       setProjectFiles(filesData);
 
-      if (roomData[0]) setActiveRoomId(roomData[0].id);
-      else setActiveRoomId('');
-      setTakeoffRoomFilter(TAKEOFF_ALL_ROOMS);
+      const ui = readWorkspaceUi(projectId);
+      const firstRoomId = roomData[0]?.id ?? '';
+      const roomPick =
+        ui.activeRoomId && roomData.some((r) => r.id === ui.activeRoomId) ? ui.activeRoomId : firstRoomId;
+      setActiveRoomId(roomPick);
+      if (
+        ui.takeoffRoomFilter === TAKEOFF_ALL_ROOMS ||
+        (ui.takeoffRoomFilter && roomData.some((r) => r.id === ui.takeoffRoomFilter))
+      ) {
+        setTakeoffRoomFilter(ui.takeoffRoomFilter ?? TAKEOFF_ALL_ROOMS);
+      } else {
+        setTakeoffRoomFilter(TAKEOFF_ALL_ROOMS);
+      }
+      const linePick =
+        ui.selectedLineId && lineData.some((l) => l.id === ui.selectedLineId) ? ui.selectedLineId : null;
+      setSelectedLineId(linePick);
     } catch (error) {
       console.error('Failed to load project workspace', error);
       navigate('/');
@@ -1558,9 +1606,12 @@ export function ProjectWorkspace() {
                 </div>
                 {takeoffRoomFilter === TAKEOFF_ALL_ROOMS ? (
                   <p className="text-xs leading-snug text-slate-500">
-                    New lines and bundles go to the room highlighted in the list on the left (
-                    <span className="font-medium text-slate-700">{roomNamesById[activeRoomId] || 'select a room'}</span>
-                    ).
+                    <span className="font-medium text-slate-700">Combined across rooms:</span> lines that match the same catalog item or SKU are rolled into one row (qty and install time are summed). Room names are listed under each item.{' '}
+                    <span className="text-slate-600">
+                      New lines and bundles still go to the room selected in the left sidebar (
+                      <span className="font-medium text-slate-800">{roomNamesById[activeRoomId] || 'select a room'}</span>
+                      ). Use a single room in the view menu to edit or delete a specific line.
+                    </span>
                   </p>
                 ) : null}
 
@@ -1571,7 +1622,7 @@ export function ProjectWorkspace() {
                   roomNamesById={roomNamesById}
                   pricingMode={pricingMode}
                   viewMode="takeoff"
-                  organizeBy="room"
+                  organizeBy={takeoffRoomFilter === TAKEOFF_ALL_ROOMS ? 'item' : 'room'}
                   takeoffShowRoom={takeoffRoomFilter === TAKEOFF_ALL_ROOMS}
                   laborMultiplier={summary?.conditionLaborMultiplier || 1}
                   selectedLineId={selectedLineId}
@@ -1585,28 +1636,32 @@ export function ProjectWorkspace() {
         )}
 
         {activeTab === 'estimate' && (
-          <div className="flex min-w-0 flex-col gap-1.5">
-              <div className="ui-panel-muted px-3 py-2.5">
-                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
-                    <span className="font-semibold text-slate-900">Estimate</span>
-                    <span className="text-slate-400">·</span>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('takeoff')}
-                      className="font-semibold text-blue-800 underline decoration-slate-300 underline-offset-2 hover:text-blue-950"
-                    >
-                      Takeoff
-                    </button>
-                    <span>for qty</span>
-                    <span className="text-slate-400">·</span>
-                    <span className="text-slate-700">{roomNamesById[activeRoomId] || 'Unassigned'}</span>
+          <div className="flex min-w-0 flex-col gap-1">
+              <div className="ui-panel-muted px-3 py-2 sm:py-2.5">
+                <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                  <div className="min-w-0">
+                    <h2 className="ui-typo-page-title">Estimate</h2>
+                    <p className="ui-typo-body mt-1 max-w-3xl">
+                      <span className="font-semibold text-slate-800">{roomNamesById[activeRoomId] || 'Unassigned'}</span>
+                      <span className="text-slate-500"> — pricing this room&apos;s lines. Quantities and scope come from </span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('takeoff')}
+                        className="font-semibold text-blue-800 underline decoration-blue-300/70 underline-offset-2 hover:text-blue-950"
+                      >
+                        Takeoff
+                      </button>
+                      <span className="text-slate-500">.</span>
+                    </p>
                   </div>
-                  <div className="w-full shrink-0 rounded-lg border border-slate-200/90 bg-white px-3 py-2 lg:w-auto lg:min-w-[200px]">
+                  <div className="w-full shrink-0 rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm sm:min-w-[220px] lg:w-auto">
                     <p className="ui-label !normal-case tracking-wide text-slate-500">Project total</p>
                     <p className="text-lg font-semibold tabular-nums tracking-tight text-slate-950">{formatCurrencySafe(summary?.baseBidTotal)}</p>
                     <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t border-slate-200/80 pt-1.5 text-xs text-slate-600">
-                      <span>This room <span className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(roomSubtotal)}</span></span>
+                      <span>
+                        This room{' '}
+                        <span className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(roomSubtotal)}</span>
+                      </span>
                       <span className="tabular-nums text-right" title="Project labor time (after multipliers)">
                         <span className="font-semibold text-slate-900">{formatNumberSafe(summary?.totalLaborHours || 0, 1)} hr</span>
                         <span className="text-slate-400"> · </span>
@@ -1618,7 +1673,7 @@ export function ProjectWorkspace() {
               </div>
 
               <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-sm">
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,17rem)_1fr] lg:items-start lg:gap-4">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] lg:items-start lg:gap-5">
                   <div className="flex min-w-0 gap-2">
                     <div
                       className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white"
@@ -1648,36 +1703,35 @@ export function ProjectWorkspace() {
                       )}
                     </div>
                   </div>
-                  <div className="w-full shrink-0 rounded-lg border border-slate-200 bg-slate-50/90 p-2.5 lg:max-w-sm">
+                  <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/90 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Project condition notes</p>
+                      <p className="text-sm font-semibold text-slate-800">Project condition notes</p>
                       <button
                         type="button"
                         onClick={() => setActiveTab('setup')}
-                        className="text-[11px] font-semibold text-blue-700 hover:text-blue-800"
+                        className="text-xs font-semibold text-blue-700 hover:text-blue-800"
                       >
                         Edit in Setup
                       </button>
                     </div>
                     {laborRateModifiersActive ? (
-                      <p className="mt-2 text-[11px] font-medium text-slate-700">
+                      <p className="mt-2 text-xs leading-relaxed text-slate-600">
                         Multipliers above come from job conditions (e.g. labor factor, night work, floors, adders).
                       </p>
                     ) : null}
                     {(summary?.conditionAssumptions?.length || 0) > 0 ? (
-                      <ul className="mt-2 max-h-36 list-disc space-y-1.5 overflow-y-auto pl-4 text-xs leading-relaxed text-slate-600">
-                        {(summary?.conditionAssumptions || []).slice(0, 10).map((line, idx) => (
+                      <ul className="mt-2 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-700">
+                        {(summary?.conditionAssumptions || []).map((line, idx) => (
                           <li key={idx}>{line}</li>
                         ))}
                       </ul>
                     ) : laborRateModifiersActive ? (
-                      <p className="mt-2 text-[11px] text-slate-600">Adjust job conditions in Setup to see narrative notes here.</p>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-600">Adjust job conditions in Setup to see narrative notes here.</p>
                     ) : (
-                      <p className="mt-2 text-[11px] text-slate-600">Turn on job conditions in Setup if this job needs productivity or cost adjustments.</p>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                        Turn on job conditions in Setup if this job needs productivity or cost adjustments.
+                      </p>
                     )}
-                    {(summary?.conditionAssumptions?.length || 0) > 10 ? (
-                      <p className="mt-2 text-[10px] text-slate-500">Showing 10 of {summary?.conditionAssumptions?.length}. Full list appears in Setup and proposal assumptions.</p>
-                    ) : null}
                   </div>
                 </div>
               </div>

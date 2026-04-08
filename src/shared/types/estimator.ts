@@ -57,17 +57,17 @@ export interface ProjectJobConditions {
   scheduleCompressionMultiplier: number;
   estimateAdderPercent: number;
   estimateAdderAmount: number;
-  /** Paid field day length per installer (used with breaks for schedule math). Default 8. */
+  /** Legacy / display; estimate duration uses 8 hr × installer count (no break deduction). */
   installerPaidDayHours: number;
-  /** Non-productive time per installer per day (lunch, breaks) subtracted from paid day for duration only. */
+  /** Legacy; not used in estimate math. */
   dailyBreakHoursPerInstaller: number;
-  /** Extra labor hours and labor $ vs catalog baseline (ramp-in, unfamiliar scope). Applied before job multipliers. */
+  /** Legacy; not applied in estimate math. */
   laborLearningCurvePercent: number;
-  /** Material waste % on takeoff material (before field-supplies adders). */
+  /** Legacy; not applied in estimate math. */
   materialWastePercent: number;
-  /** Consumables / small parts as % of material after waste (caulk, blades, fasteners, etc.). */
+  /** Legacy; not applied in estimate math. */
   installerFieldSuppliesPercent: number;
-  /** Flat allowance for installer consumables ($), added after waste, before field-supplies %. */
+  /** Legacy; not applied in estimate math. */
   installerFieldSuppliesFlat: number;
 }
 
@@ -218,6 +218,8 @@ export interface SettingsRecord {
   defaultProfitPercent: number;
   defaultTaxPercent: number;
   defaultLaborBurdenPercent: number;
+  /** Default labor overhead % on loaded sub labor (after burden). Typical office default 5. */
+  defaultLaborOverheadPercent: number;
   proposalIntro: string;
   proposalTerms: string;
   proposalExclusions: string;
@@ -260,13 +262,13 @@ export interface EstimateSummary {
   baseBidTotal: number;
   conditionAssumptions: string[];
   projectConditions: ProjectConditions;
-  /** Productive crew-hours per day (after breaks) used for field-day count. */
+  /** 8 crew-hr per installer-day × crew size, for duration-day count. */
   productiveCrewHoursPerDay: number;
-  /** $ added for material waste (on raw takeoff material). */
+  /** Always zero; legacy field. */
   materialWasteAllowanceAmount: number;
-  /** $ added for installer field supplies (flat + % of material after waste). */
+  /** Always zero; legacy field. */
   installerFieldSuppliesAmount: number;
-  /** Labor $ attributed to learning-curve allowance (before condition multipliers). */
+  /** Always zero; legacy field. */
   laborLearningCurveAllowanceAmount: number;
 }
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChevronDown, Info } from 'lucide-react';
 import type { ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord } from '../../shared/types/estimator';
-import { RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES, recommendDeliveryPlan } from '../../shared/utils/jobConditions';
+import { OFFICE_FIELD_SCHEDULE_DEFAULTS, recommendDeliveryPlan } from '../../shared/utils/jobConditions';
 import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat';
 
 type SummaryLite = {
@@ -112,13 +112,13 @@ export function ProjectSetupWorkspace({
             overheadPercent: settings.defaultOverheadPercent,
             profitPercent: 0,
             taxPercent: settings.defaultTaxPercent,
-            laborOverheadPercent: 0,
+            laborOverheadPercent: settings.defaultLaborOverheadPercent,
             laborProfitPercent: 0,
           }
         : prev
     );
     patchJobConditions({
-      ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
+      ...OFFICE_FIELD_SCHEDULE_DEFAULTS,
       laborRateMultiplier: 1,
       installerCount: 1,
       estimateAdderPercent: 0,
@@ -425,7 +425,7 @@ export function ProjectSetupWorkspace({
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 3</p>
             <h2 className="mt-0.5 text-xl font-semibold text-slate-900">Advanced pricing defaults</h2>
-            <p className="mt-1 text-sm text-slate-600">Office-style markups, burdens, field allowances, and adders. Same grid as intake — collapse if you only need Section 1.</p>
+            <p className="mt-1 text-sm text-slate-600">Office-style markups, optional labor burden, and adders. Same grid as intake — collapse if you only need Section 1.</p>
           </div>
           <ChevronDown className="h-5 w-5 shrink-0 text-slate-500 transition group-open:rotate-180" />
         </summary>
@@ -456,6 +456,9 @@ export function ProjectSetupWorkspace({
                 value={project.laborBurdenPercent}
                 onChange={(e) => setProject({ ...project, laborBurdenPercent: Number(e.target.value) || 0 })}
               />
+              <span className="mt-1 block max-w-md text-[10px] font-normal leading-snug text-slate-500">
+                Use 0 when your $/hr already includes burden.
+              </span>
             </label>
             <label className="text-[11px] font-medium text-slate-700 sm:col-span-2 md:col-span-1">
               Material O&amp;P % (after tax on material)
@@ -576,92 +579,6 @@ export function ProjectSetupWorkspace({
                 onChange={(e) => patchJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })}
               />
             </label>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-            <p className="text-xs font-semibold text-slate-900">Field day &amp; material pad</p>
-            <p className="mt-0.5 text-[11px] text-slate-600">Paid day, breaks, learning curve, waste, and field supplies — typical commercial-fit assumptions.</p>
-            <div className="mt-2 grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 md:grid-cols-3">
-              <label className="text-[11px] font-medium text-slate-700">
-                Paid day (hr/installer)
-                <input
-                  type="number"
-                  step="0.25"
-                  min={4}
-                  max={12}
-                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
-                  value={jobConditions.installerPaidDayHours}
-                  onChange={(e) => patchJobConditions({ installerPaidDayHours: Number(e.target.value) || RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.installerPaidDayHours })}
-                />
-              </label>
-              <label className="text-[11px] font-medium text-slate-700">
-                Breaks / lunch (hr/installer/day)
-                <input
-                  type="number"
-                  step="0.25"
-                  min={0}
-                  max={4}
-                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
-                  value={jobConditions.dailyBreakHoursPerInstaller}
-                  onChange={(e) => patchJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })}
-                />
-              </label>
-              <label className="text-[11px] font-medium text-slate-700">
-                Learning curve %
-                <input
-                  type="number"
-                  step="0.5"
-                  min={0}
-                  className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
-                  value={jobConditions.laborLearningCurvePercent}
-                  onChange={(e) => patchJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })}
-                />
-              </label>
-              {showMaterial ? (
-                <>
-                  <label className="text-[11px] font-medium text-slate-700">
-                    Material waste %
-                    <input
-                      type="number"
-                      step="0.5"
-                      min={0}
-                      className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
-                      value={jobConditions.materialWastePercent}
-                      onChange={(e) => patchJobConditions({ materialWastePercent: Number(e.target.value) || 0 })}
-                    />
-                  </label>
-                  <label className="text-[11px] font-medium text-slate-700">
-                    Field supplies % (after waste)
-                    <input
-                      type="number"
-                      step="0.5"
-                      min={0}
-                      className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
-                      value={jobConditions.installerFieldSuppliesPercent}
-                      onChange={(e) => patchJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })}
-                    />
-                  </label>
-                  <label className="text-[11px] font-medium text-slate-700">
-                    Field supplies flat $
-                    <input
-                      type="number"
-                      step="1"
-                      min={0}
-                      className="ui-input mt-0.5 h-8 w-full max-w-[6.5rem]"
-                      value={jobConditions.installerFieldSuppliesFlat}
-                      onChange={(e) => patchJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })}
-                    />
-                  </label>
-                </>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              onClick={() => patchJobConditions({ ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES })}
-              className="ui-btn-secondary mt-3 h-auto rounded-lg px-3 py-1.5 text-[11px] font-semibold"
-            >
-              Reset field schedule to recommended
-            </button>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-4">

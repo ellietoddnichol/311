@@ -2,11 +2,10 @@ import { GlobalModifierImpact, ProjectConditions, ProjectJobConditions, ProjectR
 import { formatCurrencySafe, formatNumberSafe, formatPercentSafe } from '../../utils/numberFormat';
 
 /**
- * Typical commercial / fit-out estimating pad: pre-waste material cushion, consumables on material,
- * paid day minus a lunch break, mild learning-curve pad on labor dollars and minutes.
- * Use for new projects and “Reset to recommended” in Project Setup.
+ * Default field-schedule / material-pad fields on new projects. The estimate engine does not apply waste,
+ * supplies, learning-curve, or break deductions; duration uses 8 crew-hr per installer-day × crew size.
  */
-export const RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES: Pick<
+export const OFFICE_FIELD_SCHEDULE_DEFAULTS: Pick<
   ProjectJobConditions,
   | 'installerPaidDayHours'
   | 'dailyBreakHoursPerInstaller'
@@ -16,10 +15,10 @@ export const RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES: Pick<
   | 'installerFieldSuppliesFlat'
 > = {
   installerPaidDayHours: 8,
-  dailyBreakHoursPerInstaller: 0.5,
-  laborLearningCurvePercent: 5,
-  materialWastePercent: 10,
-  installerFieldSuppliesPercent: 3,
+  dailyBreakHoursPerInstaller: 0,
+  laborLearningCurvePercent: 0,
+  materialWastePercent: 0,
+  installerFieldSuppliesPercent: 0,
   installerFieldSuppliesFlat: 0,
 };
 
@@ -65,7 +64,7 @@ const DEFAULT_JOB_CONDITIONS: ProjectJobConditions = {
   scheduleCompressionMultiplier: 0.1,
   estimateAdderPercent: 0,
   estimateAdderAmount: 0,
-  ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
+  ...OFFICE_FIELD_SCHEDULE_DEFAULTS,
 };
 
 export function createDefaultProjectJobConditions(): ProjectJobConditions {
@@ -527,28 +526,5 @@ export function buildProjectConditionSummaryLines(jobConditions?: Partial<Projec
     lines.push(`Approximate travel distance from office: ${formatNumberSafe(travelMilesForSummary, 1)} miles.`);
   }
   if (job.installerCount > 1) lines.push(`Schedule planning assumes a ${job.installerCount}-installer crew.`);
-  if (job.materialWastePercent > 0) {
-    lines.push(`Material waste allowance of ${formatPercentSafe(job.materialWastePercent)} was included on takeoff material.`);
-  }
-  if (job.installerFieldSuppliesFlat > 0 || job.installerFieldSuppliesPercent > 0) {
-    const parts: string[] = [];
-    if (job.installerFieldSuppliesFlat > 0) parts.push(`${formatCurrencySafe(job.installerFieldSuppliesFlat)} flat`);
-    if (job.installerFieldSuppliesPercent > 0) {
-      parts.push(`${formatPercentSafe(job.installerFieldSuppliesPercent)} of material after waste`);
-    }
-    lines.push(`Installer field supplies (consumables) were included: ${parts.join(' and ')}.`);
-  }
-  if (job.laborLearningCurvePercent > 0) {
-    lines.push(
-      `Labor learning-curve allowance of ${formatPercentSafe(job.laborLearningCurvePercent)} was applied to labor hours and labor dollars.`
-    );
-  }
-  if (job.dailyBreakHoursPerInstaller > 0) {
-    const productive = Math.max(0.25, job.installerPaidDayHours - job.dailyBreakHoursPerInstaller);
-    lines.push(
-      `Field-day length ${formatNumberSafe(job.installerPaidDayHours, 1)} hr paid per installer with ${formatNumberSafe(job.dailyBreakHoursPerInstaller, 2)} hr breaks/lunch (${formatNumberSafe(productive, 2)} productive hr/installer/day).`
-    );
-  }
-
   return lines;
 }

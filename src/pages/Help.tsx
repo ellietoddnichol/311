@@ -34,7 +34,7 @@ const WORKFLOW_STEPS = [
 ];
 
 const KEY_NOTES = [
-  'Keep company defaults current in Settings so new projects start with the right labor rate, burden, overhead, profit, and proposal text.',
+  'Keep company defaults current in Settings so new projects start with the right labor rate, optional burden, labor overhead, material markups, and proposal text.',
   'Use Project Setup before adjusting estimate lines. Job conditions and labor multipliers affect the entire estimate, not just one room.',
   'Store source files in the Files tab so parser inputs, reference drawings, and support documents stay attached to the project.',
   'Proposal PDF export is intended for client handoff. Browser print remains available for quick physical copies or print-to-PDF workflows.',

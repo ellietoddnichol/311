@@ -98,6 +98,7 @@ export function initEstimatorSchema(db: Database) {
       default_profit_percent REAL NOT NULL DEFAULT 0,
       default_tax_percent REAL NOT NULL DEFAULT 0,
       default_labor_burden_percent REAL NOT NULL DEFAULT 0,
+      default_labor_overhead_percent REAL NOT NULL DEFAULT 5,
       proposal_intro TEXT NOT NULL,
       proposal_terms TEXT NOT NULL,
       proposal_exclusions TEXT NOT NULL DEFAULT '',
@@ -220,6 +221,11 @@ export function initEstimatorSchema(db: Database) {
   const hasProposalAcceptanceLabel = settingsColumns.some((column) => column.name === 'proposal_acceptance_label');
   if (!hasProposalAcceptanceLabel) {
     db.exec("ALTER TABLE settings_v1 ADD COLUMN proposal_acceptance_label TEXT NOT NULL DEFAULT 'Accepted By'");
+  }
+
+  const hasDefaultLaborOverheadPercent = settingsColumns.some((column) => column.name === 'default_labor_overhead_percent');
+  if (!hasDefaultLaborOverheadPercent) {
+    db.exec('ALTER TABLE settings_v1 ADD COLUMN default_labor_overhead_percent REAL NOT NULL DEFAULT 5');
   }
 
   const takeoffColumns = db.prepare("PRAGMA table_info(takeoff_lines_v1)").all() as Array<{ name: string }>;
@@ -393,9 +399,9 @@ export function initEstimatorSchema(db: Database) {
     db.prepare(`
       INSERT INTO settings_v1 (
         id, company_name, company_address, company_phone, company_email, logo_url, default_labor_rate_per_hour,
-        default_overhead_percent, default_profit_percent, default_tax_percent, default_labor_burden_percent,
+        default_overhead_percent, default_profit_percent, default_tax_percent, default_labor_burden_percent, default_labor_overhead_percent,
         proposal_intro, proposal_terms, proposal_exclusions, proposal_clarifications, proposal_acceptance_label, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'global',
       'Brighten Builders, LLC',
@@ -407,7 +413,8 @@ export function initEstimatorSchema(db: Database) {
       15,
       10,
       8.25,
-      25,
+      0,
+      5,
       DEFAULT_PROPOSAL_INTRO,
       DEFAULT_PROPOSAL_TERMS,
       DEFAULT_PROPOSAL_EXCLUSIONS,

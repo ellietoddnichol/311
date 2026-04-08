@@ -14,7 +14,8 @@ function mapSettingsRow(row: any): SettingsRecord {
     defaultOverheadPercent: Number(row.default_overhead_percent ?? 15),
     defaultProfitPercent: Number(row.default_profit_percent ?? 10),
     defaultTaxPercent: Number(row.default_tax_percent ?? 8.25),
-    defaultLaborBurdenPercent: Number(row.default_labor_burden_percent ?? 25),
+    defaultLaborBurdenPercent: Number(row.default_labor_burden_percent ?? 0),
+    defaultLaborOverheadPercent: Number(row.default_labor_overhead_percent ?? 5),
     proposalIntro: row.proposal_intro,
     proposalTerms: row.proposal_terms,
     proposalExclusions: row.proposal_exclusions,
@@ -43,7 +44,7 @@ export function updateSettings(input: Partial<SettingsRecord>): SettingsRecord {
   getEstimatorDb().prepare(`
     UPDATE settings_v1 SET
       company_name = ?, company_address = ?, company_phone = ?, company_email = ?, logo_url = ?, default_labor_rate_per_hour = ?,
-      default_overhead_percent = ?, default_profit_percent = ?, default_tax_percent = ?, default_labor_burden_percent = ?,
+      default_overhead_percent = ?, default_profit_percent = ?, default_tax_percent = ?, default_labor_burden_percent = ?, default_labor_overhead_percent = ?,
       proposal_intro = ?, proposal_terms = ?, proposal_exclusions = ?, proposal_clarifications = ?, proposal_acceptance_label = ?, updated_at = ?
     WHERE id = 'global'
   `).run(
@@ -57,6 +58,7 @@ export function updateSettings(input: Partial<SettingsRecord>): SettingsRecord {
     next.defaultProfitPercent,
     next.defaultTaxPercent,
     next.defaultLaborBurdenPercent,
+    next.defaultLaborOverheadPercent,
     next.proposalIntro,
     next.proposalTerms,
     next.proposalExclusions,

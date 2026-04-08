@@ -9,7 +9,7 @@ import { CatalogItem } from '../types';
 import {
   createDefaultProjectJobConditions,
   normalizeProjectJobConditions,
-  RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
+  OFFICE_FIELD_SCHEDULE_DEFAULTS,
   recommendDeliveryPlan,
   recommendedPhasedWorkMultiplier,
 } from '../shared/utils/jobConditions';
@@ -1140,10 +1140,10 @@ function createInitialProjectDraft(settings?: SettingsRecord | null): Partial<Pr
     installHeight: 'Standard',
     materialHandling: 'Standard',
     wallSubstrate: 'Drywall',
-    laborBurdenPercent: settings?.defaultLaborBurdenPercent ?? 25,
+    laborBurdenPercent: settings?.defaultLaborBurdenPercent ?? 0,
     overheadPercent: settings?.defaultOverheadPercent ?? 15,
     profitPercent: 0,
-    laborOverheadPercent: 0,
+    laborOverheadPercent: settings?.defaultLaborOverheadPercent ?? 5,
     laborProfitPercent: 0,
     subLaborManagementFeeEnabled: false,
     subLaborManagementFeePercent: 5,
@@ -1387,13 +1387,13 @@ export function ProjectIntake() {
       ...prev,
       laborBurdenPercent: settingsDefaults.defaultLaborBurdenPercent,
       overheadPercent: settingsDefaults.defaultOverheadPercent,
-      profitPercent: settingsDefaults.defaultProfitPercent,
+      profitPercent: 0,
       taxPercent: settingsDefaults.defaultTaxPercent,
-      laborOverheadPercent: settingsDefaults.defaultOverheadPercent,
-      laborProfitPercent: settingsDefaults.defaultProfitPercent,
+      laborOverheadPercent: settingsDefaults.defaultLaborOverheadPercent,
+      laborProfitPercent: 0,
       jobConditions: normalizeProjectJobConditions({
         ...(prev.jobConditions || createDefaultProjectJobConditions()),
-        ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES,
+        ...OFFICE_FIELD_SCHEDULE_DEFAULTS,
         laborRateMultiplier: 1,
         installerCount: 1,
         estimateAdderPercent: 0,
@@ -1414,7 +1414,7 @@ export function ProjectIntake() {
       );
     if (field === 'profit') return Number(projectDraft.profitPercent) === settingsDefaults.defaultProfitPercent;
     if (field === 'tax') return Number(projectDraft.taxPercent) === settingsDefaults.defaultTaxPercent;
-    if (field === 'laborOverhead') return Number(projectDraft.laborOverheadPercent) === 0;
+    if (field === 'laborOverhead') return Number(projectDraft.laborOverheadPercent) === settingsDefaults.defaultLaborOverheadPercent;
     if (field === 'laborProfit') return Number(projectDraft.laborProfitPercent) === 0;
     return false;
   }
@@ -2255,15 +2255,11 @@ export function ProjectIntake() {
         installHeight: projectDraft.installHeight || null,
         materialHandling: projectDraft.materialHandling || null,
         wallSubstrate: projectDraft.wallSubstrate || null,
-        laborBurdenPercent: Number(projectDraft.laborBurdenPercent ?? settingsDefaults?.defaultLaborBurdenPercent ?? 25),
+        laborBurdenPercent: Number(projectDraft.laborBurdenPercent ?? settingsDefaults?.defaultLaborBurdenPercent ?? 0),
         overheadPercent: Number(projectDraft.overheadPercent ?? settingsDefaults?.defaultOverheadPercent ?? 15),
         profitPercent: Number(projectDraft.profitPercent ?? settingsDefaults?.defaultProfitPercent ?? 10),
-        laborOverheadPercent: Number(
-          projectDraft.laborOverheadPercent ?? projectDraft.overheadPercent ?? settingsDefaults?.defaultOverheadPercent ?? 15
-        ),
-        laborProfitPercent: Number(
-          projectDraft.laborProfitPercent ?? projectDraft.profitPercent ?? settingsDefaults?.defaultProfitPercent ?? 10
-        ),
+        laborOverheadPercent: Number(projectDraft.laborOverheadPercent ?? settingsDefaults?.defaultLaborOverheadPercent ?? 5),
+        laborProfitPercent: Number(projectDraft.laborProfitPercent ?? 0),
         subLaborManagementFeeEnabled: Boolean(projectDraft.subLaborManagementFeeEnabled),
         subLaborManagementFeePercent: Number(projectDraft.subLaborManagementFeePercent ?? 5),
         taxPercent: Number(projectDraft.taxPercent ?? settingsDefaults?.defaultTaxPercent ?? 8.25),
@@ -3014,7 +3010,7 @@ export function ProjectIntake() {
                           <div>
                             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 3</p>
                             <p className="text-sm font-semibold text-slate-900">Advanced pricing defaults</p>
-                            <p className="mt-0.5 text-xs text-slate-500">Burden, O&amp;P, crew, field day, adders — usually matches Settings.</p>
+                            <p className="mt-0.5 text-xs text-slate-500">Burden, O&amp;P, crew, adders — usually matches Settings.</p>
                           </div>
                           <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180" aria-hidden />
                         </summary>
@@ -3035,6 +3031,9 @@ export function ProjectIntake() {
                               Labor burden % (sub)
                               {matchesIntakeOffice('burden') ? <IntakeFieldBadge kind="office" /> : <IntakeFieldBadge kind="optional" />}
                               <input type="number" step="0.01" className="ui-input mt-1 h-9" value={projectDraft.laborBurdenPercent ?? ''} onChange={(e) => patchProjectDraft({ laborBurdenPercent: Number(e.target.value) || 0 })} />
+                              <span className="mt-1 block max-w-xl text-[10px] font-normal leading-snug text-slate-500">
+                                Use 0 when your $/hr already includes burden.
+                              </span>
                             </label>
                             <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
                               Material O&amp;P % (after tax on material)
@@ -3129,39 +3128,6 @@ export function ProjectIntake() {
                               Project adder $
                               <input type="number" step="0.01" className="ui-input mt-1 h-9" value={draftJob.estimateAdderAmount} onChange={(e) => patchDraftJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} />
                             </label>
-                          </div>
-                          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                            <p className="text-xs font-semibold text-slate-900">Field day &amp; material pad</p>
-                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                              <label className="text-[11px] font-medium text-slate-700">
-                                Paid day (hr/installer)
-                                <input type="number" step="0.25" min={4} max={12} className="ui-input mt-1 h-9" value={draftJob.installerPaidDayHours} onChange={(e) => patchDraftJobConditions({ installerPaidDayHours: Number(e.target.value) || RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES.installerPaidDayHours })} />
-                              </label>
-                              <label className="text-[11px] font-medium text-slate-700">
-                                Breaks / lunch (hr/installer/day)
-                                <input type="number" step="0.25" min={0} className="ui-input mt-1 h-9" value={draftJob.dailyBreakHoursPerInstaller} onChange={(e) => patchDraftJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })} />
-                              </label>
-                              <label className="text-[11px] font-medium text-slate-700">
-                                Learning curve %
-                                <input type="number" step="0.5" min={0} className="ui-input mt-1 h-9" value={draftJob.laborLearningCurvePercent} onChange={(e) => patchDraftJobConditions({ laborLearningCurvePercent: Number(e.target.value) || 0 })} />
-                              </label>
-                              {(projectDraft.pricingMode as PricingMode) !== 'labor_only' ? (
-                                <>
-                                  <label className="text-[11px] font-medium text-slate-700">
-                                    Material waste %
-                                    <input type="number" step="0.5" min={0} className="ui-input mt-1 h-9" value={draftJob.materialWastePercent} onChange={(e) => patchDraftJobConditions({ materialWastePercent: Number(e.target.value) || 0 })} />
-                                  </label>
-                                  <label className="text-[11px] font-medium text-slate-700">
-                                    Field supplies % (after waste)
-                                    <input type="number" step="0.5" min={0} className="ui-input mt-1 h-9" value={draftJob.installerFieldSuppliesPercent} onChange={(e) => patchDraftJobConditions({ installerFieldSuppliesPercent: Number(e.target.value) || 0 })} />
-                                  </label>
-                                  <label className="text-[11px] font-medium text-slate-700">
-                                    Field supplies flat $
-                                    <input type="number" step="1" min={0} className="ui-input mt-1 h-9" value={draftJob.installerFieldSuppliesFlat} onChange={(e) => patchDraftJobConditions({ installerFieldSuppliesFlat: Number(e.target.value) || 0 })} />
-                                  </label>
-                                </>
-                              ) : null}
-                            </div>
                           </div>
                           <div className="rounded-xl border border-slate-200 bg-white p-3">
                             <p className="text-xs font-semibold text-slate-900">Sub labor management fee</p>

@@ -265,8 +265,13 @@ export function Settings() {
             <label className="text-xs text-slate-600 block">Default Profit %
               <input type="number" className="ui-input mt-1" value={settings.defaultProfitPercent} onChange={(e) => setSettings({ ...settings, defaultProfitPercent: Number(e.target.value) || 0 })} />
             </label>
-            <label className="text-xs text-slate-600 block">Default Labor Burden %
+            <label className="text-xs text-slate-600 block">Default labor burden % (sub)
               <input type="number" className="ui-input mt-1" value={settings.defaultLaborBurdenPercent} onChange={(e) => setSettings({ ...settings, defaultLaborBurdenPercent: Number(e.target.value) || 0 })} />
+              <span className="mt-1 block text-[11px] text-slate-500">Use 0 when your billing $/hr already includes burden.</span>
+            </label>
+            <label className="text-xs text-slate-600 block">Default labor overhead % (sub)
+              <input type="number" className="ui-input mt-1" value={settings.defaultLaborOverheadPercent} onChange={(e) => setSettings({ ...settings, defaultLaborOverheadPercent: Number(e.target.value) || 0 })} />
+              <span className="mt-1 block text-[11px] text-slate-500">Sell-side markup on loaded labor after burden (office default is often 5%).</span>
             </label>
           </div>
 
