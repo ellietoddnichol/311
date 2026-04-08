@@ -162,7 +162,7 @@ export function ProjectSetup({ project, onUpdate }: Props) {
                 </div>
                 {calculatingDistance && <span className="text-blue-500 animate-pulse">Calculating distance...</span>}
                 {distance !== null && !calculatingDistance && (
-                  <span className={`text-xs ${distance > 50 ? 'text-orange-600 font-bold' : 'text-green-600'}`}>
+                  <span className={`text-xs ${distance > 50 ? 'font-bold text-[var(--warn)]' : 'font-medium text-[var(--success)]'}`}>
                     {formatNumberSafe(distance, 1)} miles from office {distance > 50 ? '(Remote Surcharge Applies)' : ''}
                   </span>
                 )}

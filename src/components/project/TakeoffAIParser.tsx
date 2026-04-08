@@ -130,8 +130,8 @@ export function TakeoffAIParser({ project, catalog, onImport, onClose }: Props) 
       <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="bg-purple-100 p-2 rounded-lg">
-              <Upload className="w-6 h-6 text-purple-600" />
+            <div className="rounded-lg p-2" style={{ background: 'var(--brand-soft)' }}>
+              <Upload className="h-6 w-6" style={{ color: 'var(--brand)' }} />
             </div>
             <h2 className="text-2xl font-bold text-gray-900">AI Takeoff Parser</h2>
           </div>
@@ -145,13 +145,13 @@ export function TakeoffAIParser({ project, catalog, onImport, onClose }: Props) 
             <div className="space-y-8">
               <div 
                 {...getRootProps()} 
-                className={`border-4 border-dashed rounded-3xl p-12 text-center transition-all cursor-pointer ${
-                  isDragActive ? 'border-purple-500 bg-purple-50' : 'border-gray-100 hover:border-purple-200 hover:bg-gray-50'
+                className={`cursor-pointer rounded-3xl border-4 border-dashed p-12 text-center transition-all ${
+                  isDragActive ? 'border-blue-500 bg-[var(--brand-soft)]' : 'border-gray-100 hover:border-blue-300 hover:bg-gray-50'
                 }`}
               >
                 <input {...getInputProps()} />
-                <div className="bg-purple-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <FileText className="w-10 h-10 text-purple-600" />
+                <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full" style={{ background: 'var(--brand-soft)' }}>
+                  <FileText className="h-10 w-10" style={{ color: 'var(--brand)' }} />
                 </div>
                 {file ? (
                   <div>
@@ -174,9 +174,10 @@ export function TakeoffAIParser({ project, catalog, onImport, onClose }: Props) 
               )}
 
               <button
+                type="button"
                 onClick={handleParse}
                 disabled={!file || parsing}
-                className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-purple-100 transition-all flex items-center justify-center space-x-3"
+                className="ui-btn-primary flex w-full items-center justify-center space-x-3 rounded-2xl py-4 text-lg font-bold shadow-xl shadow-blue-200/40 transition-all disabled:opacity-40"
               >
                 {parsing ? (
                   <>
@@ -195,7 +196,7 @@ export function TakeoffAIParser({ project, catalog, onImport, onClose }: Props) 
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold text-gray-900">Extracted Items ({results.length})</h3>
-                <button onClick={() => setResults([])} className="text-sm font-bold text-purple-600 hover:underline">
+                <button type="button" onClick={() => setResults([])} className="text-sm font-bold hover:underline" style={{ color: 'var(--brand)' }}>
                   Start Over
                 </button>
               </div>

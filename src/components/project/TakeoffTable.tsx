@@ -219,41 +219,41 @@ export function TakeoffTable({ project, estimate, onUpdate }: Props) {
         </div>
         
         <div className="flex items-center space-x-3">
-          <button 
+          <button
             onClick={() => setShowAIParser(true)}
-            className="bg-purple-50 hover:bg-purple-100 text-purple-700 px-6 py-3 rounded-xl font-bold flex items-center space-x-2 border border-purple-100 transition-all active:scale-95"
+            className="flex items-center space-x-2 rounded-xl border border-blue-200/80 bg-[var(--brand-soft)] px-6 py-3 text-sm font-semibold text-[var(--brand-strong)] shadow-sm transition-all hover:bg-white active:scale-[0.98]"
           >
             <Sparkles className="w-5 h-5" />
             <span>AI Parse</span>
           </button>
 
-          <button 
+          <button
             onClick={() => setShowBundles(true)}
-            className="bg-orange-50 hover:bg-orange-100 text-orange-700 px-6 py-3 rounded-xl font-bold flex items-center space-x-2 border border-orange-100 transition-all active:scale-95"
+            className="flex items-center space-x-2 rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-800 shadow-sm transition-all hover:bg-slate-50 active:scale-[0.98]"
           >
             <Layers className="w-5 h-5" />
             <span>Bundles</span>
           </button>
 
-          <button 
+          <button
             onClick={() => setShowAddIns(true)}
-            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-6 py-3 rounded-xl font-bold flex items-center space-x-2 border border-emerald-100 transition-all active:scale-95"
+            className="flex items-center space-x-2 rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-800 shadow-sm transition-all hover:bg-slate-50 active:scale-[0.98]"
           >
             <Plus className="w-5 h-5" />
             <span>Add-ins</span>
           </button>
-          
-          <button 
+
+          <button
             onClick={handleAddManualLine}
-            className="bg-gray-50 hover:bg-gray-100 text-gray-700 px-6 py-3 rounded-xl font-bold flex items-center space-x-2 border border-gray-200 transition-all active:scale-95"
+            className="flex items-center space-x-2 rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-800 shadow-sm transition-all hover:bg-slate-50 active:scale-[0.98]"
           >
             <Plus className="w-5 h-5" />
             <span>Manual</span>
           </button>
-          
-          <button 
+
+          <button
             onClick={() => setShowCatalog(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-semibold flex items-center space-x-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
+            className="ui-btn-primary flex items-center space-x-2 rounded-xl px-6 py-3 text-sm font-semibold shadow-md active:scale-[0.98]"
           >
             <Search className="w-5 h-5" />
             <span>Catalog</span>
@@ -392,14 +392,14 @@ export function TakeoffTable({ project, estimate, onUpdate }: Props) {
                         <button
                           key={bundle.id}
                           onClick={() => handleApplyBundle(bundle)}
-                          className="w-full p-6 text-left border border-gray-100 rounded-2xl hover:border-orange-500 hover:bg-orange-50/50 transition-all group"
+                          className="group w-full rounded-2xl border border-gray-100 p-6 text-left transition-all hover:border-blue-400 hover:bg-[var(--brand-soft)]/50"
                         >
                           <div className="flex justify-between items-center">
                             <div>
                               <h3 className="font-bold text-gray-900 text-lg">{bundle.name}</h3>
                               <p className="text-sm text-gray-500 mt-1">{bundle.items.length} items included</p>
                             </div>
-                            <Plus className="w-6 h-6 text-gray-300 group-hover:text-orange-600 transition-colors" />
+                            <Plus className="w-6 h-6 text-gray-300 transition-colors group-hover:text-[var(--brand)]" />
                           </div>
                         </button>
                       ))}
@@ -460,14 +460,14 @@ export function TakeoffTable({ project, estimate, onUpdate }: Props) {
                         if (item) handleAddLine(item);
                         setShowAddIns(false);
                       }}
-                      className="p-6 text-left border border-gray-100 rounded-2xl hover:border-emerald-500 hover:bg-emerald-50/50 transition-all group"
+                      className="group rounded-2xl border border-slate-200/90 bg-white p-6 text-left transition-all hover:border-blue-300/80 hover:bg-[var(--brand-soft)]/40"
                     >
                       <div className="flex justify-between items-center">
                         <div>
                           <h3 className="font-bold text-gray-900 text-lg">{addin.name}</h3>
                           <p className="text-sm text-gray-500 mt-1">{addin.description}</p>
                         </div>
-                        <Plus className="w-6 h-6 text-gray-300 group-hover:text-emerald-600 transition-colors" />
+                        <Plus className="w-6 h-6 text-gray-300 transition-colors group-hover:text-[var(--brand)]" />
                       </div>
                     </button>
                   ))}

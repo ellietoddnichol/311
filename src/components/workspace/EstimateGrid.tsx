@@ -81,6 +81,18 @@ export function EstimateGrid({
   const isTakeoffView = viewMode === 'takeoff';
   const columnCount = isTakeoffView ? 4 : 8 + (showLabor ? 2 : 0) + (showMaterial ? 1 : 0);
 
+  /** Fixed column shares so the line grid—not a single description column—uses most width sensibly */
+  const estimateColWidths = useMemo(() => {
+    if (isTakeoffView) return null;
+    if (showLabor && showMaterial) {
+      return ['26%', '9%', '10%', '4%', '3%', '8%', '9%', '8%', '8%', '8%', '7%'];
+    }
+    if (showLabor) {
+      return ['28%', '10%', '11%', '5%', '4%', '9%', '10%', '9%', '9%', '5%'];
+    }
+    return ['30%', '10%', '12%', '5%', '4%', '10%', '12%', '12%', '5%'];
+  }, [isTakeoffView, showLabor, showMaterial]);
+
   const bundleMeta = useMemo(() => {
     const byBundle: Record<string, { count: number; subtotal: number; name: string; laborMinutesExtended: number }> = {};
     lines.forEach((line) => {
@@ -106,28 +118,15 @@ export function EstimateGrid({
 
   function modifierLine(names: string[]) {
     if (!names.length) return null;
-    return (
-      <div className="mt-px text-[10px] font-medium leading-snug text-indigo-800/90">
-        {names.join(' · ')}
-      </div>
-    );
+    return <div className="mt-0.5 text-xs font-normal leading-snug text-slate-700">{names.join(' · ')}</div>;
   }
 
-  const sourceBadgeClass = (sourceType: string) => {
-    const key = String(sourceType || '').toLowerCase();
-    if (key.includes('bundle')) return 'bg-violet-50 text-violet-700 border-violet-200';
-    if (key.includes('catalog')) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    if (key.includes('manual')) return 'bg-amber-50 text-amber-700 border-amber-200';
-    if (key.includes('takeoff') || key.includes('parser')) return 'bg-sky-50 text-sky-700 border-sky-200';
-    return 'bg-slate-100 text-slate-600 border-slate-200';
-  };
-
   const rowAccentClass = (line: TakeoffLineRecord) => {
-    if (line.bundleId) return 'border-l-violet-300';
+    if (line.bundleId) return 'border-l-slate-500';
     const key = String(line.sourceType || '').toLowerCase();
-    if (key.includes('catalog')) return 'border-l-emerald-300';
-    if (key.includes('manual')) return 'border-l-amber-300';
-    if (key.includes('takeoff') || key.includes('parser')) return 'border-l-sky-300';
+    if (key.includes('catalog')) return 'border-l-slate-400';
+    if (key.includes('manual')) return 'border-l-slate-300';
+    if (key.includes('takeoff') || key.includes('parser')) return 'border-l-slate-300';
     return 'border-l-slate-200';
   };
 
@@ -265,46 +264,49 @@ export function EstimateGrid({
   }, [lines, organizeBy, roomNamesById]);
 
   return (
-    <div className={`overflow-hidden border shadow-sm ${isTakeoffView ? 'rounded-lg border-teal-200/70 bg-white ring-1 ring-teal-100/60' : 'rounded-lg border-slate-200/70 bg-white'}`}>
-      <div className="overflow-y-auto max-h-[min(70vh,820px)]">
-        <table className={`w-full table-fixed ${isTakeoffView ? 'text-xs' : 'text-sm'}`}>
-          <thead className={`sticky top-0 z-10 border-b ${isTakeoffView ? 'border-teal-200/70 bg-teal-50/70' : 'border-slate-200/70 bg-slate-100'}`}>
+    <div className="ui-panel overflow-hidden">
+      <div className="ui-data-grid-scroll">
+        <table className="ui-data-grid-table">
+          <thead className="ui-data-grid-thead">
             <tr>
               {isTakeoffView ? (
                 <>
-                  <th className="px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Item</th>
-                  <th className="px-2 py-1 w-[4.5rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                  <th className="ui-table-th min-w-[12rem]">Item</th>
+                  <th className="ui-table-th-end w-[5.5rem] whitespace-nowrap">Qty</th>
                   <th
-                    className="px-2 py-1 w-[6.5rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600"
+                    className="ui-table-th-end w-[7.5rem] whitespace-nowrap"
                     title="Catalog install minutes × qty (before project schedule multipliers)"
                   >
                     Install
                   </th>
-                  <th className="px-2 py-1 w-24 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Actions</th>
+                  <th className="ui-table-th-end w-[7.25rem] whitespace-nowrap pl-2">Actions</th>
                 </>
               ) : (
                 <>
-                  <th className="px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 min-w-0">Item</th>
-                  <th className="px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 w-[6.5rem]">Room</th>
-                  <th className="px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600 w-28">Category</th>
-                  <th className="px-2 py-1 w-14 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Qty</th>
-                  <th className="px-2 py-1 w-12 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600">Unit</th>
+                  <th className="ui-table-th min-w-0">Item</th>
+                  <th className="ui-table-th whitespace-nowrap">Room</th>
+                  <th className="ui-table-th min-w-0">Category</th>
+                  <th className="ui-table-th-end w-12 whitespace-nowrap">Qty</th>
+                  <th className="ui-table-th w-11 text-center">Unit</th>
                 </>
               )}
               {!isTakeoffView && showLabor ? (
-                <th className="px-2 py-1 w-[7rem] text-left text-[10px] font-semibold uppercase tracking-wide text-slate-600" title="Labor minutes × qty per line (before project schedule multipliers; see Labor time card for adjusted totals)">
+                <th
+                  className="ui-table-th-end w-[6.25rem] whitespace-nowrap"
+                  title="Labor minutes × qty per line (before project schedule multipliers; see Labor time card for adjusted totals)"
+                >
                   Install time
                 </th>
               ) : null}
               {!isTakeoffView && showLabor ? (
-                <th className="w-24 border-l border-slate-200/80 px-2 py-1 pl-2.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-                  Labor $
-                </th>
+                <th className="ui-table-th-end w-[5.25rem] whitespace-nowrap border-l border-slate-300/60 pl-3">Labor $</th>
               ) : null}
-              {!isTakeoffView && showMaterial ? <th className="px-2 py-1 w-[4.5rem] text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Material</th> : null}
-              {!isTakeoffView ? <th className="px-2 py-1 w-[4.5rem] text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Unit sell</th> : null}
-              {!isTakeoffView ? <th className="px-2 py-1 w-[4.5rem] text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Total</th> : null}
-              {!isTakeoffView ? <th className="px-2 py-1 w-24 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-600">Actions</th> : null}
+              {!isTakeoffView && showMaterial ? (
+                <th className="ui-table-th-end w-[5.25rem] whitespace-nowrap">Material</th>
+              ) : null}
+              {!isTakeoffView ? <th className="ui-table-th-end w-[5.25rem] whitespace-nowrap">Unit sell</th> : null}
+              {!isTakeoffView ? <th className="ui-table-th-end w-[5.25rem] whitespace-nowrap">Total</th> : null}
+              {!isTakeoffView ? <th className="ui-table-th-end w-[7.25rem] whitespace-nowrap pl-2">Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -332,10 +334,11 @@ export function EstimateGrid({
                 return (
                   <React.Fragment key={row.id}>
                     {isBundleStart && row.bundleId ? (
-                      <tr className="border-b border-violet-100 bg-violet-50/60">
-                        <td colSpan={columnCount} className="px-2 py-1">
+                      <tr className="border-b border-slate-200/80 bg-slate-100/90">
+                        <td colSpan={columnCount} className="px-3 py-2">
                           <button
-                            className={`inline-flex items-center gap-1.5 rounded-lg bg-white font-medium text-violet-800 shadow-sm ring-1 ring-violet-200/70 ${isTakeoffView ? 'px-2 py-1 text-xs' : 'gap-2 px-3 py-1.5 text-sm'}`}
+                            type="button"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 shadow-sm"
                             onClick={() => {
                               setCollapsedBundles((prev) => ({
                                 ...prev,
@@ -346,13 +349,13 @@ export function EstimateGrid({
                             {collapsedBundles[row.bundleId] ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                             <Layers3 className="h-3 w-3" />
                             {bundleMeta[row.bundleId]?.name || 'Bundle'}
-                            <span className="text-violet-600/90">({bundleMeta[row.bundleId]?.count || 0})</span>
+                            <span className="text-slate-500">({bundleMeta[row.bundleId]?.count || 0})</span>
                             {isTakeoffView ? (
-                              <span className="text-violet-800/90 tabular-nums">
+                              <span className="tabular-nums text-slate-700">
                                 · {formatLaborDurationMinutes(bundleMeta[row.bundleId]?.laborMinutesExtended ?? 0)}
                               </span>
                             ) : (
-                              <span className="ml-1 text-violet-900">{formatCurrencySafe(bundleMeta[row.bundleId]?.subtotal)}</span>
+                              <span className="ml-1 text-slate-900">{formatCurrencySafe(bundleMeta[row.bundleId]?.subtotal)}</span>
                             )}
                           </button>
                         </td>
@@ -360,13 +363,19 @@ export function EstimateGrid({
                     ) : null}
                     <tr
                       onClick={() => onSelectLine(row.lineId)}
-                      className={`cursor-pointer border-b border-slate-100/90 border-l-2 ${sourceLine ? rowAccentClass(sourceLine) : 'border-l-slate-200'} ${selected ? (isTakeoffView ? 'bg-teal-50/90 shadow-[inset_0_0_0_1px_rgba(13,148,136,0.2)]' : 'bg-blue-50/70 shadow-[inset_0_0_0_1px_rgba(11,61,145,0.12)]') : stripe ? 'bg-white' : isTakeoffView ? 'bg-teal-50/[0.12]' : 'bg-slate-50/[0.55]'} hover:bg-slate-50 transition-colors`}
+                      className={`ui-data-grid-row cursor-pointer border-l-[3px] ${sourceLine ? rowAccentClass(sourceLine) : 'border-l-slate-200'} ${
+                        selected
+                          ? 'bg-blue-50/90 shadow-[inset_0_0_0_1px_rgba(11,61,145,0.14)]'
+                          : stripe
+                            ? 'bg-white'
+                            : 'bg-slate-50/80'
+                      } hover:bg-slate-100/80`}
                     >
                       {isTakeoffView ? (
                         <>
-                          <td className="px-2 py-1 align-top min-w-0">
+                          <td className="ui-table-cell min-w-0 pr-4">
                             <div
-                              className="text-xs font-semibold leading-snug text-slate-900"
+                              className="ui-table-title"
                               title={[
                                 row.description,
                                 row.category || '',
@@ -380,99 +389,149 @@ export function EstimateGrid({
                             >
                               {disp.title || row.description || '—'}
                             </div>
-                            {disp.subtitle ? <div className="mt-px text-[10px] text-slate-500">{disp.subtitle}</div> : null}
-                            {row.category ? (
-                              <div className="mt-px text-[10px] text-slate-500">{row.category}</div>
-                            ) : null}
-                            {((organizeBy === 'item' && (row.roomHint || row.roomLabel)) || (organizeBy === 'room' && takeoffShowRoom && row.roomLabel)) ? (
-                              <div className="mt-px text-[10px] font-medium text-teal-800/90">{row.roomHint || row.roomLabel}</div>
+                            {disp.subtitle ? <div className="ui-table-meta line-clamp-2">{disp.subtitle}</div> : null}
+                            {row.category ? <div className="ui-table-meta">{row.category}</div> : null}
+                            {(organizeBy === 'item' && (row.roomHint || row.roomLabel)) || (organizeBy === 'room' && takeoffShowRoom && row.roomLabel) ? (
+                              <div className="mt-0.5 text-xs font-medium leading-snug text-slate-600">{row.roomHint || row.roomLabel}</div>
                             ) : null}
                           </td>
-                          <td className="px-2 py-1 align-top text-xs font-semibold text-slate-800 tabular-nums whitespace-nowrap">
-                            <span>{formatNumberSafe(row.qty, row.qty % 1 === 0 ? 0 : 2)}</span>
-                            <span className="ml-1 text-[11px] font-medium text-slate-600">{row.unit}</span>
+                          <td className="ui-table-cell whitespace-nowrap text-right tabular-nums">
+                            <span className="ui-table-num">{formatNumberSafe(row.qty, row.qty % 1 === 0 ? 0 : 2)}</span>
+                            <span className="ml-1.5 text-xs font-normal text-slate-600">{row.unit}</span>
                           </td>
-                          <td className="px-2 py-1 align-top text-xs tabular-nums text-slate-800">
-                            <div className="font-medium leading-tight" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
+                          <td className="ui-table-cell text-right tabular-nums">
+                            <div className="ui-table-num leading-tight" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
                               {formatLaborDurationMinutes(row.laborMinutesExtended)}
                             </div>
                             {row.qty !== 1 ? (
-                              <div className="mt-px text-[10px] font-normal leading-tight text-slate-500">
-                                {formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)}/u
-                              </div>
+                              <div className="ui-table-meta text-right">{formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)}/u</div>
                             ) : null}
                           </td>
-                          <td className="px-2 py-1 text-right" onClick={stopRowEvent}>
+                          <td className="ui-table-cell pl-2 text-right" onClick={stopRowEvent}>
                             <div className="flex items-center justify-end gap-1">
-                              <button type="button" onClick={() => onSelectLine(row.lineId)} className={`text-[11px] font-semibold px-2 py-1 rounded-md border transition ${selected ? 'border-teal-400 bg-teal-50 text-teal-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>{selected ? <span className="inline-flex items-center gap-0.5"><Sparkles className="h-3 w-3" /> Open</span> : organizeBy === 'item' ? 'View' : 'Edit'}</button>
-                              {row.canDelete ? <button type="button" onClick={(e) => { e.stopPropagation(); onDeleteLine(row.lineId); }} className="text-[11px] font-semibold px-1.5 py-1 rounded-md border border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700" aria-label="Delete line">×</button> : null}
+                              <button
+                                type="button"
+                                onClick={() => onSelectLine(row.lineId)}
+                                className={`ui-table-action ${selected ? 'border-blue-400 bg-blue-50 text-blue-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                              >
+                                {selected ? (
+                                  <span className="inline-flex items-center gap-1">
+                                    <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                                    Open
+                                  </span>
+                                ) : organizeBy === 'item' ? (
+                                  'View'
+                                ) : (
+                                  'Edit'
+                                )}
+                              </button>
+                              {row.canDelete ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteLine(row.lineId);
+                                  }}
+                                  className="ui-table-action w-7 min-w-[1.75rem] border-transparent px-0 text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                                  aria-label="Delete line"
+                                >
+                                  ×
+                                </button>
+                              ) : null}
                             </div>
                           </td>
                         </>
                       ) : (
                         <>
-                      <td className="px-2 py-1 align-top min-w-0">
-                        <div
-                          className="line-clamp-2 text-sm font-semibold leading-tight text-slate-900"
-                          title={[row.description, row.modifierNames?.length ? row.modifierNames.join(' · ') : '', row.sku ? `SKU ${row.sku}` : '', row.notes || ''].filter(Boolean).join(' · ')}
-                        >
-                          {disp.title || row.description || '—'}
-                        </div>
-                        {disp.subtitle ? <div className="mt-px line-clamp-2 text-[11px] text-slate-500">{disp.subtitle}</div> : null}
-                        {modifierLine(row.modifierNames)}
-                      </td>
-                      <td className="px-2 py-1 align-top">
-                        <div className="truncate text-xs font-medium text-slate-800" title={row.roomHint || row.roomLabel}>
-                          {row.roomLabel}
-                        </div>
-                        {row.roomHint && row.roomHint !== row.roomLabel ? <div className="mt-px truncate text-[10px] text-slate-500">{row.roomHint}</div> : null}
-                      </td>
-                      <td className="px-2 py-1 align-top">
-                        <div className="truncate text-xs text-slate-600" title={row.category || 'Uncategorized'}>
-                          {row.category || 'Uncategorized'}
-                        </div>
-                      </td>
-                      <td className="px-2 py-1 align-top text-xs font-semibold text-slate-800 tabular-nums">
-                        {row.qty}
-                      </td>
-                      <td className="px-2 py-1 align-top text-xs font-medium text-slate-700">
-                        {row.unit}
-                      </td>
-                      {!isTakeoffView && showLabor ? (
-                        <td className="px-2 py-1 align-top text-xs tabular-nums text-slate-800">
-                          <div className="font-medium leading-tight" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
-                            {formatLaborDurationMinutes(row.laborMinutesExtended)}
-                          </div>
-                          {row.qty !== 1 ? (
-                            <div className="mt-px text-[10px] font-normal leading-tight text-slate-500">
-                              {formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)} min/u
+                          <td className="ui-table-cell min-w-0 align-top">
+                            <div
+                              className="ui-table-title line-clamp-2 break-words"
+                              title={[row.description, row.modifierNames?.length ? row.modifierNames.join(' · ') : '', row.sku ? `SKU ${row.sku}` : '', row.notes || ''].filter(Boolean).join(' · ')}
+                            >
+                              {disp.title || row.description || '—'}
                             </div>
+                            {disp.subtitle ? <div className="ui-table-meta line-clamp-2">{disp.subtitle}</div> : null}
+                            {modifierLine(row.modifierNames)}
+                          </td>
+                          <td className="ui-table-cell">
+                            <div className="text-xs font-normal leading-snug text-slate-800" title={row.roomHint || row.roomLabel}>
+                              {row.roomLabel}
+                            </div>
+                            {row.roomHint && row.roomHint !== row.roomLabel ? <div className="ui-table-meta truncate">{row.roomHint}</div> : null}
+                          </td>
+                          <td className="ui-table-cell">
+                            <div className="line-clamp-2 text-xs font-normal leading-snug text-slate-700" title={row.category || 'Uncategorized'}>
+                              {row.category || 'Uncategorized'}
+                            </div>
+                          </td>
+                          <td className="ui-table-cell text-right tabular-nums">
+                            <span className="ui-table-num">{row.qty}</span>
+                          </td>
+                          <td className="ui-table-cell text-center text-xs font-normal text-slate-700">{row.unit}</td>
+                          {!isTakeoffView && showLabor ? (
+                            <td className="ui-table-cell">
+                              <div className="ui-table-num leading-tight" title={`${formatNumberSafe(row.laborMinutesExtended, row.laborMinutesExtended % 1 === 0 ? 0 : 1)} min total`}>
+                                {formatLaborDurationMinutes(row.laborMinutesExtended)}
+                              </div>
+                              {row.qty !== 1 ? (
+                                <div className="ui-table-meta">{formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)} min/u</div>
+                              ) : null}
+                            </td>
                           ) : null}
-                        </td>
-                      ) : null}
-                      {!isTakeoffView && showLabor ? (
-                        <td className="border-l border-slate-200/80 px-2 py-1 pl-2.5 align-top text-right text-xs font-medium text-slate-800 tabular-nums">
-                          <div>{formatCurrencySafe(effectiveLaborCost)}</div>
-                          {laborMultiplier !== 1 ? <div className="mt-px text-[10px] leading-tight text-slate-500">base {formatCurrencySafe(row.laborCost)}</div> : null}
-                        </td>
-                      ) : null}
-                      {!isTakeoffView && showMaterial ? (
-                        <td className="px-2 py-1 align-top text-right text-xs font-medium text-slate-800 tabular-nums">
-                          {formatCurrencySafe(row.materialCost)}
-                        </td>
-                      ) : null}
-                      {!isTakeoffView ? (
-                        <td className="px-2 py-1 align-top text-right text-xs font-medium text-slate-800 tabular-nums">
-                          {formatCurrencySafe(row.unitSell)}
-                        </td>
-                      ) : null}
-                      {!isTakeoffView ? <td className="px-2 py-1 align-top text-right text-sm font-semibold text-slate-900 tabular-nums">{formatCurrencySafe(row.lineTotal)}</td> : null}
-                      <td className="px-2 py-1 text-right" onClick={stopRowEvent}>
-                        <div className="flex items-center justify-end gap-1">
-                          <button type="button" onClick={() => onSelectLine(row.lineId)} className={`text-[11px] font-semibold px-2 py-1 rounded-md border transition ${selected ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>{selected ? <span className="inline-flex items-center gap-0.5"><Sparkles className="h-3 w-3" /> Open</span> : organizeBy === 'item' ? 'Inspect' : 'Edit'}</button>
-                          {row.canDelete ? <button type="button" onClick={(e) => { e.stopPropagation(); onDeleteLine(row.lineId); }} className="text-[11px] font-semibold px-1.5 py-1 rounded-md border border-transparent text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700" aria-label="Delete line">×</button> : null}
-                        </div>
-                      </td>
+                          {!isTakeoffView && showLabor ? (
+                            <td className="ui-table-cell border-l border-slate-200/80 pl-2.5 text-right">
+                              <div className="ui-table-num text-right">{formatCurrencySafe(effectiveLaborCost)}</div>
+                              {laborMultiplier !== 1 ? <div className="ui-table-meta text-right">base {formatCurrencySafe(row.laborCost)}</div> : null}
+                            </td>
+                          ) : null}
+                          {!isTakeoffView && showMaterial ? (
+                            <td className="ui-table-cell text-right">
+                              <span className="ui-table-num">{formatCurrencySafe(row.materialCost)}</span>
+                            </td>
+                          ) : null}
+                          {!isTakeoffView ? (
+                            <td className="ui-table-cell text-right">
+                              <span className="ui-table-num">{formatCurrencySafe(row.unitSell)}</span>
+                            </td>
+                          ) : null}
+                          {!isTakeoffView ? (
+                            <td className="ui-table-cell text-right">
+                              <span className="ui-table-num-em">{formatCurrencySafe(row.lineTotal)}</span>
+                            </td>
+                          ) : null}
+                          <td className="ui-table-cell pl-2 text-right" onClick={stopRowEvent}>
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => onSelectLine(row.lineId)}
+                                className={`ui-table-action ${selected ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                              >
+                                {selected ? (
+                                  <span className="inline-flex items-center gap-1">
+                                    <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                                    Open
+                                  </span>
+                                ) : organizeBy === 'item' ? (
+                                  'Inspect'
+                                ) : (
+                                  'Edit'
+                                )}
+                              </button>
+                              {row.canDelete ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteLine(row.lineId);
+                                  }}
+                                  className="ui-table-action w-7 min-w-[1.75rem] border-transparent px-0 text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                                  aria-label="Delete line"
+                                >
+                                  ×
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
                         </>
                       )}
                     </tr>

@@ -175,13 +175,14 @@ export function ImportParsePanel({ catalog, projectId, roomId, onFinalize, varia
     : 'space-y-3 rounded-[16px] border border-slate-200/80 bg-white p-3 shadow-sm';
   const textAreaRows = variant === 'expanded' ? 10 : 4;
 
-  const statusTone = status === 'error'
-    ? 'border-red-200 bg-red-50 text-red-700'
-    : status === 'ready'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-      : status === 'parsing' || status === 'saving'
-        ? 'border-blue-200 bg-blue-50 text-blue-700'
-        : 'border-slate-200 bg-slate-100 text-slate-600';
+  const statusTone =
+    status === 'error'
+      ? 'ui-status-error'
+      : status === 'ready'
+        ? 'ui-status-ok'
+        : status === 'parsing' || status === 'saving'
+          ? 'ui-status-info'
+          : 'border border-slate-200 bg-slate-100 text-slate-600';
 
   const content = (
     <div className={containerClass}>
@@ -219,7 +220,13 @@ export function ImportParsePanel({ catalog, projectId, roomId, onFinalize, varia
                 Upload File
                 <input type="file" accept=".txt,.csv" className="hidden" onChange={(e) => handleFileUpload(e.target.files?.[0])} />
               </label>
-              <button onClick={() => void finalizeAcceptedLines()} disabled={acceptedLines.length === 0 || status === 'saving'} className="inline-flex h-9 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-4 text-[11px] font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50">Finalize Accepted</button>
+              <button
+                onClick={() => void finalizeAcceptedLines()}
+                disabled={acceptedLines.length === 0 || status === 'saving'}
+                className="ui-btn-primary inline-flex h-9 items-center justify-center rounded-full px-4 text-[11px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Finalize Accepted
+              </button>
               <button onClick={resetImport} className="inline-flex h-9 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-[11px] font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50">Reset</button>
             </div>
           </div>
@@ -233,9 +240,9 @@ export function ImportParsePanel({ catalog, projectId, roomId, onFinalize, varia
                 <p className="text-[18px] font-semibold tracking-[-0.04em] text-slate-950">{acceptedLines.length}</p>
                 <p className="text-[10px] font-medium uppercase tracking-wide text-blue-800">Include</p>
               </div>
-              <div className="rounded-xl bg-amber-50 px-2 py-3">
+              <div className="rounded-xl border border-slate-200/80 bg-slate-50 px-2 py-3">
                 <p className="text-[18px] font-semibold tracking-[-0.04em] text-slate-950">{pendingLines.length}</p>
-                <p className="text-[10px] font-medium uppercase tracking-wide text-amber-700">Review</p>
+                <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Review</p>
               </div>
               <div className="rounded-xl bg-slate-100 px-2 py-3">
                 <p className="text-[18px] font-semibold tracking-[-0.04em] text-slate-950">{rejectedLines.length}</p>
@@ -284,11 +291,12 @@ export function ImportParsePanel({ catalog, projectId, roomId, onFinalize, varia
               <tbody>
                 {reviewLines.map((line, index) => {
                   const confidence = Math.round((line.confidence || 0) * 100);
-                  const rowTone = line.reviewStatus === 'accepted'
-                    ? 'bg-emerald-50/35'
-                    : line.reviewStatus === 'pending'
-                      ? 'bg-amber-50/45'
-                      : 'bg-slate-50/55';
+                  const rowTone =
+                    line.reviewStatus === 'accepted'
+                      ? 'bg-[var(--brand-soft)]/90'
+                      : line.reviewStatus === 'pending'
+                        ? 'bg-slate-50/80'
+                        : 'bg-slate-50/40';
 
                   return (
                     <tr key={`${line.rawText}-${index}`} className={`border-t border-slate-100 align-top ${rowTone}`}>
@@ -327,7 +335,17 @@ export function ImportParsePanel({ catalog, projectId, roomId, onFinalize, varia
                         />
                       </td>
                       <td className="px-3 py-2">
-                        <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold ${confidence >= 85 ? 'bg-emerald-100 text-emerald-700' : confidence >= 60 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{confidence}%</span>
+                        <span
+                          className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold ${
+                            confidence >= 85
+                              ? 'ui-status-ok'
+                              : confidence >= 60
+                                ? 'ui-status-info'
+                                : 'ui-status-warn'
+                          }`}
+                        >
+                          {confidence}%
+                        </span>
                       </td>
                     </tr>
                   );

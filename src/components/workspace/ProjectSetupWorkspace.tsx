@@ -21,7 +21,7 @@ function FieldBadge({ kind }: { kind: 'required' | 'optional' | 'office' }) {
   }
   if (kind === 'optional') {
     return (
-      <span className="ml-1.5 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-900">
+      <span className="ml-1.5 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600">
         Optional
       </span>
     );
@@ -42,7 +42,7 @@ function Legend() {
         Required for this estimate
       </span>
       <span className="inline-flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden />
+        <span className="h-2 w-2 rounded-full bg-slate-400" aria-hidden />
         Optional project adjustment
       </span>
       <span className="inline-flex items-center gap-1.5">
@@ -658,7 +658,7 @@ export function ProjectSetupWorkspace({
             <button
               type="button"
               onClick={() => patchJobConditions({ ...RECOMMENDED_FIELD_SCHEDULE_ALLOWANCES })}
-              className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-950 hover:bg-amber-100"
+              className="ui-btn-secondary mt-3 h-auto rounded-lg px-3 py-1.5 text-[11px] font-semibold"
             >
               Reset field schedule to recommended
             </button>

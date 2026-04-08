@@ -27,9 +27,15 @@
     --accent-teal-soft: #e4f5f2;
     --accent-gold: #b7791f;
     --accent-gold-soft: #fff5dd;
-    --success: #0f766e;
-    --warn: #b45309;
+    --success: #166534;
+    --success-soft: #ecfdf3;
+    --warn: #9a3412;
+    --warn-soft: #fff7ed;
     --danger: #b91c1c;
+    --danger-soft: #fef2f2;
+    /** Neutral callouts (reviews, hints) — same hue family as UI */
+    --callout-bg: #f1f4f9;
+    --callout-border: #d5dde8;
   }
 
   * {
@@ -38,7 +44,7 @@
 
   body {
     @apply antialiased;
-    background: radial-gradient(1200px 800px at 5% -10%, #ffffff 0%, var(--bg-canvas) 52%, #e8edf5 100%);
+    background: var(--bg-app);
     color: var(--text);
   }
 
@@ -88,12 +94,65 @@
 
   .ui-subtitle {
     color: var(--text-muted);
-    @apply text-sm;
+    @apply text-sm leading-relaxed;
   }
 
   .ui-label {
     color: var(--text-subtle);
-    @apply text-[11px] font-semibold tracking-[0.06em];
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em];
+  }
+
+  /** Page / section hierarchy — use on every screen for consistency */
+  .ui-typo-kicker {
+    color: var(--text-subtle);
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em];
+  }
+
+  .ui-typo-page-title {
+    color: var(--text);
+    @apply text-xl font-semibold leading-snug tracking-tight sm:text-2xl;
+  }
+
+  .ui-typo-section-title {
+    color: var(--text);
+    @apply text-lg font-semibold leading-snug tracking-tight;
+  }
+
+  .ui-typo-body {
+    color: var(--text-muted);
+    @apply text-sm leading-relaxed;
+  }
+
+  .ui-typo-muted {
+    color: var(--text-subtle);
+    @apply text-xs leading-relaxed;
+  }
+
+  /** Card / panel: less flat white-on-white */
+  .ui-panel {
+    background: var(--surface);
+    border: 1px solid rgba(216, 222, 232, 0.95);
+    @apply rounded-xl shadow-sm;
+  }
+
+  .ui-panel-muted {
+    background: var(--surface-soft);
+    border: 1px solid rgba(216, 222, 232, 0.85);
+    @apply rounded-xl;
+  }
+
+  .ui-callout {
+    background: var(--callout-bg);
+    border: 1px solid var(--callout-border);
+    color: var(--text);
+    @apply rounded-lg px-3 py-2 text-xs leading-relaxed;
+  }
+
+  .ui-callout-warn {
+    background: var(--warn-soft);
+    border: 1px solid rgba(234, 179, 8, 0.35);
+    color: var(--warn);
+    @apply rounded-lg px-3 py-2 text-xs leading-relaxed;
   }
 
   .ui-input {
@@ -176,12 +235,29 @@
     @apply bg-blue-700 text-white shadow-sm hover:bg-blue-800;
   }
 
-  .ui-wtab-teal {
-    @apply bg-teal-700 text-white shadow-sm hover:bg-teal-800;
+  /** Semantic status chips (saved, sync, import) — same tokens app-wide */
+  .ui-status-ok {
+    color: var(--success);
+    background: var(--success-soft);
+    border: 1px solid rgba(22, 101, 52, 0.2);
   }
 
-  .ui-wtab-amber {
-    @apply bg-amber-600 text-white shadow-sm hover:bg-amber-700;
+  .ui-status-error {
+    color: var(--danger);
+    background: var(--danger-soft);
+    border: 1px solid rgba(185, 28, 28, 0.22);
+  }
+
+  .ui-status-warn {
+    color: var(--warn);
+    background: var(--warn-soft);
+    border: 1px solid rgba(234, 179, 8, 0.35);
+  }
+
+  .ui-status-info {
+    color: var(--brand-strong);
+    background: var(--brand-soft);
+    border: 1px solid rgba(59, 130, 246, 0.25);
   }
 
   .ui-list-hit {
@@ -224,6 +300,64 @@
   .ui-divider {
     border-color: var(--line-soft);
     @apply border-t;
+  }
+
+  /**
+   * Dense data tables (takeoff / estimate grids): one type scale, predictable hierarchy.
+   * Primary = semibold title; body = medium/normal slate-800; meta = normal slate-500; totals = semibold.
+   */
+  .ui-table-th {
+    @apply px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-700;
+  }
+
+  .ui-table-th-end {
+    @apply px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-700;
+  }
+
+  .ui-table-cell {
+    @apply px-3 py-2 align-top text-xs text-slate-800;
+  }
+
+  .ui-table-title {
+    @apply text-xs font-semibold leading-snug text-slate-900;
+  }
+
+  .ui-table-meta {
+    @apply mt-0.5 text-xs font-normal leading-snug text-slate-500;
+  }
+
+  .ui-table-num {
+    @apply text-xs font-medium tabular-nums text-slate-800;
+  }
+
+  .ui-table-num-em {
+    @apply text-xs font-semibold tabular-nums text-slate-900;
+  }
+
+  .ui-table-action {
+    @apply inline-flex h-7 min-h-[1.75rem] shrink-0 items-center justify-center gap-1 rounded-md border px-2.5 text-xs font-medium transition-colors;
+  }
+
+  /** Wrapper + table: scroll wide grids instead of crushing columns; crisp row rules. */
+  .ui-data-grid-scroll {
+    @apply max-h-[min(78vh,920px)] overflow-x-auto overflow-y-auto;
+  }
+
+  .ui-data-grid-table {
+    @apply w-full min-w-[800px] border-separate border-spacing-0 text-xs;
+  }
+
+  /** Estimate grid: keep numeric columns grouped; avoid one ultra-wide description column */
+  .ui-data-grid-table--estimate-fixed {
+    table-layout: fixed;
+  }
+
+  .ui-data-grid-thead {
+    @apply sticky top-0 z-20 border-b-2 border-slate-200/90 bg-slate-100;
+  }
+
+  .ui-data-grid-row {
+    @apply border-b border-slate-200/70 transition-colors;
   }
 
   .print-only {

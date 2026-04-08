@@ -36,7 +36,12 @@ export function TopProjectHeader({
         : syncState === 'error'
           ? 'Save failed'
           : 'Not saved yet';
-  const syncColor = syncState === 'ok' ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : syncState === 'error' ? 'text-red-700 bg-red-50 border-red-100' : 'text-slate-600 bg-slate-50 border-slate-200';
+  const syncColor =
+    syncState === 'ok'
+      ? 'ui-status-ok'
+      : syncState === 'error'
+        ? 'ui-status-error'
+        : 'text-slate-600 bg-slate-50 border border-slate-200';
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/95 px-3 py-2.5 md:px-4 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-white/90">
@@ -53,7 +58,7 @@ export function TopProjectHeader({
               {project.generalContractor ? ` · GC ${project.generalContractor}` : ''}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
-              <span className={`px-2.5 py-1 rounded-full border ${syncColor} inline-flex items-center gap-1`}> 
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${syncColor}`}>
                 <Cloud className="w-3.5 h-3.5" /> {syncLabel}
               </span>
               <span className="ui-chip-soft">Last saved {lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString() : 'n/a'}</span>

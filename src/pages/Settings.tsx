@@ -163,9 +163,9 @@ export function Settings() {
           Use <span className="font-medium text-slate-700">Backfill Takeoff Registry</span> to mirror the app-side takeoff model registry into the Google Sheets ITEMS tab.
         </p>
         {!!syncStatus?.warnings?.length && (
-          <div className="border border-amber-200 bg-amber-50/40 rounded p-2">
-            <p className="text-xs font-medium text-amber-800 mb-1">Warnings</p>
-            <ul className="text-xs text-amber-900 list-disc pl-4">
+          <div className="ui-callout-warn">
+            <p className="ui-label mb-1 !normal-case tracking-normal text-[var(--warn)]">Warnings</p>
+            <ul className="mt-1 list-disc pl-4 text-xs">
               {syncStatus.warnings.slice(0, 6).map((warning, idx) => (
                 <li key={`${warning}-${idx}`}>{warning}</li>
               ))}
@@ -194,7 +194,7 @@ export function Settings() {
                   <tr key={run.id} className="border-b border-slate-100 align-top">
                     <td className="py-2 pr-2 text-slate-700">{formatDate(run.attemptedAt)}</td>
                     <td className="py-2 pr-2">
-                      <span className={`px-2 py-0.5 rounded border ${run.status === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${run.status === 'success' ? 'ui-status-ok' : 'ui-status-error'}`}>
                         {run.status}
                       </span>
                     </td>
@@ -204,7 +204,7 @@ export function Settings() {
                     <td className="py-2 text-slate-700">
                       {run.message || 'No message'}
                       {run.warnings.length > 0 && (
-                        <span className="text-amber-700"> ({run.warnings.length} warning{run.warnings.length === 1 ? '' : 's'})</span>
+                        <span className="text-[var(--warn)]"> ({run.warnings.length} warning{run.warnings.length === 1 ? '' : 's'})</span>
                       )}
                     </td>
                   </tr>

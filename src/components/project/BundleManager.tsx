@@ -89,12 +89,12 @@ export function BundleManager({ project, onUpdate }: Props) {
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col overflow-hidden">
         <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
           <h2 className="font-bold text-gray-900 flex items-center">
-            <Layers className="w-5 h-5 mr-2 text-orange-600" />
+            <Layers className="mr-2 h-5 w-5" style={{ color: 'var(--brand)' }} />
             Project Bundles
           </h2>
           <button 
             onClick={handleAddBundle}
-            className="p-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-all"
+            className="ui-btn-primary rounded-lg p-2 transition-all"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -109,9 +109,9 @@ export function BundleManager({ project, onUpdate }: Props) {
               <div 
                 key={bundle.id}
                 onClick={() => setSelectedBundleId(bundle.id)}
-                className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex justify-between items-center ${
-                  selectedBundleId === bundle.id 
-                    ? 'border-orange-500 bg-orange-50 text-orange-700' 
+                className={`flex cursor-pointer items-center justify-between rounded-xl border-2 p-4 transition-all ${
+                  selectedBundleId === bundle.id
+                    ? 'border-blue-500 bg-[var(--brand-soft)] text-[var(--brand-strong)]'
                     : 'border-transparent bg-gray-50 text-gray-600 hover:bg-gray-100'
                 }`}
               >

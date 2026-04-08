@@ -66,21 +66,21 @@ export function RightDetailDrawer({
   const isTakeoffView = viewMode === 'takeoff';
 
   return (
-    <aside className={`w-full min-w-0 bg-gradient-to-b border rounded-xl p-2 space-y-2 h-[calc(100vh-170px)] overflow-y-auto shadow-sm ${isTakeoffView ? 'from-amber-50/40 to-white border-amber-200' : 'from-white to-slate-50/30 border-slate-200'}`}>
+    <aside className="ui-panel-muted w-full min-w-0 space-y-2 p-2 h-[calc(100vh-170px)] overflow-y-auto">
       <div className="rounded-lg border border-slate-200 bg-white p-2">
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-1.5">{isTakeoffView ? 'Scope Line Review' : 'Selected Item'}</h3>
         {selectedLine ? (
           <div className="space-y-1.5">
             <input className="h-7 w-full rounded border border-slate-300 px-2 text-xs focus:outline-none focus:border-blue-300" value={selectedLine.description} onChange={(e) => onPatchLine(selectedLine.id, { description: e.target.value })} onBlur={() => onPersistLine(selectedLine.id)} />
             {selectedLine.modifierNames?.length ? (
-              <div className="text-[10px] font-medium text-indigo-800/90">{selectedLine.modifierNames.join(' · ')}</div>
+              <div className="text-[10px] font-medium text-slate-700">{selectedLine.modifierNames.join(' · ')}</div>
             ) : null}
             <div className="grid grid-cols-2 gap-2">
               <DrawerQtyInput lineId={selectedLine.id} qty={selectedLine.qty} onPatchLine={onPatchLine} onPersistLine={onPersistLine} />
               <input className="h-7 w-full rounded border border-slate-300 px-2 text-xs focus:outline-none focus:border-blue-300" value={selectedLine.unit} onChange={(e) => onPatchLine(selectedLine.id, { unit: e.target.value })} onBlur={() => onPersistLine(selectedLine.id)} />
             </div>
             {isTakeoffView ? (
-              <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-900 space-y-0.5">
+              <div className="ui-callout space-y-0.5 text-[10px]">
                 <p>Source: <span className="font-semibold">{selectedLine.sourceType || 'manual'}</span></p>
                 <p>Category: <span className="font-semibold">{selectedLine.category || 'Uncategorized'}</span></p>
                 <p>Catalog Match: <span className="font-semibold">{selectedLine.catalogItemId ? 'Matched' : 'Unmatched'}</span></p>
@@ -100,7 +100,7 @@ export function RightDetailDrawer({
       </div>
 
       {isTakeoffView ? (
-        <div className="rounded-lg border border-amber-200 bg-white p-2">
+        <div className="rounded-lg border border-slate-200/90 bg-white p-2 shadow-sm">
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-1.5">Takeoff Guidance</h3>
           <div className="space-y-2 text-xs text-slate-600">
             <p>Use Takeoff to normalize descriptions, quantities, units, and room assignment before pricing decisions.</p>

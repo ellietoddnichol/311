@@ -9,10 +9,10 @@ type SortKey = 'sku-asc' | 'sku-desc' | 'name-asc' | 'name-desc' | 'category-asc
 type CatalogTab = 'items' | 'modifiers' | 'bundles';
 
 function statusClass(status: CatalogSyncStatusRecord['status']): string {
-  if (status === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  if (status === 'running') return 'border-blue-200 bg-blue-50 text-blue-700';
-  if (status === 'failed') return 'border-red-200 bg-red-50 text-red-700';
-  return 'border-slate-300 bg-slate-100 text-slate-600';
+  if (status === 'success') return 'ui-status-ok';
+  if (status === 'running') return 'ui-status-info';
+  if (status === 'failed') return 'ui-status-error';
+  return 'border border-slate-300 bg-slate-100 text-slate-600';
 }
 
 export function Catalog() {
@@ -316,7 +316,7 @@ export function Catalog() {
               <Database className="w-3.5 h-3.5" />
               Source: Google Sheets
             </span>
-            <span className={`rounded border px-2 py-1 font-medium ${statusClass(syncStatus?.status || 'never')}`}>
+            <span className={`rounded px-2 py-1 text-xs font-medium ${statusClass(syncStatus?.status || 'never')}`}>
               {syncStatus?.status === 'running' ? 'Syncing' : syncStatus?.status === 'success' ? 'Synced' : syncStatus?.status === 'failed' ? 'Failed' : 'Never Synced'}
             </span>
             <button
@@ -343,7 +343,7 @@ export function Catalog() {
         </div>
 
         {inventory && inventory.inactive > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          <div className="ui-callout-warn flex flex-wrap items-center justify-between gap-2 text-xs">
             <p>
               <span className="font-semibold">{inventory.inactive} catalog row(s) are inactive</span> — hidden from estimates and intake unless you filter “Inactive” here.
               Often caused by syncing Google Sheets when the sheet has fewer rows than this database.
@@ -352,7 +352,7 @@ export function Catalog() {
               type="button"
               onClick={() => void handleActivateAllCatalogItems()}
               disabled={activatingAll}
-              className="shrink-0 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-[11px] font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-50"
+              className="ui-btn-secondary h-auto shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-semibold disabled:opacity-50"
             >
               {activatingAll ? 'Updating…' : 'Activate all catalog items'}
             </button>
@@ -360,7 +360,7 @@ export function Catalog() {
         ) : null}
 
         {syncStatus?.warnings?.length ? (
-          <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+          <div className="ui-callout-warn text-xs">
             {syncStatus.warnings.slice(0, 3).map((warning, index) => (
               <p key={`${warning}-${index}`}>- {warning}</p>
             ))}
@@ -526,7 +526,7 @@ export function Catalog() {
                         <div className="font-medium text-slate-900">{item.description}</div>
                         <div className="text-[10px] text-slate-500 inline-flex items-center gap-1">
                           {item.family || item.subcategory || 'Standard'}
-                          {item.adaFlag ? <ShieldCheck className="w-3 h-3 text-emerald-600" title="ADA" /> : null}
+                          {item.adaFlag ? <ShieldCheck className="h-3 w-3 text-[var(--success)]" title="ADA" /> : null}
                         </div>
                       </td>
                       <td className="py-2 px-2 text-slate-700">{item.category}</td>
@@ -534,7 +534,9 @@ export function Catalog() {
                       <td className="py-2 px-2 text-right text-slate-700">{formatNumberSafe(item.baseLaborMinutes, 1)} min</td>
                       <td className="py-2 px-2 text-right text-slate-700">{formatCurrencySafe(item.baseMaterialCost)}</td>
                       <td className="py-2 px-2 text-center">
-                        <span className={`px-1.5 py-0.5 rounded border ${item.active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-slate-100 text-slate-600'}`}>
+                        <span
+                          className={`rounded px-1.5 py-0.5 ${item.active ? 'ui-status-info border text-xs font-medium' : 'border border-slate-300 bg-slate-100 text-xs text-slate-600'}`}
+                        >
                           {item.active ? 'Yes' : 'No'}
                         </span>
                       </td>
@@ -600,7 +602,9 @@ export function Catalog() {
                       <td className="py-2 px-2 text-right text-slate-700">{formatPercentSafe(modifier.percentLabor)}</td>
                       <td className="py-2 px-2 text-right text-slate-700">{formatPercentSafe(modifier.percentMaterial)}</td>
                       <td className="py-2 px-2 text-center">
-                        <span className={`px-1.5 py-0.5 rounded border ${modifier.active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-slate-100 text-slate-600'}`}>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-xs ${modifier.active ? 'ui-status-info border font-medium' : 'border border-slate-300 bg-slate-100 text-slate-600'}`}
+                        >
                           {modifier.active ? 'Yes' : 'No'}
                         </span>
                       </td>
@@ -659,7 +663,9 @@ export function Catalog() {
                     <td className="py-2 px-2 text-slate-700">{bundle.category || '-'}</td>
                     <td className="py-2 px-2 text-slate-500">{bundle.updatedAt ? new Date(bundle.updatedAt).toLocaleString() : '-'}</td>
                     <td className="py-2 px-2 text-center">
-                      <span className={`px-1.5 py-0.5 rounded border ${bundle.active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-slate-100 text-slate-600'}`}>
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-xs ${bundle.active ? 'ui-status-info border font-medium' : 'border border-slate-300 bg-slate-100 text-slate-600'}`}
+                      >
                         {bundle.active ? 'Yes' : 'No'}
                       </span>
                     </td>
