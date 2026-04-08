@@ -2,7 +2,9 @@ import * as xlsx from 'xlsx';
 import { randomUUID } from 'crypto';
 import { parse as parseCsv } from 'csv-parse/sync';
 import type { CatalogItem } from '../../types.ts';
+import type { ModifierRecord } from '../../shared/types/estimator.ts';
 import type {
+  IntakeAiSuggestions,
   IntakeParseRequest,
   IntakeParseResult,
   IntakeProjectAssumption,
@@ -12,6 +14,8 @@ import type {
   IntakeSourceKind,
   IntakeSourceType,
 } from '../../shared/types/intake.ts';
+import { listModifiers } from '../repos/modifiersRepo.ts';
+import { buildIntakeEstimateDraft } from './intakeMatcherService.ts';
 import { listBundles } from '../repos/bundlesRepo.ts';
 import { listActiveCatalogItems } from '../repos/catalogRepo.ts';
 import { buildIntakeDiagnostics } from './intakeDiagnosticsService.ts';
@@ -20,6 +24,7 @@ import { detectSpreadsheetHeaderRow, extractSpreadsheetPreludeText } from './spr
 import { INTAKE_GEMINI_MODEL } from './structuredExtractionSchemas.ts';
 import { classifyIntakeSourceType, deriveDocumentSourceKind } from './fileClassifierService.ts';
 import { extractDocumentWithGemini, extractSpreadsheetWithGemini } from './geminiExtractionService.ts';
+import { buildIntakeAiSuggestionsFromGemini } from './intakeAiSuggestions.ts';
 import {
   coerceSafeProjectName,
   isPlausibleProjectTitle,
@@ -876,6 +881,23 @@ function buildRoomCandidates(lines: IntakeReviewLine[]): IntakeRoomCandidate[] {
     .sort((left, right) => right.lineCount - left.lineCount || left.roomName.localeCompare(right.roomName));
 }
 
+function attachEstimateDraft(
+  matchCatalog: boolean,
+  catalog: CatalogItem[],
+  modifiers: ModifierRecord[],
+  reviewLines: IntakeReviewLine[],
+  aiSuggestions?: IntakeAiSuggestions
+): Pick<IntakeParseResult, 'estimateDraft'> {
+  if (!matchCatalog || !catalog.length) return {};
+  const estimateDraft = buildIntakeEstimateDraft({
+    reviewLines,
+    catalog,
+    modifiers,
+    aiSuggestions: aiSuggestions ?? null,
+  });
+  return estimateDraft ? { estimateDraft } : {};
+}
+
 function buildDiagnostics(sourceKind: IntakeSourceKind, parserStrategy: string, metadata: IntakeProjectMetadata, reviewLines: IntakeReviewLine[], warnings: string[]) {
   return buildIntakeDiagnostics({
     sourceKind,
@@ -902,6 +924,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
   const sourceType = classifyIntakeSourceType(fileName, mimeType, input.sourceType);
   const matchCatalog = input.matchCatalog !== false;
   const catalog = matchCatalog ? listActiveCatalogItems() : [];
+  const modifiers = listModifiers();
   const bundles = listBundles();
   const warnings: string[] = [];
 
@@ -932,6 +955,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         warnings,
         diagnostics: buildDiagnostics('spreadsheet-unstructured', 'spreadsheet-fallback', metadata, reviewLines, warnings),
         proposalAssist,
+        ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines),
       };
     }
 
@@ -1049,6 +1073,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         lineDescriptions: reviewLines.map((line) => line.description),
         geminiAssist: gemini.proposalAssist,
       });
+      const aiSuggestions = buildIntakeAiSuggestionsFromGemini(gemini);
       return {
         sourceType,
         sourceKind: parsedSheets[0]?.sourceKind || 'spreadsheet-row',
@@ -1060,6 +1085,8 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         warnings: Array.from(new Set(warnings)),
         diagnostics: buildDiagnostics(parsedSheets[0]?.sourceKind || 'spreadsheet-row', 'spreadsheet-structure+gemini', enrichedMetadata, reviewLines, warnings),
         proposalAssist,
+        aiSuggestions,
+        ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines, aiSuggestions),
       };
     } catch (error: any) {
       warnings.push(error.message || 'Gemini enrichment failed for spreadsheet parsing.');
@@ -1081,6 +1108,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         warnings: Array.from(new Set(warnings)),
         diagnostics: buildDiagnostics(parsedSheets[0]?.sourceKind || 'spreadsheet-row', 'spreadsheet-structure', metadata, reviewLines, warnings),
         proposalAssist,
+        ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines),
       };
     }
   }
@@ -1175,6 +1203,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       warnings: Array.from(new Set(warnings)),
       diagnostics: buildDiagnostics(sourceKind, usableGeminiLines.length ? 'gemini-first' : 'gemini+fallback', metadata, reviewLines, warnings),
       proposalAssist,
+      aiSuggestions: buildIntakeAiSuggestionsFromGemini(gemini),
     };
   } catch (error: any) {
     warnings.push(error.message || 'Gemini extraction failed; fallback text parsing used.');
@@ -1196,6 +1225,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       warnings: Array.from(new Set(warnings)),
       diagnostics: buildDiagnostics(sourceKind, 'text-fallback', metadata, reviewLines, warnings),
       proposalAssist,
+      ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines),
     };
   }
 }

@@ -25,6 +25,15 @@ export interface GeminiExtractionLine {
   fieldAssembly?: boolean;
   /** item | modifier | bundle — scope adders vs primary lines when obvious. */
   lineKind?: string;
+  documentLineKind?: string;
+  pricingRole?: string;
+  scopeTarget?: string;
+  costDriver?: string;
+  applicationMethod?: string;
+  lineConfidence?: number;
+  rationale?: string;
+  evidenceText?: string;
+  requiresGroundingLine?: boolean;
 }
 
 export interface GeminiExtractionResult {
@@ -43,6 +52,17 @@ export interface GeminiExtractionResult {
   rooms: string[];
   parsedLines: GeminiExtractionLine[];
   warnings: string[];
+  documentType?: string;
+  documentRationale?: string;
+  documentConfidence?: number;
+  documentEvidence?: string;
+  suggestedGlobalModifiers?: Array<{
+    phrase: string;
+    confidence: number;
+    rationale: string;
+    evidenceText: string;
+  }>;
+  requiresGrounding?: string[];
 }
 
 interface ExtractInput {
@@ -77,6 +97,17 @@ function sanitizeResult(value: any): GeminiExtractionResult {
           notes: asText(line?.notes),
           fieldAssembly: Boolean(line?.fieldAssembly),
           lineKind: asText(line?.lineKind).toLowerCase(),
+          documentLineKind: asText(line?.documentLineKind).toLowerCase(),
+          pricingRole: asText(line?.pricingRole).toLowerCase(),
+          scopeTarget: asText(line?.scopeTarget).toLowerCase(),
+          costDriver: asText(line?.costDriver).toLowerCase(),
+          applicationMethod: asText(line?.applicationMethod).toLowerCase(),
+          lineConfidence: Number.isFinite(Number(line?.lineConfidence))
+            ? Math.max(0, Math.min(1, Number(line.lineConfidence)))
+            : undefined,
+          rationale: asText(line?.rationale),
+          evidenceText: asText(line?.evidenceText),
+          requiresGroundingLine: Boolean(line?.requiresGroundingLine),
         }))
         .filter((line: GeminiExtractionLine) => line.description || line.itemName)
         .filter((line: GeminiExtractionLine) => {
@@ -110,6 +141,24 @@ function sanitizeResult(value: any): GeminiExtractionResult {
 
   const rawProjectName = asText(value?.projectName);
 
+  const suggestedGlobalModifiers = Array.isArray(value?.suggestedGlobalModifiers)
+    ? value.suggestedGlobalModifiers
+        .map((entry: any) => ({
+          phrase: asText(entry?.phrase),
+          confidence: Number.isFinite(Number(entry?.confidence)) ? Math.max(0, Math.min(1, Number(entry.confidence))) : 0.5,
+          rationale: asText(entry?.rationale),
+          evidenceText: asText(entry?.evidenceText),
+        }))
+        .filter((entry: { phrase: string }) => entry.phrase)
+    : [];
+
+  const requiresGrounding = Array.isArray(value?.requiresGrounding)
+    ? value.requiresGrounding.map((g: unknown) => asText(g)).filter(Boolean)
+    : [];
+
+  const documentConfidenceRaw = Number(value?.documentConfidence);
+  const documentConfidence = Number.isFinite(documentConfidenceRaw) ? Math.max(0, Math.min(1, documentConfidenceRaw)) : 0;
+
   return {
     projectName: isPlausibleProjectTitle(rawProjectName) ? rawProjectName : '',
     projectNumber: asText(value?.projectNumber),
@@ -128,6 +177,12 @@ function sanitizeResult(value: any): GeminiExtractionResult {
     rooms,
     parsedLines,
     warnings: Array.isArray(value?.warnings) ? value.warnings.map((warning: unknown) => asText(warning)).filter(Boolean) : [],
+    documentType: asText(value?.documentType).toLowerCase(),
+    documentRationale: asText(value?.documentRationale),
+    documentConfidence,
+    documentEvidence: asText(value?.documentEvidence),
+    suggestedGlobalModifiers,
+    requiresGrounding,
   };
 }
 
@@ -261,6 +316,14 @@ export async function extractIntakeFromGemini(input: ExtractInput): Promise<Gemi
     'For structured spreadsheets, prefer the row/column structure over OCR-like interpretation.',
     'Do not invent room names. Only return rooms that are clearly present in the source.',
     'Do not invent assumptions that are not present or strongly implied by the source.',
+    '',
+    'Ontology pass (same JSON response): set documentType to one of: takeoff, finish_schedule, spec_excerpt, proposal, quote_request, addendum, general_notes, unknown.',
+    'Set documentRationale (short), documentConfidence (0-1), and documentEvidence (short quote from source) when you can justify documentType.',
+    'For each parsedLines row, when possible set: documentLineKind (item, modifier_candidate, bundle_candidate, exclusion, clarification, allowance, deduction, freight_delivery, demo, labor_note, material_note, informational_only, unknown),',
+    'pricingRole (base_material, base_install, optional_adder, global_adder, line_modifier, deduction, informational_only, unknown), scopeTarget (line, room, project, unknown), costDriver (material, labor, both, none, unknown),',
+    'applicationMethod (attach_to_item, apply_globally, info_only, unknown), lineConfidence (0-1), rationale (one sentence), evidenceText (short quote), requiresGroundingLine (true only if part numbers/spec language needs web lookup).',
+    'suggestedGlobalModifiers: array of { phrase, confidence, rationale, evidenceText } for project-wide conditions implied by the doc (night work, occupied building, prevailing wage, delivery, demo, etc.) — phrases only, not dollar amounts.',
+    'requiresGrounding: string array of reasons the model needs external verification (ambiguous manufacturer, unfamiliar spec section, etc.). Leave empty when not needed.',
   ]
     .filter(Boolean)
     .join('\n');

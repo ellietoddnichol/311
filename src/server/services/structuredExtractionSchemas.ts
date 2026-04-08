@@ -5,6 +5,28 @@ export const INTAKE_GEMINI_MODEL = process.env.INTAKE_GEMINI_MODEL || process.en
 export const intakeGeminiResponseSchema = {
   type: Type.OBJECT,
   properties: {
+    documentType: {
+      type: Type.STRING,
+      description:
+        'One of: takeoff, finish_schedule, spec_excerpt, proposal, quote_request, addendum, general_notes, unknown',
+    },
+    documentRationale: { type: Type.STRING },
+    documentConfidence: { type: Type.NUMBER },
+    documentEvidence: { type: Type.STRING },
+    suggestedGlobalModifiers: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          phrase: { type: Type.STRING },
+          confidence: { type: Type.NUMBER },
+          rationale: { type: Type.STRING },
+          evidenceText: { type: Type.STRING },
+        },
+        required: ['phrase'],
+      },
+    },
+    requiresGrounding: { type: Type.ARRAY, items: { type: Type.STRING } },
     projectName: { type: Type.STRING },
     projectNumber: { type: Type.STRING },
     bidPackage: { type: Type.STRING },
@@ -55,6 +77,26 @@ export const intakeGeminiResponseSchema = {
           notes: { type: Type.STRING },
           fieldAssembly: { type: Type.BOOLEAN },
           lineKind: { type: Type.STRING },
+          documentLineKind: {
+            type: Type.STRING,
+            description:
+              'item, bundle_candidate, modifier_candidate, job_condition, exclusion, clarification, allowance, deduction, freight_delivery, demo, labor_note, material_note, informational_only, unknown',
+          },
+          pricingRole: {
+            type: Type.STRING,
+            description:
+              'base_material, base_install, optional_adder, global_adder, line_modifier, deduction, informational_only, unknown',
+          },
+          scopeTarget: { type: Type.STRING, description: 'line, room, project, or unknown' },
+          costDriver: { type: Type.STRING, description: 'material, labor, both, none, unknown' },
+          applicationMethod: {
+            type: Type.STRING,
+            description: 'attach_to_item, apply_globally, info_only, unknown',
+          },
+          lineConfidence: { type: Type.NUMBER },
+          rationale: { type: Type.STRING },
+          evidenceText: { type: Type.STRING },
+          requiresGroundingLine: { type: Type.BOOLEAN },
         },
         required: ['description', 'quantity', 'unit'],
       },

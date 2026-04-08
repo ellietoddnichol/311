@@ -6,6 +6,7 @@ import { prepareBundleMatch } from './intake/bundleIntakeMatching.ts';
 import { detectBundleCandidates } from './intake/normalizer.ts';
 import { prepareCatalogMatch } from './catalogMatchService.ts';
 import { intakeAsText } from './metadataExtractorService.ts';
+import { computeReviewLineFingerprint } from '../utils/reviewLineFingerprint.ts';
 import type { NormalizedIntakeLine } from './spreadsheetInterpreterService.ts';
 
 function normalizeRoomName(value: unknown): string {
@@ -80,8 +81,19 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
       warnings.push(`Possible catalog bundle: “${suggestedBundle.bundleName}” (${suggestedBundle.reason}).`);
     }
 
+    const reviewLineFingerprint = computeReviewLineFingerprint({
+      sourceReference: line.sourceReference,
+      roomName: normalizeRoomName(line.roomName),
+      itemCode: line.itemCode,
+      itemName: line.itemName || description,
+      description,
+      quantity: line.quantity,
+      unit: line.unit || 'EA',
+    });
+
     return {
       lineId: randomUUID(),
+      reviewLineFingerprint,
       roomName: normalizeRoomName(line.roomName),
       itemName: line.itemName || description,
       description,

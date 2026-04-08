@@ -1,4 +1,5 @@
 import { listActiveCatalogItems } from '../repos/catalogRepo.ts';
+import { listModifiers } from '../repos/modifiersRepo.ts';
 import type {
   IntakeParseRequest,
   IntakeParseResult,
@@ -23,6 +24,7 @@ import { buildRoomCandidates, toReviewLines } from './matchPreparationService.ts
 import { mergeResolvedMetadata } from './metadataExtractorService.ts';
 import { buildProposalAssist, extractAssumptionsFromText } from './proposalAssistService.ts';
 import { parseIntakeRequest } from './intakePipeline.ts';
+import { buildIntakeEstimateDraft } from './intakeMatcherService.ts';
 
 function detectUploadFileType(fileName: string, mimeType: string): UploadFileType {
   const lowerName = String(fileName || '').toLowerCase();
@@ -150,10 +152,12 @@ function toLegacyIntakeResult(input: {
   extractedMetadata: Partial<IntakeProjectMetadata>;
 }): IntakeParseResult {
   const catalog = listActiveCatalogItems();
+  const modifiers = listModifiers();
   const bundles = listBundles();
   const items = input.upload.validation.correctedItems || input.upload.extractedItems;
   const metadata = buildMetadata({ extractedMetadata: input.extractedMetadata, items, fileName: input.request.fileName });
-  const reviewLines = toReviewLines(toLegacyNormalizedLines(items), catalog, input.request.matchCatalog !== false, bundles);
+  const matchCatalog = input.request.matchCatalog !== false;
+  const reviewLines = toReviewLines(toLegacyNormalizedLines(items), catalog, matchCatalog, bundles);
   const warnings = Array.from(new Set([...input.upload.parseWarnings, ...input.upload.validation.warnings]));
   const sourceKind = deriveSourceKind(input.upload.fileType, items);
   const proposalAssist = buildProposalAssist({
@@ -188,6 +192,17 @@ function toLegacyIntakeResult(input: {
       webEnrichmentUsed: false,
     }),
     proposalAssist,
+    ...(matchCatalog && catalog.length
+      ? (() => {
+          const estimateDraft = buildIntakeEstimateDraft({
+            reviewLines,
+            catalog,
+            modifiers,
+            aiSuggestions: null,
+          });
+          return estimateDraft ? { estimateDraft } : {};
+        })()
+      : {}),
   };
 }
 

@@ -4,7 +4,7 @@ import { ArrowLeft, ChevronDown, FileUp, FolderInput, Info, PlusCircle, Save, Se
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { PricingMode, ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
-import { IntakeParseResult, IntakeReviewLine } from '../shared/types/intake';
+import { IntakeAiSuggestions, IntakeParseResult, IntakeReviewLine } from '../shared/types/intake';
 import { CatalogItem } from '../types';
 import {
   createDefaultProjectJobConditions,
@@ -85,6 +85,7 @@ interface ParserReviewSummary {
   validationWarnings: string[];
   parseWarnings: string[];
   sourceSummary: IntakeParseResult['sourceSummary'] | null;
+  aiSuggestions: IntakeAiSuggestions | null;
 }
 
 interface WarningGroupSummary {
@@ -1089,6 +1090,7 @@ function buildParserReviewSummary(result: IntakeParseResult): ParserReviewSummar
     validationWarnings: result.validation?.warnings || [],
     parseWarnings: result.parseWarnings || [],
     sourceSummary: result.sourceSummary || null,
+    aiSuggestions: result.aiSuggestions ?? null,
   };
 }
 
@@ -3274,6 +3276,120 @@ export function ProjectIntake() {
                   </button>
                 ) : null}
               </div>
+
+              {parserReviewSummary.aiSuggestions ? (
+                <details className="group mt-3 rounded-lg border border-indigo-200/70 bg-indigo-50/40 open:bg-white/90">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-left [&::-webkit-details-marker]:hidden">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-indigo-800">AI decision hints</p>
+                      <p className="text-[11px] text-indigo-950/90">
+                        Document type, pricing role, and project hints from the model — <span className="font-medium">review only</span>; nothing here is auto-applied to
+                        catalog or job conditions yet.
+                      </p>
+                    </div>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-indigo-600 transition group-open:rotate-180" aria-hidden />
+                  </summary>
+                  <div className="space-y-3 border-t border-indigo-100/80 px-3 pb-3 pt-2 text-xs text-slate-800">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Document type</p>
+                        <p className="mt-0.5 font-medium capitalize text-slate-900">
+                          {parserReviewSummary.aiSuggestions.documentType.replace(/_/g, ' ') || '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Suggested pricing mode</p>
+                        <p className="mt-0.5 font-medium text-slate-900">
+                          {parserReviewSummary.aiSuggestions.pricingModeSuggested
+                            ? parserReviewSummary.aiSuggestions.pricingModeSuggested.replace(/_/g, ' ')
+                            : '—'}
+                        </p>
+                      </div>
+                      {parserReviewSummary.aiSuggestions.documentConfidence > 0 ? (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Document confidence</p>
+                          <p className="mt-0.5 font-medium tabular-nums text-slate-900">
+                            {formatConfidencePercent(parserReviewSummary.aiSuggestions.documentConfidence)}
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
+                    {parserReviewSummary.aiSuggestions.documentRationale ? (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Why (document)</p>
+                        <p className="mt-0.5 leading-snug text-slate-800">{parserReviewSummary.aiSuggestions.documentRationale}</p>
+                      </div>
+                    ) : null}
+                    {parserReviewSummary.aiSuggestions.documentEvidence ? (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Evidence</p>
+                        <p className="mt-0.5 max-h-24 overflow-y-auto rounded border border-slate-100 bg-slate-50/90 p-2 font-mono text-[11px] leading-snug text-slate-700">
+                          {parserReviewSummary.aiSuggestions.documentEvidence}
+                        </p>
+                      </div>
+                    ) : null}
+                    {parserReviewSummary.aiSuggestions.suggestedProjectModifierHints.length > 0 ? (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Suggested project-level conditions (phrases)</p>
+                        <ul className="mt-1 space-y-2">
+                          {parserReviewSummary.aiSuggestions.suggestedProjectModifierHints.map((hint, idx) => (
+                            <li key={`${hint.phrase}-${idx}`} className="rounded-md border border-slate-200/80 bg-white p-2">
+                              <p className="font-semibold text-slate-900">{hint.phrase}</p>
+                              {hint.rationale ? <p className="mt-0.5 text-[11px] text-slate-600">{hint.rationale}</p> : null}
+                              {hint.evidenceText ? (
+                                <p className="mt-1 text-[10px] text-slate-500">&ldquo;{hint.evidenceText}&rdquo;</p>
+                              ) : null}
+                              <p className="mt-1 text-[10px] text-slate-400">Confidence {formatConfidencePercent(hint.confidence)}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {parserReviewSummary.aiSuggestions.requiresGrounding.length > 0 ? (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800">Flagged for external grounding</p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-amber-950/90">
+                          {parserReviewSummary.aiSuggestions.requiresGrounding.map((r) => (
+                            <li key={r}>{r}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {parserReviewSummary.aiSuggestions.lineClassifications.length > 0 ? (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                          Line ontology ({parserReviewSummary.aiSuggestions.lineClassifications.length} rows)
+                        </p>
+                        <div className="mt-1 max-h-48 overflow-y-auto rounded border border-slate-200/80 bg-white">
+                          <table className="w-full text-left text-[11px]">
+                            <thead className="sticky top-0 bg-slate-100/95 text-[10px] uppercase tracking-wide text-slate-600">
+                              <tr>
+                                <th className="px-2 py-1.5">#</th>
+                                <th className="px-2 py-1.5">Preview</th>
+                                <th className="px-2 py-1.5">Kind</th>
+                                <th className="px-2 py-1.5">Pricing role</th>
+                                <th className="px-2 py-1.5">Conf.</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {parserReviewSummary.aiSuggestions.lineClassifications.map((row) => (
+                                <tr key={row.lineIndex} className="border-t border-slate-100 align-top">
+                                  <td className="px-2 py-1.5 tabular-nums text-slate-500">{row.lineIndex + 1}</td>
+                                  <td className="px-2 py-1.5 text-slate-800">{row.descriptionPreview}</td>
+                                  <td className="px-2 py-1.5 capitalize text-slate-700">{row.documentLineKind.replace(/_/g, ' ') || '—'}</td>
+                                  <td className="px-2 py-1.5 capitalize text-slate-700">{row.pricingRole.replace(/_/g, ' ') || '—'}</td>
+                                  <td className="px-2 py-1.5 tabular-nums text-slate-600">{formatConfidencePercent(row.lineConfidence)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="mt-1 text-[10px] text-slate-500">Expand rows in a future pass to show rationale and evidence per line.</p>
+                      </div>
+                    ) : null}
+                  </div>
+                </details>
+              ) : null}
 
               {parserReviewSummary.validationErrors.length > 0 ? (
                 <ul className="mt-3 space-y-1 border-t border-slate-200/60 pt-3 text-xs text-red-700">

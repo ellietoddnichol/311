@@ -238,8 +238,23 @@ export interface IntakeBundleMatch {
   reason: string;
 }
 
+export type IntakeScopeBucket =
+  | 'priced_base_scope'
+  | 'line_condition'
+  | 'project_condition'
+  | 'deduction_alternate'
+  | 'excluded_by_others'
+  | 'allowance'
+  | 'informational_only'
+  | 'unknown';
+
+/** Review / correction workflow state for matcher output (not persisted until UI writes back). */
+export type IntakeApplicationStatus = 'suggested' | 'accepted' | 'replaced' | 'ignored';
+
 export interface IntakeReviewLine {
   lineId: string;
+  /** Stable content key for reorder-safe correction logging and estimate draft rows. */
+  reviewLineFingerprint: string;
   roomName: string;
   itemName: string;
   description: string;
@@ -305,6 +320,84 @@ export interface IntakeParseDiagnostics {
   webEnrichmentUsed: boolean;
 }
 
+/** Project-level condition hint from the AI classification pass (validated against DB in later phases). */
+export interface IntakeAiProjectModifierHint {
+  phrase: string;
+  confidence: number;
+  rationale: string;
+  evidenceText: string;
+}
+
+/** @deprecated Use IntakeAiProjectModifierHint */
+export type IntakeAiGlobalModifierHint = IntakeAiProjectModifierHint;
+
+/** Per-line ontology hints from Gemini structured output — for review UI and future matcher validation. */
+export interface IntakeAiLineClassification {
+  lineIndex: number;
+  descriptionPreview: string;
+  documentLineKind: string;
+  pricingRole: string;
+  scopeTarget: string;
+  costDriver: string;
+  applicationMethod: string;
+  lineConfidence: number;
+  rationale: string;
+  evidenceText: string;
+  requiresGrounding: boolean;
+  lineKindLegacy?: string;
+}
+
+/**
+ * Decision-layer output: document + line ontology separate from raw extraction.
+ * Populated when intake uses Gemini structured extraction; not DB-validated yet.
+ */
+export interface IntakeAiSuggestions {
+  documentType: string;
+  pricingModeSuggested: '' | 'material_only' | 'labor_only' | 'labor_and_material';
+  documentConfidence: number;
+  documentRationale: string;
+  documentEvidence: string;
+  /** Project-wide conditions (night work, prevailing wage, etc.) — not line-level assembly. */
+  suggestedProjectModifierHints: IntakeAiProjectModifierHint[];
+  requiresGrounding: string[];
+  lineClassifications: IntakeAiLineClassification[];
+}
+
+/** Read-only pricing draft from Pass 2–3 (catalog + modifier suggestions). */
+export interface IntakeLineEstimateSuggestion {
+  reviewLineFingerprint: string;
+  lineId: string;
+  scopeBucket: IntakeScopeBucket;
+  applicationStatus: IntakeApplicationStatus;
+  topCatalogCandidates: IntakeCatalogMatch[];
+  suggestedCatalogItemId: string | null;
+  /** Line-level modifiers (field conditions, finish, etc.). */
+  suggestedLineModifierIds: string[];
+  /** Project-level modifiers suggested for this line’s context (same IDs may repeat across lines). */
+  suggestedProjectModifierIds: string[];
+  matcherSignals: string[];
+  marketingNotes: string[];
+  pricingPreview: {
+    materialEach: number;
+    laborMinutesEach: number;
+    qty: number;
+  } | null;
+}
+
+export interface IntakeProjectEstimateSuggestion {
+  applicationStatus: IntakeApplicationStatus;
+  suggestedProjectModifierIds: string[];
+  marketingNotes: string[];
+}
+
+export interface IntakeEstimateDraft {
+  version: 1;
+  readonly: true;
+  generatedAt: string;
+  lineSuggestions: IntakeLineEstimateSuggestion[];
+  projectSuggestion: IntakeProjectEstimateSuggestion;
+}
+
 export interface IntakeParseResult {
   status?: UploadParseStatus;
   fileType?: UploadFileType;
@@ -327,4 +420,8 @@ export interface IntakeParseResult {
   warnings: string[];
   diagnostics: IntakeParseDiagnostics;
   proposalAssist: IntakeProposalAssist;
+  /** Optional AI decision layer (ontology + rationale); present when Gemini returned extended fields. */
+  aiSuggestions?: IntakeAiSuggestions;
+  /** Matcher + read-only pricing preview; omitted when catalog matching is disabled. */
+  estimateDraft?: IntakeEstimateDraft;
 }
