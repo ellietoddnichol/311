@@ -2,6 +2,14 @@ FROM node:20-bookworm-slim
 
 WORKDIR /app
 
+# better-sqlite3 compiles from source when no matching prebuild exists (common on newer Node
+# or non-default platforms). bookworm-slim omits python/make/g++, which breaks node-gyp.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
 RUN npm ci
 
