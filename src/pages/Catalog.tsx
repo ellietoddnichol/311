@@ -338,10 +338,9 @@ export function Catalog() {
       <section className="ui-surface p-3 space-y-3">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="ui-label">Catalog Database</p>
-            <h1 className="ui-title mt-1">Catalog</h1>
-            <p className="text-xs text-slate-500">
-              Local SQLite holds every row. Syncing from Google Sheets deactivates anything not on the sheet — use “Activate all” after a bulk DB import if counts look wrong.
+            <h1 className="ui-title">Catalog</h1>
+            <p className="ui-subtitle mt-1">
+              Items, modifiers, and bundles — stored in SQLite and synced from Google Sheets. Rows missing from the sheet are deactivated; use Activate all after a bulk import if counts look wrong.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs">
@@ -553,6 +552,9 @@ export function Catalog() {
                         }
                       }}
                     >
+                      <td className="py-2 px-2 align-middle text-center">
+                        <CatalogItemThumb url={item.imageUrl} />
+                      </td>
                       <td className="py-2 px-3 align-top">
                         <div className="font-medium text-slate-800">{item.sku || 'No SKU'}</div>
                         <div className="text-[10px] text-slate-500">{item.id.slice(0, 12)}</div>
