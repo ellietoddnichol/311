@@ -155,6 +155,59 @@ export function looksLikeIntakePricingSummaryOrDisclaimerLine(text: string): boo
   return false;
 }
 
+/**
+ * Letterhead, contact blocks, and form labels that models sometimes emit as fake qty=1 lines.
+ * Keep conservative: prefer dropping obvious non-products over keeping noise in review.
+ */
+export function looksLikeIntakeContactOrNonScopeLine(text: string): boolean {
+  const t = intakeTrim(stripIntakeControlCharacters(String(text || ''))).replace(/\s+/g, ' ').trim();
+  if (!t) return true;
+
+  // Email or URL-only-ish contact
+  if (/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/.test(t)) return true;
+  if (/^https?:\/\/\S+$/i.test(t)) return true;
+
+  // North American phone / fax style (digits + separators only, optional ext)
+  const digitCount = (t.match(/\d/g) || []).length;
+  if (digitCount >= 10 && digitCount <= 16 && /^[\d\s().+–—-]+(ext\.?\s*\d+)?$/i.test(t.replace(/\s+/g, ' '))) {
+    return true;
+  }
+
+  // Job or page number only (no product language)
+  if (/^\d{1,4}$/.test(t)) return true;
+
+  // City, ST ZIP (common proposal footer)
+  if (/^[A-Za-z][A-Za-z\s.'-]+,\s*[A-Za-z]{2}\s+\d{5}(-\d{4})?\s*$/i.test(t)) return true;
+
+  // Form / schedule labels (not products)
+  if (/^bond\s*:\s*Y\s*\/\s*N/i.test(t)) return true;
+  if (/^quantity'?s?\s+material\b/i.test(t)) return true;
+  if (/^material\s*\/\s*labor\b/i.test(t) && t.length < 48) return true;
+
+  // Proposal / legal fragments (not billable scope)
+  if (
+    t.length >= 24 &&
+    t.length < 220 &&
+    /\b(proposal date|approved submittals?|submittals?\s+are|days of|valid\s+(for|through)|herein|whereas|notwithstanding)\b/i.test(t)
+  ) {
+    return true;
+  }
+
+  // Short company letterhead: "Name Name Inc" with no qty-led pattern and no scope tokens
+  if (t.length >= 6 && t.length <= 72 && !/^\d/.test(t)) {
+    if (/\b(Inc\.?|LLC|L\.L\.C\.|Corp\.?|Corporation|Ltd\.?|L\.P\.|P\.C\.)\s*$/i.test(t)) {
+      const lower = t.toLowerCase();
+      const hasScopeCue =
+        /\b(ea|lf|sf|sq\.?\s*ft|each|lot|set|pair|install|furnish|provide|supply|mount|partition|mirror|bar|dispenser|locker|sign|tile|door|frame|hardware)\b/i.test(
+          lower
+        );
+      if (!hasScopeCue) return true;
+    }
+  }
+
+  return false;
+}
+
 export function looksLikeIntakeSectionHeaderOrTitleLine(text: string): boolean {
   const t = intakeTrim(stripIntakeControlCharacters(String(text || ''))).replace(/\s+/g, ' ').trim();
   if (!t || t.length > 140) return false;

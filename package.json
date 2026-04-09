@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "test:intake": "tsx --test src/server/services/intake/**/*.test.ts",
+    "smoke:intake-env": "tsx scripts/intake-env-smoke.ts",
     "extract-sa-pem": "node scripts/extract-service-account-pem.mjs"
   },
   "dependencies": {

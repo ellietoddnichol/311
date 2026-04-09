@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import type { IntakeProjectAssumption, IntakeProposalAssist } from '../../shared/types/intake.ts';
 import { isPlausibleProjectTitle, looksLikeIntakePricingSummaryOrDisclaimerLine } from '../../shared/utils/intakeTextGuards.ts';
+import { normalizeIntakeUnit } from '../../shared/utils/intakeNormalization.ts';
 import { intakeGeminiResponseSchema, INTAKE_GEMINI_MODEL } from './structuredExtractionSchemas.ts';
 import { extractIntakeMetadataHintsFromText, mergeNlpHintsIntoPartialMetadata } from './naturalLanguageService.ts';
 import {
@@ -93,7 +94,7 @@ function sanitizeResult(value: any): GeminiExtractionResult {
           itemName: asText(line?.itemName),
           description: asText(line?.description),
           quantity: asNumber(line?.quantity, 1),
-          unit: asText(line?.unit) || 'EA',
+          unit: normalizeIntakeUnit(asText(line?.unit)) || asText(line?.unit) || 'EA',
           notes: asText(line?.notes),
           fieldAssembly: Boolean(line?.fieldAssembly),
           lineKind: asText(line?.lineKind).toLowerCase(),
@@ -297,6 +298,8 @@ export async function extractIntakeFromGemini(input: ExtractInput): Promise<Gemi
     'Section headers such as Toilet Accessories, Visual Display Boards, or Wall Protection may inform category context but must never appear in parsedLines unless a real scoped item is present.',
     'Ignore repeated field names, bid/proposal labels, generic setup text, parser artifacts, and long raw text blobs when they are not actual scoped items.',
     'Never emit as parsedLines: lump-sum lines like "Material: $1234" or "Labor: $500", grand totals, or disclaimers such as "IF LABOR IS NEEDED PLEASE CALL FOR QUOTE" — those belong in assumptions or nowhere.',
+    'Never emit letterhead or contact blocks as parsedLines: company names alone, street/city/state/ZIP lines, phone, fax, email, URLs, job numbers that are not a scoped product line, or form labels like "BOND: Y / N" or column headers like "Quantity\'s Material".',
+    'Legal/proposal boilerplate (e.g. submittals, proposal validity, "days of proposal date") is not a takeoff line — omit from parsedLines or fold into assumptions if it affects pricing.',
     'Focus on finding: project name, project number or bid package, client, general contractor, full address, bid date, proposal date, estimator, room or area names, category, item identity, quantity, and unit.',
     'When the source is messy, use semantic reasoning to cleanly group scope lines and separate metadata from actual takeoff content.',
     'Prioritize accurate extraction over guessing; if uncertain, leave blank and add a warning.',
@@ -304,6 +307,10 @@ export async function extractIntakeFromGemini(input: ExtractInput): Promise<Gemi
     'For spreadsheets: use provided normalized rows as source of truth and improve categorization/mapping only.',
     'When structured fields are present in the source, split them into roomArea, category, itemName, description, quantity, unit, notes, and labor/material flags instead of dumping whole rows into description.',
     'For PDFs/messy docs: infer room area, item, quantity, and unit when explicitly stated or strongly implied by schedules and scope tables; avoid junk records.',
+    'For matrix or room×column schedules: treat row labels as room/location keys and column headers as model or product identifiers; emit one parsedLines row per non-empty cell with the quantity from that cell (use 1 when the schedule uses checkmarks or X only).',
+    'When a schedule shows qty in one column and description in another, merge into a single row; do not split into fragment rows per cell unless they are clearly separate line items.',
+    'Prefer quantities printed in quantity columns over footnote text; if OCR text conflicts with the visible PDF table, trust the table layout you see in the file.',
+    'Normalize units to short tokens (EA, LF, SF, SY, LS, SET, PR, HR, etc.); map EACH→EA, SQ FT/SQFT→SF, LNFT/L.F.→LF.',
     'Interpret common construction proposal and invitation-to-bid structures, including schedules, room finish legends, keyed notes, and bid package references.',
     'Classify parsedLines rows: primary scope quantities (lineKind item), finish/adder/deduct lines (lineKind modifier), or grouped accessory packages (lineKind bundle).',
     'Set fieldAssembly true when the line states KD, RTA, knock-down, or that fixtures (e.g. lockers, benches) must be assembled on site — those are still scope items, not modifiers.',

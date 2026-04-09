@@ -46,7 +46,7 @@ import {
 } from '../shared/utils/projectWorkspaceSession';
 import { getErrorMessage } from '../shared/utils/errorMessage';
 import { scopeExceptionCount } from '../shared/utils/scopeReviewExceptions';
-import { TAKEOFF_ALL_ROOMS } from '../shared/constants/workspaceUi';
+import { PRICING_ALL_CATEGORIES, TAKEOFF_ALL_ROOMS } from '../shared/constants/workspaceUi';
 import { ProjectHeader } from '../components/workflow/ProjectHeader';
 import { WorkflowTabs } from '../components/workflow/WorkflowTabs';
 import { WorkflowRightDrawer } from '../components/workflow/WorkflowRightDrawer';
@@ -161,6 +161,8 @@ export function ProjectWorkspace() {
   /** `TAKEOFF_ALL_ROOMS` = combined view; otherwise a real room id (matches sidebar selection when drilling into one room). */
   const [takeoffRoomFilter, setTakeoffRoomFilter] = useState<string>(TAKEOFF_ALL_ROOMS);
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
+  const [pricingOrganizeMode, setPricingOrganizeMode] = useState<'rooms' | 'categories'>('rooms');
+  const [pricingCategoryFilter, setPricingCategoryFilter] = useState<string>(PRICING_ALL_CATEGORIES);
 
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [bundleModalOpen, setBundleModalOpen] = useState(false);
@@ -206,8 +208,14 @@ export function ProjectWorkspace() {
 
   useEffect(() => {
     if (!id || loading) return;
-    writeWorkspaceUi(id, { activeRoomId, takeoffRoomFilter, selectedLineId });
-  }, [id, loading, activeRoomId, takeoffRoomFilter, selectedLineId]);
+    writeWorkspaceUi(id, {
+      activeRoomId,
+      takeoffRoomFilter,
+      selectedLineId,
+      pricingOrganizeMode,
+      pricingCategoryFilter,
+    });
+  }, [id, loading, activeRoomId, takeoffRoomFilter, selectedLineId, pricingOrganizeMode, pricingCategoryFilter]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -350,6 +358,20 @@ export function ProjectWorkspace() {
       if (ui.estimateView === 'quantities' || ui.estimateView === 'pricing') {
         setEstimateView(ui.estimateView);
       }
+      if (ui.pricingOrganizeMode === 'categories' || ui.pricingOrganizeMode === 'rooms') {
+        setPricingOrganizeMode(ui.pricingOrganizeMode);
+      } else {
+        setPricingOrganizeMode('rooms');
+      }
+      const roomLinesForUi = lineData.filter((l) => l.roomId === roomPick);
+      const categoryKeys = new Set(
+        roomLinesForUi.map((l) => String(l.category || '').trim() || 'Uncategorized')
+      );
+      let nextPricingCat = ui.pricingCategoryFilter || PRICING_ALL_CATEGORIES;
+      if (nextPricingCat !== PRICING_ALL_CATEGORIES && !categoryKeys.has(nextPricingCat)) {
+        nextPricingCat = PRICING_ALL_CATEGORIES;
+      }
+      setPricingCategoryFilter(nextPricingCat);
     } catch (error: unknown) {
       console.error('Failed to load project workspace', error);
       const message = error instanceof Error ? error.message : 'Failed to load project.';
@@ -398,6 +420,54 @@ export function ProjectWorkspace() {
     () => activeRoomLines.reduce((sum, line) => sum + line.lineTotal, 0),
     [activeRoomLines]
   );
+
+  const pricingCategoryMetrics = useMemo(() => {
+    const map = new Map<string, { count: number; subtotal: number }>();
+    activeRoomLines.forEach((line) => {
+      const cat = String(line.category || '').trim() || 'Uncategorized';
+      const cur = map.get(cat) ?? { count: 0, subtotal: 0 };
+      cur.count += 1;
+      cur.subtotal += Number(line.lineTotal) || 0;
+      map.set(cat, cur);
+    });
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [activeRoomLines]);
+
+  const pricingGridLines = useMemo(() => {
+    if (pricingOrganizeMode !== 'categories' || pricingCategoryFilter === PRICING_ALL_CATEGORIES) {
+      return activeRoomLines;
+    }
+    return activeRoomLines.filter((line) => {
+      const cat = String(line.category || '').trim() || 'Uncategorized';
+      return cat === pricingCategoryFilter;
+    });
+  }, [activeRoomLines, pricingOrganizeMode, pricingCategoryFilter]);
+
+  const sortedPricingGridLines = useMemo(() => {
+    if (pricingOrganizeMode !== 'categories' || pricingCategoryFilter !== PRICING_ALL_CATEGORIES) {
+      return pricingGridLines;
+    }
+    return [...pricingGridLines].sort((a, b) => {
+      const ca = String(a.category || '').trim() || 'Uncategorized';
+      const cb = String(b.category || '').trim() || 'Uncategorized';
+      const cmp = ca.localeCompare(cb);
+      if (cmp !== 0) return cmp;
+      return String(a.description || '').localeCompare(String(b.description || ''));
+    });
+  }, [pricingGridLines, pricingOrganizeMode, pricingCategoryFilter]);
+
+  const pricingChipSubtotal = useMemo(
+    () => pricingGridLines.reduce((sum, line) => sum + line.lineTotal, 0),
+    [pricingGridLines]
+  );
+
+  useEffect(() => {
+    if (estimateView !== 'pricing') return;
+    if (!selectedLineId) return;
+    if (!sortedPricingGridLines.some((l) => l.id === selectedLineId)) {
+      setSelectedLineId(null);
+    }
+  }, [estimateView, sortedPricingGridLines, selectedLineId]);
 
   const roomMetrics = useMemo(() => {
     const byRoom: Record<string, { count: number; subtotal: number; totalQty: number; laborMinutes: number }> = {};
@@ -1377,74 +1447,58 @@ export function ProjectWorkspace() {
                   />
                 </div>
               ) : (
-              <>
-              <div className="ui-panel-muted px-3 py-2 sm:py-2.5">
-                <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-                  <div className="min-w-0">
-                    <h2 className="ui-typo-page-title">Estimate</h2>
-                    <p className="ui-typo-body mt-1 max-w-3xl">
-                      <span className="font-semibold text-slate-800">{roomNamesById[activeRoomId] || 'Unassigned'}</span>
-                      <span className="text-slate-500"> — pricing this room&apos;s lines. Quantities and scope: switch to </span>
-                      <button
-                        type="button"
-                        onClick={() => setEstimateView('quantities')}
-                        className="font-semibold text-blue-800 underline decoration-blue-300/70 underline-offset-2 hover:text-blue-950"
-                      >
-                        Quantities
-                      </button>
-                      <span className="text-slate-500">.</span>
-                    </p>
-                  </div>
-                  <div className="w-full shrink-0 rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm sm:min-w-[220px] lg:w-auto">
-                    <p className="ui-label !normal-case tracking-wide text-slate-500">Project total</p>
-                    <p className="text-lg font-semibold tabular-nums tracking-tight text-slate-950">{formatCurrencySafe(summary?.baseBidTotal)}</p>
-                    <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t border-slate-200/80 pt-1.5 text-xs text-slate-600">
-                      <span>
-                        This room{' '}
-                        <span className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(roomSubtotal)}</span>
-                      </span>
-                      <span className="tabular-nums text-right" title="Project labor time (after multipliers)">
-                        <span className="font-semibold text-slate-900">{formatNumberSafe(summary?.totalLaborHours || 0, 1)} hr</span>
-                        <span className="text-slate-400"> · </span>
-                        <span>{formatNumberSafe(Math.round(summary?.totalLaborMinutes ?? (summary?.totalLaborHours || 0) * 60), 0)} min</span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <div className="space-y-3">
+              <p className="px-0.5 text-xs leading-snug text-slate-500">
+                <span className="font-medium text-slate-700">Active room</span>{' '}
+                <span className="font-medium text-slate-900">{roomNamesById[activeRoomId] || 'Unassigned'}</span>
+                <span className="text-slate-500">
+                  {' '}
+                  — install pricing for lines in this room (sidebar). Project total is in the bar above. Use{' '}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEstimateView('quantities')}
+                  className="font-semibold text-blue-800 underline decoration-slate-300 underline-offset-2 hover:text-blue-950"
+                >
+                  Quantities
+                </button>
+                <span className="text-slate-500"> for the same compact header + View menu as the takeoff table.</span>
+              </p>
 
-              <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-sm">
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] lg:items-start lg:gap-5">
-                  <div className="flex min-w-0 gap-2">
-                    <div
-                      className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white"
-                      style={{ background: 'var(--brand)' }}
-                    >
-                      <Gauge className="h-3.5 w-3.5" aria-hidden />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="ui-label !normal-case tracking-wide text-slate-500">Labor rate (sub)</p>
-                      <p className="mt-0.5 text-base font-semibold tabular-nums tracking-tight text-slate-950">
-                        {formatCurrencySafe(effectiveLaborCostPerHour)}
-                        <span className="text-sm font-semibold text-slate-600">/hr</span>
-                        <span className="ml-1.5 text-xs font-medium text-slate-500">effective</span>
-                      </p>
-                      <p className="mt-1 text-xs text-slate-600">
-                        Base <span className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(baseLaborRatePerHour)}/hr</span>
-                        <span className="text-slate-400"> · </span>
-                        ×<span className="font-semibold tabular-nums text-slate-900">{formatNumberSafe(laborCostMultiplier, 2)}</span> cost
-                      </p>
-                      {Math.abs(laborHoursMultiplier - 1) > 0.001 ? (
-                        <p className="ui-callout mt-2 border-blue-200/50 bg-blue-50/60 text-slate-800">
-                          Time multiplier <span className="font-semibold tabular-nums text-slate-900">×{formatNumberSafe(laborHoursMultiplier, 2)}</span>{' '}
-                          (hours, separate from $/hr).
+              <div className="ui-panel-muted px-3 py-2.5">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-slate-200/90 bg-white p-3 shadow-sm">
+                    <div className="flex min-w-0 gap-2">
+                      <div
+                        className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white"
+                        style={{ background: 'var(--brand)' }}
+                      >
+                        <Gauge className="h-3.5 w-3.5" aria-hidden />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="ui-label !normal-case tracking-wide text-slate-500">Labor rate (sub)</p>
+                        <p className="mt-0.5 text-base font-semibold tabular-nums tracking-tight text-slate-950">
+                          {formatCurrencySafe(effectiveLaborCostPerHour)}
+                          <span className="text-sm font-semibold text-slate-600">/hr</span>
+                          <span className="ml-1.5 text-xs font-medium text-slate-500">effective</span>
                         </p>
-                      ) : (
-                        <p className="ui-typo-muted mt-0.5">Labor time ×1.00 (no schedule multiplier).</p>
-                      )}
+                        <p className="mt-1 text-xs text-slate-600">
+                          Base <span className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(baseLaborRatePerHour)}/hr</span>
+                          <span className="text-slate-400"> · </span>
+                          ×<span className="font-semibold tabular-nums text-slate-900">{formatNumberSafe(laborCostMultiplier, 2)}</span> cost
+                        </p>
+                        {Math.abs(laborHoursMultiplier - 1) > 0.001 ? (
+                          <p className="ui-callout mt-2 border-blue-200/50 bg-blue-50/60 text-slate-800">
+                            Time multiplier <span className="font-semibold tabular-nums text-slate-900">×{formatNumberSafe(laborHoursMultiplier, 2)}</span>{' '}
+                            (hours, separate from $/hr).
+                          </p>
+                        ) : (
+                          <p className="ui-typo-muted mt-0.5">Labor time ×1.00 (no schedule multiplier).</p>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/90 p-3">
+                  <div className="rounded-lg border border-slate-200/90 bg-slate-50/90 p-3 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-slate-800">Project condition notes</p>
                       <button
@@ -1488,39 +1542,136 @@ export function ProjectWorkspace() {
                 </div>
 
                 <div>
-                  <div className="mb-1.5 flex flex-col gap-1.5 sm:flex-row sm:items-end sm:justify-between">
-                    <p className="text-xs font-medium text-slate-700">Room · one at a time</p>
-                    <div className="ui-panel-muted px-3 py-1.5 text-right">
-                      <p className="ui-label !normal-case tracking-wide text-slate-500">Room total</p>
-                      <p className="text-base font-semibold tabular-nums text-slate-900">{formatCurrencySafe(roomSubtotal)}</p>
+                  <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Group by</p>
+                      <div className="inline-flex rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPricingOrganizeMode('rooms');
+                            setPricingCategoryFilter(PRICING_ALL_CATEGORIES);
+                          }}
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+                            pricingOrganizeMode === 'rooms' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          Rooms
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPricingOrganizeMode('categories');
+                            setPricingCategoryFilter(PRICING_ALL_CATEGORIES);
+                          }}
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+                            pricingOrganizeMode === 'categories' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          Categories
+                        </button>
+                      </div>
+                      <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+                        {pricingOrganizeMode === 'rooms'
+                          ? 'Jump between rooms (same as sidebar).'
+                          : 'Filter the table by catalog category for this room; All keeps every line.'}
+                      </p>
+                    </div>
+                    <div className="ui-panel-muted shrink-0 rounded-lg px-3 py-1.5 text-right">
+                      <p className="ui-label !normal-case tracking-wide text-slate-500">
+                        {pricingOrganizeMode === 'categories' && pricingCategoryFilter !== PRICING_ALL_CATEGORIES
+                          ? 'Category total'
+                          : 'Room total'}
+                      </p>
+                      <p className="text-base font-semibold tabular-nums text-slate-900">{formatCurrencySafe(pricingChipSubtotal)}</p>
                     </div>
                   </div>
                   <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-0.5">
-                    {rooms.map((room) => {
-                      const active = room.id === activeRoomId;
-                      const metric = roomMetrics[room.id] || { count: 0, subtotal: 0, totalQty: 0, laborMinutes: 0 };
-                      return (
-                        <button
-                          key={room.id}
-                          onClick={() => selectWorkspaceRoom(room.id)}
-                          title={`${metric.count} lines · ${formatCurrencySafe(metric.subtotal)}`}
-                          className={`shrink-0 rounded-lg px-3 py-2 text-left transition-all ${
-                            active
-                              ? 'text-white shadow-md ring-1 ring-blue-900/30'
-                              : 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50'
-                          }`}
-                          style={active ? { background: 'var(--brand)' } : undefined}
-                        >
-                          <div className="min-w-[118px]">
-                            <div className={`text-xs font-semibold ${active ? 'text-white' : 'text-slate-900'}`}>{room.roomName}</div>
-                            <div className={`mt-0.5 flex items-center justify-between text-[10px] ${active ? 'text-slate-200' : 'text-slate-500'}`}>
-                              <span>{metric.count} lines</span>
-                              <span className="tabular-nums font-medium">{formatCurrencySafe(metric.subtotal)}</span>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
+                    {pricingOrganizeMode === 'rooms'
+                      ? rooms.map((room) => {
+                          const active = room.id === activeRoomId;
+                          const metric = roomMetrics[room.id] || { count: 0, subtotal: 0, totalQty: 0, laborMinutes: 0 };
+                          return (
+                            <button
+                              key={room.id}
+                              type="button"
+                              onClick={() => selectWorkspaceRoom(room.id)}
+                              title={`${metric.count} lines · ${formatCurrencySafe(metric.subtotal)}`}
+                              className={`shrink-0 rounded-lg px-3 py-2 text-left transition-all ${
+                                active
+                                  ? 'text-white shadow-md ring-1 ring-blue-900/30'
+                                  : 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50'
+                              }`}
+                              style={active ? { background: 'var(--brand)' } : undefined}
+                            >
+                              <div className="min-w-[118px]">
+                                <div className={`text-xs font-semibold ${active ? 'text-white' : 'text-slate-900'}`}>{room.roomName}</div>
+                                <div className={`mt-0.5 flex items-center justify-between text-[10px] ${active ? 'text-slate-200' : 'text-slate-500'}`}>
+                                  <span>{metric.count} lines</span>
+                                  <span className="tabular-nums font-medium">{formatCurrencySafe(metric.subtotal)}</span>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })
+                      : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setPricingCategoryFilter(PRICING_ALL_CATEGORIES)}
+                              title={`${activeRoomLines.length} lines in this room`}
+                              className={`shrink-0 rounded-lg px-3 py-2 text-left transition-all ${
+                                pricingCategoryFilter === PRICING_ALL_CATEGORIES
+                                  ? 'text-white shadow-md ring-1 ring-blue-900/30'
+                                  : 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50'
+                              }`}
+                              style={pricingCategoryFilter === PRICING_ALL_CATEGORIES ? { background: 'var(--brand)' } : undefined}
+                            >
+                              <div className="min-w-[132px]">
+                                <div
+                                  className={`text-xs font-semibold ${
+                                    pricingCategoryFilter === PRICING_ALL_CATEGORIES ? 'text-white' : 'text-slate-900'
+                                  }`}
+                                >
+                                  All categories
+                                </div>
+                                <div
+                                  className={`mt-0.5 flex items-center justify-between text-[10px] ${
+                                    pricingCategoryFilter === PRICING_ALL_CATEGORIES ? 'text-slate-200' : 'text-slate-500'
+                                  }`}
+                                >
+                                  <span>{activeRoomLines.length} lines</span>
+                                  <span className="tabular-nums font-medium">{formatCurrencySafe(roomSubtotal)}</span>
+                                </div>
+                              </div>
+                            </button>
+                            {pricingCategoryMetrics.map(([cat, metric]) => {
+                              const active = pricingCategoryFilter === cat;
+                              return (
+                                <button
+                                  key={cat}
+                                  type="button"
+                                  onClick={() => setPricingCategoryFilter(cat)}
+                                  title={`${metric.count} lines · ${formatCurrencySafe(metric.subtotal)}`}
+                                  className={`shrink-0 rounded-lg px-3 py-2 text-left transition-all ${
+                                    active
+                                      ? 'text-white shadow-md ring-1 ring-blue-900/30'
+                                      : 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50'
+                                  }`}
+                                  style={active ? { background: 'var(--brand)' } : undefined}
+                                >
+                                  <div className="min-w-[118px] max-w-[14rem]">
+                                    <div className={`truncate text-xs font-semibold ${active ? 'text-white' : 'text-slate-900'}`}>{cat}</div>
+                                    <div className={`mt-0.5 flex items-center justify-between text-[10px] ${active ? 'text-slate-200' : 'text-slate-500'}`}>
+                                      <span>{metric.count} lines</span>
+                                      <span className="tabular-nums font-medium">{formatCurrencySafe(metric.subtotal)}</span>
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </>
+                        )}
                   </div>
                 </div>
 
@@ -1594,13 +1745,24 @@ export function ProjectWorkspace() {
                         <Calculator className="h-3.5 w-3.5 shrink-0 text-blue-700/80" />
                       </div>
                       <p className="mt-1 text-sm font-semibold tabular-nums text-slate-950">{formatCurrencySafe(summary?.baseBidTotal)}</p>
-                      <p className="mt-0.5 text-[10px] text-slate-600">Room {formatCurrencySafe(roomSubtotal)}</p>
+                      <p className="mt-0.5 text-[10px] text-slate-600">
+                        Room {formatCurrencySafe(roomSubtotal)}
+                        {pricingOrganizeMode === 'categories' && pricingCategoryFilter !== PRICING_ALL_CATEGORIES ? (
+                          <>
+                            {' '}
+                            · Shown {formatCurrencySafe(pricingChipSubtotal)}
+                          </>
+                        ) : null}
+                      </p>
                     </div>
                   </div>
                   </div>
 
                   <div className="flex shrink-0 flex-wrap content-start items-center gap-1.5 border-t border-slate-200/70 pt-2 text-[11px] text-slate-600 lg:max-w-[14rem] lg:border-l lg:border-t-0 lg:pl-3 lg:pt-0 xl:max-w-none xl:flex-nowrap">
-                    <span className="rounded-full bg-slate-50 px-2 py-1 font-medium ring-1 ring-slate-200/80">{activeRoomLines.length} lines</span>
+                    <span className="rounded-full bg-slate-50 px-2 py-1 font-medium ring-1 ring-slate-200/80">
+                      {pricingGridLines.length} line{pricingGridLines.length === 1 ? '' : 's'}
+                      {pricingOrganizeMode === 'categories' && pricingCategoryFilter !== PRICING_ALL_CATEGORIES ? ' shown' : ''}
+                    </span>
                     <span className="rounded-full bg-slate-50 px-2 py-1 font-medium ring-1 ring-slate-200/80">{selectedScopeCategories.length || categories.filter((category) => category !== 'all').length} categories</span>
                     {selectedLine ? (
                       <span className="max-w-[min(100%,20rem)] truncate rounded-full bg-blue-50 px-2 py-1 font-medium text-blue-900 ring-1 ring-blue-200/80">{selectedLine.description}</span>
@@ -1617,7 +1779,7 @@ export function ProjectWorkspace() {
               </div>
 
               <EstimateGrid
-                lines={activeRoomLines}
+                lines={sortedPricingGridLines}
                 rooms={rooms}
                 categories={categories}
                 roomNamesById={roomNamesById}
@@ -1630,7 +1792,7 @@ export function ProjectWorkspace() {
                 onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
                 onDeleteLine={(lineId) => void deleteLine(lineId)}
               />
-              </>
+              </div>
               )}
             </div>
           </div>

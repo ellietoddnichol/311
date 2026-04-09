@@ -1,5 +1,9 @@
 import type { IntakeProjectMetadata } from '../../shared/types/intake.ts';
-import { looksLikeIntakePricingSummaryOrDisclaimerLine } from '../../shared/utils/intakeTextGuards.ts';
+import {
+  looksLikeIntakeContactOrNonScopeLine,
+  looksLikeIntakePricingSummaryOrDisclaimerLine,
+  looksLikeIntakeSectionHeaderOrTitleLine,
+} from '../../shared/utils/intakeTextGuards.ts';
 import { extractMetadataFromCells, hasProjectMetadataValue, intakeAsText, normalizeComparableText } from './metadataExtractorService.ts';
 
 export type ParsedChunkType = 'project_metadata' | 'header_row' | 'section_header' | 'actual_scope_line' | 'ignore';
@@ -133,6 +137,11 @@ export function classifyParsedChunk(cells: string[], lineIndex: number, knownMet
 }
 
 export function shouldKeepNormalizedLine(line: RowClassifierLineLike, lineIndex: number, knownMetadata?: Partial<IntakeProjectMetadata>): boolean {
+  const identity = intakeAsText(line.description || line.itemName);
+  if (!identity) return false;
+  if (looksLikeIntakeContactOrNonScopeLine(identity)) return false;
+  if (looksLikeIntakeSectionHeaderOrTitleLine(identity)) return false;
+
   const classification = classifyParsedChunk([
     line.roomName,
     line.category,
@@ -143,8 +152,6 @@ export function shouldKeepNormalizedLine(line: RowClassifierLineLike, lineIndex:
   ], lineIndex, knownMetadata);
 
   if (classification.kind !== 'actual_scope_line') return false;
-  const identity = intakeAsText(line.description || line.itemName);
-  if (!identity) return false;
   if (looksLikeHeaderChunk([line.itemName, line.description, line.category, line.unit, line.notes])) return false;
   if (looksLikeProjectMetadataChunk(identity, lineIndex, knownMetadata)) return false;
   if (looksLikeIntakePricingSummaryOrDisclaimerLine(identity)) return false;

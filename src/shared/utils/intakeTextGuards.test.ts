@@ -5,6 +5,7 @@ import {
   isPlausibleCustomerFacingProposalText,
   isPlausibleProjectTitle,
   isPlausibleProposalScopeSnippet,
+  looksLikeIntakeContactOrNonScopeLine,
   looksLikeIntakePricingSummaryOrDisclaimerLine,
   looksLikeIntakeSectionHeaderOrTitleLine,
 } from './intakeTextGuards.ts';
@@ -26,6 +27,22 @@ test('looksLikeIntakeSectionHeaderOrTitleLine flags column headers and short div
 test('proposal scope snippets exclude table header ribbons', () => {
   assert.equal(isPlausibleProposalScopeSnippet('Qty Description Unit'), false);
   assert.equal(isPlausibleProposalScopeSnippet('ITEM'), false);
+});
+
+test('looksLikeIntakeContactOrNonScopeLine drops letterhead, contact, and form junk', () => {
+  assert.equal(looksLikeIntakeContactOrNonScopeLine('CWA Specialties Inc.'), true);
+  assert.equal(looksLikeIntakeContactOrNonScopeLine('182'), true);
+  assert.equal(looksLikeIntakeContactOrNonScopeLine('Linwood, KS 66052'), true);
+  assert.equal(looksLikeIntakeContactOrNonScopeLine('913-526-9834'), true);
+  assert.equal(looksLikeIntakeContactOrNonScopeLine('latina@cwaspecialties.com'), true);
+  assert.equal(
+    looksLikeIntakeContactOrNonScopeLine('days of proposal date with approved submittals'),
+    true
+  );
+  assert.equal(looksLikeIntakeContactOrNonScopeLine("Quantity's Material"), true);
+  assert.equal(looksLikeIntakeContactOrNonScopeLine('BOND: Y / N'), true);
+  assert.equal(looksLikeIntakeContactOrNonScopeLine('4 EA Stainless grab bar 36 inch'), false);
+  assert.equal(looksLikeIntakeContactOrNonScopeLine('Partition Systems LLC furnish per plans'), false);
 });
 
 test('looksLikeIntakePricingSummaryOrDisclaimerLine drops totals and labor/quote disclaimers', () => {

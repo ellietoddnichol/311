@@ -56,6 +56,58 @@ test('validator drops section header lines and adds a single summary warning', (
   );
 });
 
+test('validator drops contact/letterhead lines and normalizes units', () => {
+  const items: NormalizedIntakeItem[] = [
+    {
+      sourceType: 'excel',
+      sourceRef: { fileName: 'bid.xlsx', sheetName: 'Scope', rowNumber: 1 },
+      itemType: 'item',
+      category: null,
+      roomName: null,
+      description: 'latina@contractor.com',
+      quantity: 1,
+      unit: 'EA',
+      manufacturer: null,
+      model: null,
+      finish: null,
+      modifiers: [],
+      bundleCandidates: [],
+      notes: [],
+      alternate: false,
+      exclusion: false,
+      confidence: 0.5,
+    },
+    {
+      sourceType: 'excel',
+      sourceRef: { fileName: 'bid.xlsx', sheetName: 'Scope', rowNumber: 2 },
+      itemType: 'item',
+      category: 'Toilet Accessories',
+      roomName: '101',
+      description: 'Grab bar 36 inch',
+      quantity: 2,
+      unit: 'each',
+      manufacturer: null,
+      model: null,
+      finish: null,
+      modifiers: [],
+      bundleCandidates: [],
+      notes: [],
+      alternate: false,
+      exclusion: false,
+      confidence: 0.8,
+    },
+  ];
+
+  const validation = validateNormalizedItems(items);
+
+  assert.equal(validation.correctedItems?.length, 1);
+  assert.equal(validation.correctedItems?.[0]?.unit, 'EA');
+  assert.equal(
+    validation.warnings.some((w) => w.includes('letterhead, contact info')),
+    true
+  );
+});
+
 test('validator flags modifiers and confidence recommends review when warnings accumulate', () => {
   const items: NormalizedIntakeItem[] = [
     {

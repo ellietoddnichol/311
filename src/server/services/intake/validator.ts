@@ -1,9 +1,11 @@
 import type { NormalizedIntakeItem, ValidationResult } from '../../../shared/types/intake.ts';
 import { looksLikeModifierLine } from './intakeSemantics.ts';
 import {
+  looksLikeIntakeContactOrNonScopeLine,
   looksLikeIntakePricingSummaryOrDisclaimerLine,
   looksLikeIntakeSectionHeaderOrTitleLine,
 } from '../../../shared/utils/intakeTextGuards.ts';
+import { normalizeIntakeUnit } from '../../../shared/utils/intakeNormalization.ts';
 import { intakeAsText, normalizeComparableText } from '../metadataExtractorService.ts';
 
 /**
@@ -40,8 +42,13 @@ export function validateNormalizedItems(items: NormalizedIntakeItem[]): Validati
 
   let sectionHeaderLinesDropped = 0;
   let disclaimerOrPricingLinesDropped = 0;
+  let contactOrNonScopeDropped = 0;
   correctedItems = correctedItems.filter((item) => {
     const desc = item.description || '';
+    if (looksLikeIntakeContactOrNonScopeLine(desc)) {
+      contactOrNonScopeDropped += 1;
+      return false;
+    }
     if (looksLikeIntakePricingSummaryOrDisclaimerLine(desc)) {
       disclaimerOrPricingLinesDropped += 1;
       return false;
@@ -52,6 +59,16 @@ export function validateNormalizedItems(items: NormalizedIntakeItem[]): Validati
     }
     return true;
   });
+  correctedItems = correctedItems.map((item) => {
+    const nu = normalizeIntakeUnit(item.unit);
+    if (nu) return { ...item, unit: nu };
+    return item;
+  });
+  if (contactOrNonScopeDropped > 0) {
+    warnings.push(
+      `${contactOrNonScopeDropped} line(s) were removed as letterhead, contact info, or other non-scope rows (aligned with Gemini row classifier rules).`
+    );
+  }
   if (disclaimerOrPricingLinesDropped > 0) {
     warnings.push(
       `${disclaimerOrPricingLinesDropped} line(s) were removed as pricing summaries, totals, or contact/quote disclaimers (not scope items).`

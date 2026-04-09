@@ -8,6 +8,10 @@ export type WorkspaceUiSnapshot = {
   takeoffRoomFilter?: string;
   selectedLineId?: string | null;
   estimateView?: EstimateWorkspaceView;
+  /** Pricing tab: horizontal chips by room vs by category. */
+  pricingOrganizeMode?: 'rooms' | 'categories';
+  /** When `categories`, filter key or PRICING_ALL_CATEGORIES sentinel (stored as string). */
+  pricingCategoryFilter?: string;
 };
 
 export function readWorkspaceUi(projectId: string): WorkspaceUiSnapshot {

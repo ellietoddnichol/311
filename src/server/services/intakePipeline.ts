@@ -32,6 +32,7 @@ import {
   isPlausibleProjectTitle,
   looksLikeIntakePricingSummaryOrDisclaimerLine,
 } from '../../shared/utils/intakeTextGuards.ts';
+import { normalizeIntakeUnit } from '../../shared/utils/intakeNormalization.ts';
 import {
   mergeResolvedMetadata as mergeResolvedMetadataFromService,
   extractMetadataFromText as extractMetadataFromTextFromService,
@@ -1183,40 +1184,46 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
     });
 
     warnings.push(...gemini.warnings);
-    const geminiLines: NormalizedIntakeLine[] = gemini.parsedLines
-      .map((line) => {
-        const description = line.description || line.itemName || '';
-        const enriched = enrichIntakeServiceLineNotes({
-          description,
-          itemName: line.itemName || '',
-          category: line.category || '',
-          notes: line.notes || '',
-          fieldAssemblyHint: line.fieldAssembly === true,
-        });
-        const semanticTags = [...enriched.semanticTags];
-        const lk = (line.lineKind || '').toLowerCase();
-        if (lk === 'modifier') semanticTags.push('gemini_line_kind_modifier');
-        if (lk === 'bundle') semanticTags.push('gemini_line_kind_bundle');
-        return {
-          roomName: normalizeRoomName(line.roomArea || 'General'),
-          category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
-          itemCode: line.itemCode || '',
-          itemName: line.itemName || description,
-          description,
-          quantity: parsePositiveNumber(line.quantity, 1),
-          unit: line.unit || 'EA',
-          notes: enriched.notes,
-          sourceReference: fileName,
-          laborIncluded: null,
-          materialIncluded: null,
-          confidence: 0.9,
-          parserTag: sourceType === 'pdf' ? 'gemini-pdf' : 'gemini-document',
-          warnings: [],
-          semanticTags: semanticTags.length ? Array.from(new Set(semanticTags)) : undefined,
-          bundleCandidates: detectBundleCandidates(description, line.category || ''),
-        };
-      })
-      .filter((line, index) => shouldKeepNormalizedLineFromService(line, index, heuristicMetadata));
+    const geminiLines: NormalizedIntakeLine[] = (
+      gemini.parsedLines
+        .map((line) => {
+          const docKind = String(line.documentLineKind || '').toLowerCase();
+          if (docKind === 'informational_only' || docKind === 'clarification') {
+            return null;
+          }
+          const description = line.description || line.itemName || '';
+          const enriched = enrichIntakeServiceLineNotes({
+            description,
+            itemName: line.itemName || '',
+            category: line.category || '',
+            notes: line.notes || '',
+            fieldAssemblyHint: line.fieldAssembly === true,
+          });
+          const semanticTags = [...enriched.semanticTags];
+          const lk = (line.lineKind || '').toLowerCase();
+          if (lk === 'modifier') semanticTags.push('gemini_line_kind_modifier');
+          if (lk === 'bundle') semanticTags.push('gemini_line_kind_bundle');
+          return {
+            roomName: normalizeRoomName(line.roomArea || 'General'),
+            category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
+            itemCode: line.itemCode || '',
+            itemName: line.itemName || description,
+            description,
+            quantity: parsePositiveNumber(line.quantity, 1),
+            unit: normalizeIntakeUnit(line.unit) || String(line.unit || 'EA').trim().toUpperCase() || 'EA',
+            notes: enriched.notes,
+            sourceReference: fileName,
+            laborIncluded: null,
+            materialIncluded: null,
+            confidence: 0.9,
+            parserTag: sourceType === 'pdf' ? 'gemini-pdf' : 'gemini-document',
+            warnings: [],
+            semanticTags: semanticTags.length ? Array.from(new Set(semanticTags)) : undefined,
+            bundleCandidates: detectBundleCandidates(description, line.category || ''),
+          };
+        })
+        .filter((line) => line !== null) as NormalizedIntakeLine[]
+    ).filter((line, index) => shouldKeepNormalizedLineFromService(line, index, heuristicMetadata));
 
     const usableGeminiLines = geminiLines.filter((line) => line.description && line.quantity > 0);
     const normalizedLines = usableGeminiLines.length ? usableGeminiLines : fallbackLines;
