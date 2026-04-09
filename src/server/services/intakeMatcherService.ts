@@ -257,6 +257,14 @@ export function buildIntakeEstimateDraft(params: {
     };
   });
 
+  const suggestedJobConditionsPatch = (aiSuggestions?.suggestedProjectModifierHints ?? []).map((h, index) => ({
+    id: `jc-ai-${index}`,
+    label: h.phrase,
+    suggestedState: true,
+    reason: h.rationale || undefined,
+    applicationStatus: 'suggested' as const,
+  }));
+
   return {
     version: 1,
     readonly: true,
@@ -266,6 +274,7 @@ export function buildIntakeEstimateDraft(params: {
       applicationStatus: 'suggested',
       suggestedProjectModifierIds: projectModIds,
       marketingNotes: [],
+      suggestedJobConditionsPatch,
     },
   };
 }

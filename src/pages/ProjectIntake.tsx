@@ -3,7 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronDown, FileUp, FolderInput, Info, PlusCircle, Save, Search, Upload, WandSparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { PricingMode, ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
+import {
+  ModifierRecord,
+  PricingMode,
+  ProjectJobConditions,
+  ProjectRecord,
+  RoomRecord,
+  SettingsRecord,
+  TakeoffLineRecord,
+} from '../shared/types/estimator';
+import type { IntakeApplicationStatus } from '../shared/types/intake';
 import { IntakeAiSuggestions, IntakeParseResult, IntakeReviewLine } from '../shared/types/intake';
 import { CatalogItem } from '../types';
 import {
@@ -29,6 +38,16 @@ import {
 import { computeCatalogPeerPricingSuggestion } from '../shared/utils/catalogPeerSuggestions';
 import { catalogItemMatchesQuery } from '../shared/utils/catalogItemSearch';
 import { computeReviewStepOverallConfidence } from '../shared/utils/reviewStepConfidence';
+import {
+  buildInitialEstimateReviewState,
+  ESTIMATE_REVIEW_HIGH_CONFIDENCE,
+  ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD,
+  getActiveCatalogMatchForRow,
+  inferJobConditionPatchesFromText,
+  resolveLineForProjectCreation,
+  type EstimateReviewLineState,
+} from '../shared/utils/intakeEstimateReview';
+import { IntakeEstimateReviewPanel } from '../components/intake/IntakeEstimateReviewPanel';
 
 function IntakeFieldBadge({ kind }: { kind: 'required' | 'optional' | 'office' }) {
   if (kind === 'required') {
@@ -75,6 +94,10 @@ function IntakeFieldLegend() {
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
 type IntakeStep = 1 | 2 | 3 | 4 | 5;
 
+type CatalogPickerTarget =
+  | { kind: 'line'; lineId: string }
+  | { kind: 'fingerprint'; fingerprint: string };
+
 interface ParserReviewSummary {
   status: string | null;
   fileType: string | null;
@@ -120,6 +143,8 @@ interface LineSuggestion {
   matchReason?: string;
   suggestedBundleId?: string | null;
   suggestedBundleName?: string | null;
+  /** Stable key from server parse; links to estimate draft rows. */
+  reviewLineFingerprint?: string;
 }
 
 type SourceKind =
@@ -936,6 +961,7 @@ function buildIntakeLineSuggestion(line: IntakeReviewLine, fallbackSource: strin
     matchReason: preferredMatch?.reason || '',
     suggestedBundleId: bundle?.bundleId ?? null,
     suggestedBundleName: bundle?.bundleName ?? null,
+    reviewLineFingerprint: line.reviewLineFingerprint,
   };
 }
 
@@ -1191,7 +1217,6 @@ export function ProjectIntake() {
   const [intakeWarnings, setIntakeWarnings] = useState<string[]>([]);
 
   const [createConfirmedOnly, setCreateConfirmedOnly] = useState(true);
-  const [catalogPickerLineId, setCatalogPickerLineId] = useState<string | null>(null);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [newCatalogLineId, setNewCatalogLineId] = useState<string | null>(null);
   const [newCatalogDraft, setNewCatalogDraft] = useState<NewCatalogDraft | null>(null);
@@ -1202,6 +1227,12 @@ export function ProjectIntake() {
   const [distanceMessage, setDistanceMessage] = useState('No calculated distance yet.');
   const [projectDateErrors, setProjectDateErrors] = useState<Partial<Record<'bidDate' | 'proposalDate' | 'dueDate', string>>>({});
   const [parserReviewSummary, setParserReviewSummary] = useState<ParserReviewSummary | null>(null);
+  const [lastIntakeParse, setLastIntakeParse] = useState<IntakeParseResult | null>(null);
+  const [estimateReviewLines, setEstimateReviewLines] = useState<Record<string, EstimateReviewLineState>>({});
+  const [estimateReviewJobConditions, setEstimateReviewJobConditions] = useState<Record<string, IntakeApplicationStatus>>({});
+  const [estimateReviewProjectMods, setEstimateReviewProjectMods] = useState<Record<string, IntakeApplicationStatus>>({});
+  const [intakeModifiers, setIntakeModifiers] = useState<ModifierRecord[]>([]);
+  const [catalogPickerTarget, setCatalogPickerTarget] = useState<CatalogPickerTarget | null>(null);
 
   const [roomSuggestions, setRoomSuggestions] = useState<RoomSuggestion[]>([]);
   const [lineSuggestions, setLineSuggestions] = useState<LineSuggestion[]>([]);
@@ -1221,10 +1252,16 @@ export function ProjectIntake() {
 
   useEffect(() => {
     void (async () => {
-      const [projectData, catalogData, settingsData] = await Promise.all([api.getV1Projects(), api.getCatalog(), api.getV1Settings()]);
+      const [projectData, catalogData, settingsData, modifiersData] = await Promise.all([
+        api.getV1Projects(),
+        api.getCatalog(),
+        api.getV1Settings(),
+        api.getV1Modifiers(),
+      ]);
       setProjects(projectData);
       setCatalog(catalogData);
       setSettingsDefaults(settingsData);
+      setIntakeModifiers(modifiersData);
 
       const defaults = createInitialProjectDraft(settingsData);
       setProjectDraft((prev) => ({
@@ -1526,7 +1563,18 @@ export function ProjectIntake() {
     setLineSuggestions(suggestions);
     setRoomSuggestions(buildIntakeRoomSuggestions(result, suggestions));
     setIntakeWarnings(buildIntakeWarnings(result));
-      setParserReviewSummary(buildParserReviewSummary(result));
+    setParserReviewSummary(buildParserReviewSummary(result));
+    setLastIntakeParse(result);
+    if (result.estimateDraft) {
+      const init = buildInitialEstimateReviewState(result.estimateDraft);
+      setEstimateReviewLines(init.lineByFingerprint);
+      setEstimateReviewJobConditions(init.jobConditionById);
+      setEstimateReviewProjectMods(init.projectModifierById);
+    } else {
+      setEstimateReviewLines({});
+      setEstimateReviewJobConditions({});
+      setEstimateReviewProjectMods({});
+    }
     setProjectDraft((prev) => ({
       ...prev,
       selectedScopeCategories: prev.selectedScopeCategories && prev.selectedScopeCategories.length > 0
@@ -1972,7 +2020,7 @@ export function ProjectIntake() {
     setLineSuggestions(dedupeSuggestions(parsed));
   }
 
-  function applyExistingCatalogMatch(lineId: string, item: CatalogItem) {
+  function applyCatalogToLineId(lineId: string, item: CatalogItem, matchReason = 'User-selected catalog item') {
     setLineSuggestions((prev) =>
       prev.map((line) => {
         if (line.id !== lineId) return line;
@@ -1991,12 +2039,171 @@ export function ProjectIntake() {
           laborIncluded: line.laborIncluded,
           materialIncluded: line.materialIncluded,
           matchConfidence: 'strong',
-          matchReason: 'User-selected catalog item',
+          matchReason,
         };
       })
     );
-    setCatalogPickerLineId(null);
+  }
+
+  function applyCatalogPickerSelection(item: CatalogItem) {
+    const target = catalogPickerTarget;
+    if (!target) return;
+    if (target.kind === 'line') {
+      applyCatalogToLineId(target.lineId, item);
+    } else {
+      const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === target.fingerprint)?.id;
+      if (lineId) {
+        applyCatalogToLineId(lineId, item, 'Estimate review catalog pick');
+      }
+      setEstimateReviewLines((prev) => ({
+        ...prev,
+        [target.fingerprint]: { applicationStatus: 'replaced', selectedCatalogItemId: item.id },
+      }));
+    }
+    setCatalogPickerTarget(null);
     setCatalogSearch('');
+  }
+
+  function patchEstimateReviewLine(fingerprint: string, patch: Partial<EstimateReviewLineState>) {
+    setEstimateReviewLines((prev) => {
+      const cur = prev[fingerprint] ?? { applicationStatus: 'suggested' as const, selectedCatalogItemId: null };
+      return { ...prev, [fingerprint]: { ...cur, ...patch } };
+    });
+  }
+
+  function handleAcceptEstimateLine(fingerprint: string) {
+    const draft = lastIntakeParse?.estimateDraft;
+    const row = draft?.lineSuggestions.find((r) => r.reviewLineFingerprint === fingerprint);
+    if (!row) return;
+    const st = estimateReviewLines[fingerprint] ?? {
+      applicationStatus: row.applicationStatus,
+      selectedCatalogItemId: row.suggestedCatalogItemId,
+    };
+    const catId = st.selectedCatalogItemId ?? row.suggestedCatalogItemId;
+    const item = catId ? catalog.find((c) => c.id === catId) : undefined;
+    patchEstimateReviewLine(fingerprint, { applicationStatus: 'accepted', selectedCatalogItemId: catId });
+    const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === fingerprint)?.id;
+    if (item && lineId) {
+      applyCatalogToLineId(lineId, item, 'Accepted estimate suggestion');
+    }
+  }
+
+  function handleReplaceEstimateLineWithCatalogId(fingerprint: string, catalogItemId: string) {
+    const item = catalog.find((c) => c.id === catalogItemId);
+    patchEstimateReviewLine(fingerprint, { applicationStatus: 'replaced', selectedCatalogItemId: catalogItemId });
+    const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === fingerprint)?.id;
+    if (item && lineId) {
+      applyCatalogToLineId(lineId, item, 'Replaced catalog candidate (estimate review)');
+    }
+  }
+
+  function handleIgnoreEstimateLine(fingerprint: string) {
+    patchEstimateReviewLine(fingerprint, { applicationStatus: 'ignored', selectedCatalogItemId: null });
+    const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === fingerprint)?.id;
+    if (lineId) ignoreLine(lineId);
+  }
+
+  function bulkAcceptHighConfidenceEstimateRows() {
+    const draft = lastIntakeParse?.estimateDraft;
+    if (!draft) return;
+    const nextReview: Record<string, EstimateReviewLineState> = { ...estimateReviewLines };
+    for (const row of draft.lineSuggestions) {
+      if (row.scopeBucket !== 'priced_base_scope') continue;
+      const st = nextReview[row.reviewLineFingerprint] ?? {
+        applicationStatus: row.applicationStatus,
+        selectedCatalogItemId: row.suggestedCatalogItemId,
+      };
+      const m = getActiveCatalogMatchForRow(row, st);
+      if (m?.confidence === ESTIMATE_REVIEW_HIGH_CONFIDENCE) {
+        nextReview[row.reviewLineFingerprint] = {
+          applicationStatus: 'accepted',
+          selectedCatalogItemId: st.selectedCatalogItemId ?? row.suggestedCatalogItemId,
+        };
+      }
+    }
+    setEstimateReviewLines(nextReview);
+    setLineSuggestions((prev) =>
+      prev.map((line) => {
+        const fp = line.reviewLineFingerprint;
+        if (!fp) return line;
+        if (nextReview[fp]?.applicationStatus !== 'accepted') return line;
+        const row = draft.lineSuggestions.find((r) => r.reviewLineFingerprint === fp);
+        if (!row || row.scopeBucket !== 'priced_base_scope') return line;
+        const catId = nextReview[fp].selectedCatalogItemId ?? row.suggestedCatalogItemId;
+        const item = catId ? catalog.find((c) => c.id === catId) : undefined;
+        if (!item) return line;
+        return {
+          ...line,
+          include: true,
+          matched: true,
+          description: item.description,
+          category: item.category,
+          sku: item.sku,
+          unit: item.uom,
+          catalogItemId: item.id,
+          materialCost: item.baseMaterialCost,
+          laborMinutes: item.baseLaborMinutes,
+          matchConfidence: 'strong',
+          matchReason: 'Bulk accept high-confidence (estimate review)',
+        };
+      })
+    );
+  }
+
+  function bulkIgnoreLowConfidenceEstimateRows() {
+    const draft = lastIntakeParse?.estimateDraft;
+    if (!draft) return;
+    const nextReview: Record<string, EstimateReviewLineState> = { ...estimateReviewLines };
+    for (const row of draft.lineSuggestions) {
+      const st = nextReview[row.reviewLineFingerprint] ?? {
+        applicationStatus: row.applicationStatus,
+        selectedCatalogItemId: row.suggestedCatalogItemId,
+      };
+      if (st.applicationStatus !== 'suggested') continue;
+      const m = getActiveCatalogMatchForRow(row, st);
+      const low =
+        !m ||
+        m.confidence === 'none' ||
+        (typeof m.score === 'number' && m.score < ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD);
+      if (low) {
+        nextReview[row.reviewLineFingerprint] = { applicationStatus: 'ignored', selectedCatalogItemId: null };
+      }
+    }
+    setEstimateReviewLines(nextReview);
+    setLineSuggestions((prev) =>
+      prev.map((line) => {
+        const fp = line.reviewLineFingerprint;
+        if (!fp || nextReview[fp]?.applicationStatus !== 'ignored') return line;
+        return { ...line, include: false, catalogItemId: null, sku: null, matched: false };
+      })
+    );
+  }
+
+  function setJobConditionReviewStatus(id: string, status: IntakeApplicationStatus) {
+    setEstimateReviewJobConditions((prev) => ({ ...prev, [id]: status }));
+    if (status === 'accepted') {
+      const patch = lastIntakeParse?.estimateDraft?.projectSuggestion.suggestedJobConditionsPatch?.find((p) => p.id === id);
+      if (patch) patchDraftJobConditions(inferJobConditionPatchesFromText(patch));
+    }
+  }
+
+  function applyAllSuggestedJobConditionsToDraft() {
+    const patches = lastIntakeParse?.estimateDraft?.projectSuggestion.suggestedJobConditionsPatch ?? [];
+    const nextJc: Record<string, IntakeApplicationStatus> = { ...estimateReviewJobConditions };
+    let jcPatch: Partial<ProjectJobConditions> = {};
+    for (const p of patches) {
+      nextJc[p.id] = 'accepted';
+      Object.assign(jcPatch, inferJobConditionPatchesFromText(p));
+    }
+    setEstimateReviewJobConditions(nextJc);
+    patchDraftJobConditions(jcPatch);
+  }
+
+  function applySuggestedPricingModeFromAi() {
+    const pm = lastIntakeParse?.aiSuggestions?.pricingModeSuggested;
+    if (pm === 'material_only' || pm === 'labor_only' || pm === 'labor_and_material') {
+      patchProjectDraft({ pricingMode: pm });
+    }
   }
 
   function openNewCatalogFromLine(lineId: string) {
@@ -2033,7 +2240,7 @@ export function ProjectIntake() {
     });
 
     setCatalog((prev) => [created, ...prev]);
-    applyExistingCatalogMatch(newCatalogLineId, created);
+    applyCatalogToLineId(newCatalogLineId, created);
     setNewCatalogLineId(null);
     setNewCatalogDraft(null);
   }
@@ -2067,6 +2274,10 @@ export function ProjectIntake() {
     setRoomSuggestions(nextRooms.map((roomName) => ({ id: makeId('room-suggest'), include: true, roomName })));
     setLineSuggestions([]);
     setParserReviewSummary(null);
+    setLastIntakeParse(null);
+    setEstimateReviewLines({});
+    setEstimateReviewJobConditions({});
+    setEstimateReviewProjectMods({});
     setProjectDraft((prev) => ({
       ...prev,
       projectName: prev.projectName || 'New Project'
@@ -2075,6 +2286,10 @@ export function ProjectIntake() {
 
   function loadTemplateDefaults() {
     setParserReviewSummary(null);
+    setLastIntakeParse(null);
+    setEstimateReviewLines({});
+    setEstimateReviewJobConditions({});
+    setEstimateReviewProjectMods({});
     setProjectDraft((prev) => ({
       ...prev,
       projectName: prev.projectName || 'Division 10 Template Project',
@@ -2228,7 +2443,26 @@ export function ProjectIntake() {
 
     try {
       const uploadedSourceFile = mode === 'takeoff' ? takeoffUploadedFile : mode === 'document' ? uploadedDocumentFile : null;
-      const normalizedJobConditions = normalizeProjectJobConditions(projectDraft.jobConditions);
+      let normalizedJobConditions = normalizeProjectJobConditions(projectDraft.jobConditions);
+      for (const patch of lastIntakeParse?.estimateDraft?.projectSuggestion.suggestedJobConditionsPatch ?? []) {
+        const st = estimateReviewJobConditions[patch.id] ?? patch.applicationStatus;
+        if (st === 'accepted') {
+          normalizedJobConditions = normalizeProjectJobConditions({
+            ...normalizedJobConditions,
+            ...inferJobConditionPatchesFromText(patch),
+          });
+        }
+      }
+
+      const acceptedModNames = (lastIntakeParse?.estimateDraft?.projectSuggestion.suggestedProjectModifierIds ?? [])
+        .filter((id) => (estimateReviewProjectMods[id] ?? 'suggested') === 'accepted')
+        .map((id) => intakeModifiers.find((m) => m.id === id)?.name || id);
+      let specialNotesAppend = projectDraft.specialNotes || '';
+      if (acceptedModNames.length > 0) {
+        specialNotesAppend = mergeDistinctText(specialNotesAppend, [
+          `Accepted project modifiers (intake review): ${acceptedModNames.join(', ')}`,
+        ]);
+      }
       if ((projectDraft.address || '').trim() && normalizedJobConditions.travelDistanceMiles === null) {
         const distance = await refreshDraftDistance(projectDraft.address, true);
         if (distance !== null) {
@@ -2269,7 +2503,7 @@ export function ProjectIntake() {
         selectedScopeCategories: projectDraft.selectedScopeCategories || [],
         jobConditions: normalizedJobConditions,
         notes: projectDraft.notes || null,
-        specialNotes: projectDraft.specialNotes || null
+        specialNotes: specialNotesAppend || null,
       });
 
       const includedRooms = roomSuggestions.filter((room) => room.include);
@@ -2289,7 +2523,11 @@ export function ProjectIntake() {
         roomMap.set(normalizeRoomName(room.roomName), room.id);
       }
 
-      const linesToCreate = lineSuggestions.filter((line) => (createConfirmedOnly ? line.include : true));
+      const draftForResolve = lastIntakeParse?.estimateDraft;
+      const resolvedLineSuggestions = lineSuggestions.map((line) =>
+        resolveLineForProjectCreation(line, draftForResolve, estimateReviewLines, createConfirmedOnly)
+      );
+      const linesToCreate = resolvedLineSuggestions.filter((line) => (createConfirmedOnly ? line.include : true));
       if (linesToCreate.length > 0) {
         const payload = linesToCreate.map((line) => ({
           projectId: createdProject.id,
@@ -3443,6 +3681,32 @@ export function ProjectIntake() {
               ) : null}
             </div>
           ) : null}
+          {lastIntakeParse?.estimateDraft ? (
+            <div className="mx-auto w-full max-w-[1600px]">
+              <IntakeEstimateReviewPanel
+                draft={lastIntakeParse.estimateDraft}
+                reviewLines={lastIntakeParse.reviewLines}
+                aiSuggestions={lastIntakeParse.aiSuggestions ?? null}
+                modifiers={intakeModifiers}
+                lineByFingerprint={estimateReviewLines}
+                onAcceptLine={handleAcceptEstimateLine}
+                onReplaceLineWithCatalogId={handleReplaceEstimateLineWithCatalogId}
+                onIgnoreLine={handleIgnoreEstimateLine}
+                onBulkAcceptHighConfidence={bulkAcceptHighConfidenceEstimateRows}
+                onBulkIgnoreLowConfidence={bulkIgnoreLowConfidenceEstimateRows}
+                onOpenCatalogPicker={(fingerprint) => setCatalogPickerTarget({ kind: 'fingerprint', fingerprint })}
+                jobConditionById={estimateReviewJobConditions}
+                onSetJobConditionStatus={setJobConditionReviewStatus}
+                onApplyAllSuggestedJobConditions={applyAllSuggestedJobConditionsToDraft}
+                projectModifierById={estimateReviewProjectMods}
+                onSetProjectModifierStatus={(modifierId, status) =>
+                  setEstimateReviewProjectMods((prev) => ({ ...prev, [modifierId]: status }))
+                }
+                pricingModeDraft={String(projectDraft.pricingMode || '')}
+                onApplySuggestedPricingMode={applySuggestedPricingModeFromAi}
+              />
+            </div>
+          ) : null}
           <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
             <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Step 5</p>
@@ -3583,7 +3847,7 @@ export function ProjectIntake() {
                         <span className="text-[11px] text-slate-500 mr-auto">Source {line.sourceReference || 'unknown'}</span>
                         <button
                           type="button"
-                          onClick={() => setCatalogPickerLineId(line.id)}
+                          onClick={() => setCatalogPickerTarget({ kind: 'line', lineId: line.id })}
                           className="ui-btn-secondary h-7 px-2 text-xs"
                         >
                           Match
@@ -3644,12 +3908,14 @@ export function ProjectIntake() {
         </section>
       )}
 
-      {catalogPickerLineId && (
+      {catalogPickerTarget && (
         <div className="fixed inset-0 bg-black/40 z-50 p-6 flex items-center justify-center">
           <div className="bg-white w-full max-w-4xl rounded-lg border border-slate-200 overflow-hidden">
             <div className="h-11 px-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-800">Match Item</h3>
-              <button type="button" onClick={() => setCatalogPickerLineId(null)} className="h-7 px-2 rounded border border-slate-300 text-xs hover:bg-slate-50">Close</button>
+              <h3 className="text-sm font-semibold text-slate-800">
+                {catalogPickerTarget.kind === 'fingerprint' ? 'Match item (estimate review)' : 'Match Item'}
+              </h3>
+              <button type="button" onClick={() => setCatalogPickerTarget(null)} className="h-7 px-2 rounded border border-slate-300 text-xs hover:bg-slate-50">Close</button>
             </div>
             <div className="p-3 border-b border-slate-200">
               <div className="relative">
@@ -3671,7 +3937,7 @@ export function ProjectIntake() {
                 <button
                   type="button"
                   key={item.id}
-                  onClick={() => applyExistingCatalogMatch(catalogPickerLineId, item)}
+                  onClick={() => applyCatalogPickerSelection(item)}
                   className="text-left rounded border border-slate-200 p-2 outline-none hover:border-blue-400 hover:bg-blue-50/50 focus-visible:ring-2 focus-visible:ring-blue-400/40"
                 >
                   <p className="text-xs text-slate-500">{item.category} · {item.sku}</p>

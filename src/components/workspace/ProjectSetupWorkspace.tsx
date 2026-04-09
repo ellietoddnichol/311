@@ -63,7 +63,7 @@ export interface ProjectSetupWorkspaceProps {
   selectedScopeCategories: string[];
   toggleScopeCategory: (category: string) => void;
   rooms: RoomRecord[];
-  setActiveTab: (tab: 'overview' | 'setup' | 'takeoff' | 'estimate' | 'files' | 'proposal') => void;
+  setActiveTab: (tab: 'overview' | 'setup' | 'takeoff' | 'estimate' | 'files' | 'proposal' | 'scope-review' | 'handoff') => void;
   summary: SummaryLite | null;
   settings: SettingsRecord | null;
   distanceError: string | null;
@@ -373,8 +373,8 @@ export function ProjectSetupWorkspace({
               <p className="text-sm font-medium text-slate-900">Rooms &amp; areas</p>
               <p className="text-xs text-slate-500">{rooms.length} room(s) — organize takeoff lines.</p>
             </div>
-            <button type="button" onClick={() => setActiveTab('takeoff')} className="ui-btn-secondary h-9 px-4 text-xs font-semibold">
-              Rooms &amp; takeoff
+            <button type="button" onClick={() => setActiveTab('estimate')} className="ui-btn-secondary h-9 px-4 text-xs font-semibold">
+              Open estimate
             </button>
           </div>
         </div>
@@ -419,8 +419,8 @@ export function ProjectSetupWorkspace({
         </p>
       </section>
 
-      {/* 3 — Advanced pricing */}
-      <details open className="group rounded-2xl border border-slate-300/80 bg-slate-50/50 shadow-sm open:bg-white">
+      {/* 3 — Advanced pricing (collapsed by default — open when you need burden / O&P / adders) */}
+      <details className="group rounded-2xl border border-slate-300/80 bg-slate-50/50 shadow-sm open:bg-white">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 3</p>

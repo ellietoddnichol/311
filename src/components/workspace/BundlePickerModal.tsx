@@ -20,9 +20,19 @@ interface Props {
   activeRoomId: string;
   onClose: () => void;
   onApplyBundle: (bundleId: string, roomId: string) => Promise<void>;
+  /** Drawer slides in from the right (estimate workflow); modal keeps centered panel. */
+  presentation?: 'modal' | 'drawer';
 }
 
-export function BundlePickerModal({ open, bundles, rooms, activeRoomId, onClose, onApplyBundle }: Props) {
+export function BundlePickerModal({
+  open,
+  bundles,
+  rooms,
+  activeRoomId,
+  onClose,
+  onApplyBundle,
+  presentation = 'modal',
+}: Props) {
   const [search, setSearch] = useState('');
   const [roomId, setRoomId] = useState('');
   const [applyingBundleId, setApplyingBundleId] = useState<string | null>(null);
@@ -130,9 +140,16 @@ export function BundlePickerModal({ open, bundles, rooms, activeRoomId, onClose,
     }
   }
 
+  const shellClass =
+    presentation === 'drawer' ? 'fixed inset-0 z-50 flex justify-end bg-slate-900/40' : 'fixed inset-0 z-50 bg-slate-900/40 p-3 sm:p-6';
+  const panelClass =
+    presentation === 'drawer'
+      ? 'flex h-full w-full max-w-3xl flex-col overflow-hidden border-l border-slate-200 bg-white shadow-2xl'
+      : 'mx-auto flex h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl';
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 p-3 sm:p-6" onClick={onClose}>
-      <div className="mx-auto flex h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+    <div className={shellClass} onClick={onClose}>
+      <div className={panelClass} onClick={(event) => event.stopPropagation()}>
         <div className="border-b border-slate-200 px-5 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>

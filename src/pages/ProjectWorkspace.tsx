@@ -6,25 +6,28 @@ import {
   ChevronDown,
   Clock3,
   Download,
-  FileUp,
   Gauge,
   Hammer,
   Layers3,
-  Paperclip,
   Sparkles,
-  Trash2,
   Wallet,
   CalendarClock,
 } from 'lucide-react';
 import { api } from '../services/api';
-import { BundleRecord, InstallReviewEmailDraft, ModifierRecord, ProjectFileRecord, ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
-import { CatalogItem } from '../types';
 import {
-  createDefaultProjectJobConditions,
-  isMeaningfulTravelDistanceMiles,
-  normalizeProjectJobConditions,
-  recommendDeliveryPlan,
-} from '../shared/utils/jobConditions';
+  BundleRecord,
+  InstallReviewEmailDraft,
+  ModifierRecord,
+  PricingMode,
+  ProjectFileRecord,
+  ProjectJobConditions,
+  ProjectRecord,
+  RoomRecord,
+  SettingsRecord,
+  TakeoffLineRecord,
+} from '../shared/types/estimator';
+import { CatalogItem } from '../types';
+import { createDefaultProjectJobConditions, normalizeProjectJobConditions, recommendDeliveryPlan } from '../shared/utils/jobConditions';
 import {
   DEFAULT_PROPOSAL_ACCEPTANCE_LABEL,
   DEFAULT_PROPOSAL_CLARIFICATIONS,
@@ -33,16 +36,26 @@ import {
   DEFAULT_PROPOSAL_TERMS,
   ensureProposalDefaults,
 } from '../shared/utils/proposalDefaults';
-import { PROPOSAL_FORMAT_OPTIONS } from '../shared/utils/proposalDocument';
-import { TopProjectHeader } from '../components/workspace/TopProjectHeader';
-import { ProjectSetupWorkspace } from '../components/workspace/ProjectSetupWorkspace';
-import { RoomManager } from '../components/workspace/RoomManager';
+import type { EstimateWorkspaceView, WorkspaceTab } from '../shared/types/projectWorkflow';
+import { scopeExceptionCount } from '../shared/utils/scopeReviewExceptions';
+import { TAKEOFF_ALL_ROOMS } from '../shared/constants/workspaceUi';
+import { ProjectHeader } from '../components/workflow/ProjectHeader';
+import { WorkflowTabs } from '../components/workflow/WorkflowTabs';
+import { WorkflowRightDrawer } from '../components/workflow/WorkflowRightDrawer';
+import { EstimateToolbar } from '../components/workflow/EstimateToolbar';
+import { RoomList } from '../components/workflow/RoomList';
+import { ProposalSectionEditor } from '../components/workflow/ProposalSectionEditor';
+import { ProposalSettingsRail } from '../components/workflow/ProposalSettingsRail';
+import { ProposalPreview } from '../components/workflow/ProposalPreview';
 import { EstimateGrid } from '../components/workspace/EstimateGrid';
 import { ItemPicker } from '../components/workspace/ItemPicker';
 import { ModifierPanel } from '../components/workspace/ModifierPanel';
-import { ProposalPreview } from '../components/workspace/ProposalPreview';
 import { BundlePickerModal } from '../components/workspace/BundlePickerModal';
-import { formatCurrencySafe, formatKilobytesSafe, formatLaborDurationMinutes, formatNumberSafe } from '../utils/numberFormat';
+import { OverviewPage } from './project/OverviewPage';
+import { SetupPage } from './project/SetupPage';
+import { ScopeReviewPage } from './project/ScopeReviewPage';
+import { HandoffPage } from './project/HandoffPage';
+import { formatCurrencySafe, formatLaborDurationMinutes, formatNumberSafe } from '../utils/numberFormat';
 import { getDistanceInMiles } from '../utils/geo';
 import { catalogItemMatchesQuery } from '../shared/utils/catalogItemSearch';
 import { CatalogCategorySelect } from '../components/intake/CatalogCategorySelect';
@@ -86,20 +99,14 @@ interface RoomCreationDraft {
   starterUnit: string;
 }
 
-type WorkspaceTab = 'overview' | 'setup' | 'takeoff' | 'estimate' | 'files' | 'proposal';
-
-const WORKSPACE_TABS: WorkspaceTab[] = ['overview', 'setup', 'takeoff', 'estimate', 'files', 'proposal'];
-
-/** URL/searchParam value for “show every room’s lines” in takeoff (not a real room id). */
-const TAKEOFF_ALL_ROOMS = '__all__';
-
 /** Persist room / takeoff view / selection across reloads and dev HMR so work isn’t reset to “first room”. */
-const WORKSPACE_UI_STORAGE_PREFIX = 'estimator:workspaceUi:v1:';
+const WORKSPACE_UI_STORAGE_PREFIX = 'estimator:workspaceUi:v2:';
 
 type WorkspaceUiSnapshot = {
   activeRoomId?: string;
   takeoffRoomFilter?: string;
   selectedLineId?: string | null;
+  estimateView?: EstimateWorkspaceView;
 };
 
 function readWorkspaceUi(projectId: string): WorkspaceUiSnapshot {
@@ -121,13 +128,21 @@ function writeWorkspaceUi(projectId: string, snapshot: WorkspaceUiSnapshot) {
   }
 }
 
-function isWorkspaceTab(value: string | null): value is WorkspaceTab {
-  return !!value && WORKSPACE_TABS.includes(value as WorkspaceTab);
-}
+const KNOWN_TABS = new Set<string>(['overview', 'setup', 'scope-review', 'estimate', 'proposal', 'handoff']);
 
 function tabFromSearchParam(value: string | null): WorkspaceTab {
-  if (value === 'rooms') return 'takeoff';
-  return isWorkspaceTab(value) ? value : 'estimate';
+  if (!value) return 'estimate';
+  if (value === 'files') return 'overview';
+  if (value === 'takeoff' || value === 'rooms') return 'estimate';
+  if (KNOWN_TABS.has(value)) return value as WorkspaceTab;
+  return 'estimate';
+}
+
+function estimateViewFromSearchParams(searchParams: URLSearchParams): EstimateWorkspaceView {
+  if (searchParams.get('view') === 'quantities') return 'quantities';
+  const tab = searchParams.get('tab');
+  if (tab === 'takeoff' || tab === 'rooms') return 'quantities';
+  return 'pricing';
 }
 
 /** Canonical JSON for autosave dirty checks — avoids missed saves when key order or nested shapes differ. */
@@ -169,6 +184,7 @@ export function ProjectWorkspace() {
   const [loading, setLoading] = useState(true);
   const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(() => tabFromSearchParam(searchParams.get('tab')));
+  const [estimateView, setEstimateView] = useState<EstimateWorkspaceView>(() => estimateViewFromSearchParams(searchParams));
 
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [rooms, setRooms] = useState<RoomRecord[]>([]);
@@ -230,6 +246,20 @@ export function ProjectWorkspace() {
     return 'Mark Submitted';
   }, [project]);
 
+  const exceptionCount = useMemo(() => scopeExceptionCount(lines), [lines]);
+
+  const workflowTabsItems = useMemo(
+    () => [
+      { id: 'overview' as const, label: 'Overview' },
+      { id: 'setup' as const, label: 'Setup' },
+      { id: 'scope-review' as const, label: 'Scope review', badge: exceptionCount },
+      { id: 'estimate' as const, label: 'Estimate' },
+      { id: 'proposal' as const, label: 'Proposal' },
+      { id: 'handoff' as const, label: 'Handoff' },
+    ],
+    [exceptionCount]
+  );
+
   useEffect(() => {
     if (!id) return;
     setWorkspaceLoadError(null);
@@ -245,14 +275,17 @@ export function ProjectWorkspace() {
     const next = new URLSearchParams(searchParams);
     if (activeTab === 'estimate') {
       next.delete('tab');
+      if (estimateView === 'quantities') next.set('view', 'quantities');
+      else next.delete('view');
     } else {
       next.set('tab', activeTab);
+      next.delete('view');
     }
 
     if (next.toString() !== searchParams.toString()) {
       setSearchParams(next, { replace: true });
     }
-  }, [activeTab, searchParams, setSearchParams]);
+  }, [activeTab, estimateView, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!project) return;
@@ -371,6 +404,9 @@ export function ProjectWorkspace() {
       const linePick =
         ui.selectedLineId && lineData.some((l) => l.id === ui.selectedLineId) ? ui.selectedLineId : null;
       setSelectedLineId(linePick);
+      if (ui.estimateView === 'quantities' || ui.estimateView === 'pricing') {
+        setEstimateView(ui.estimateView);
+      }
     } catch (error: unknown) {
       console.error('Failed to load project workspace', error);
       const message = error instanceof Error ? error.message : 'Failed to load project.';
@@ -458,7 +494,7 @@ export function ProjectWorkspace() {
     [activeRoomLines]
   );
 
-  const pricingMode = project?.pricingMode || 'labor_and_material';
+  const pricingMode: PricingMode = project?.pricingMode || 'labor_and_material';
   const showMaterial = pricingMode !== 'labor_only';
   const showLabor = pricingMode !== 'material_only';
 
@@ -840,10 +876,11 @@ export function ProjectWorkspace() {
     setLastSavedAt(new Date().toISOString());
   }
 
-  async function syncSheets() {
+  async function syncCatalogFromSheets() {
     setSyncState('syncing');
     try {
-      await api.syncSheets();
+      await api.syncV1Catalog();
+      window.dispatchEvent(new CustomEvent('catalog-synced'));
       setCatalog(await api.getCatalog());
       setSyncState('ok');
     } catch (error) {
@@ -1231,7 +1268,7 @@ export function ProjectWorkspace() {
 
   return (
     <div className="min-h-full bg-slate-50">
-      <TopProjectHeader
+      <ProjectHeader
         project={project}
         baseBidTotal={summary?.baseBidTotal || 0}
         syncState={syncState}
@@ -1245,312 +1282,85 @@ export function ProjectWorkspace() {
       />
 
       <div className="ui-page space-y-2">
-        <p className="ui-label px-1">Project Workflow</p>
-        <div className="ui-surface flex items-center gap-1 overflow-x-auto whitespace-nowrap p-1.5 shadow-sm">
-          <button type="button" onClick={() => setActiveTab('overview')} className={`ui-wtab ${activeTab === 'overview' ? 'ui-wtab-blue' : 'ui-wtab-idle'}`}>Overview</button>
-          <button type="button" onClick={() => setActiveTab('setup')} className={`ui-wtab ${activeTab === 'setup' ? 'ui-wtab-blue' : 'ui-wtab-idle'}`}>Project Setup</button>
-          <button
-            type="button"
-            title="Manage rooms and line-item takeoff in one place. Use Estimate for dollars and rollups."
-            onClick={() => setActiveTab('takeoff')}
-            className={`ui-wtab ${activeTab === 'takeoff' ? 'ui-wtab-blue' : 'ui-wtab-idle'}`}
-          >
-            Rooms &amp; takeoff
-          </button>
-          <button
-            type="button"
-            title="Review dollars, labor stack, markups, and project totals after the takeoff is complete."
-            onClick={() => setActiveTab('estimate')}
-            className={`ui-wtab ${activeTab === 'estimate' ? 'ui-wtab-blue' : 'ui-wtab-idle'}`}
-          >
-            Estimate
-          </button>
-          <button type="button" onClick={() => setActiveTab('files')} className={`ui-wtab ${activeTab === 'files' ? 'ui-wtab-blue' : 'ui-wtab-idle'}`}>Files</button>
-          <button type="button" onClick={() => setActiveTab('proposal')} className={`ui-wtab ${activeTab === 'proposal' ? 'ui-wtab-blue' : 'ui-wtab-idle'}`}>Proposal</button>
-          <div className="ml-auto flex items-center gap-1.5 pl-2">
-            <button onClick={() => void syncSheets()} className="ui-btn-secondary h-8 px-2.5 text-[11px] font-semibold">Sync</button>
-          </div>
-        </div>
+        <p className="ui-label px-1">Project workflow</p>
+        <WorkflowTabs
+          tabs={workflowTabsItems}
+          active={activeTab}
+          onChange={(tab) => setActiveTab(tab)}
+          trailing={
+            <button type="button" onClick={() => void syncCatalogFromSheets()} className="ui-btn-secondary h-8 px-2.5 text-[11px] font-semibold">
+              Sync catalog
+            </button>
+          }
+        />
 
         {activeTab === 'overview' && (
-          <div className="mx-auto w-full max-w-[1600px] space-y-8">
-            <header className="rounded-2xl border border-slate-200/70 bg-white px-5 py-5 shadow-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Project overview</p>
-              <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Read-only snapshot</h2>
-              <p className="mt-2 max-w-3xl text-sm text-slate-600">
-                High-level context for this bid — same structure as Project Setup, without editing controls. Adjust details on the Setup tab.
-              </p>
-              <div className="mt-5 flex flex-wrap gap-x-8 gap-y-4 border-t border-slate-100 pt-5 text-sm">
-                <div className="min-w-[140px]">
-                  <p className="text-xs text-slate-500">Project</p>
-                  <p className="mt-0.5 font-semibold text-slate-900">{project.projectName}</p>
-                </div>
-                <div className="min-w-[120px]">
-                  <p className="text-xs text-slate-500">Client</p>
-                  <p className="mt-0.5 font-semibold text-slate-900">{project.clientName || '—'}</p>
-                </div>
-                <div className="min-w-[140px]">
-                  <p className="text-xs text-slate-500">Price mode</p>
-                  <p className="mt-0.5 font-semibold text-slate-900">
-                    {pricingMode === 'material_only' ? 'Material only' : pricingMode === 'labor_only' ? 'Install only' : 'Material + install'}
-                  </p>
-                </div>
-                <div className="min-w-[100px]">
-                  <p className="text-xs text-slate-500">Rooms</p>
-                  <p className="mt-0.5 font-semibold text-slate-900">{rooms.length}</p>
-                </div>
-                <div className="min-w-[120px]">
-                  <p className="text-xs text-slate-500">Scope tags</p>
-                  <p className="mt-0.5 font-semibold text-slate-900">{selectedScopeCategories.length || scopeCategoryOptions.length || 0}</p>
-                </div>
-                <div className="min-w-[120px]">
-                  <p className="text-xs text-slate-500">Bid total</p>
-                  <p className="mt-0.5 font-semibold text-slate-900">{formatCurrencySafe(summary?.baseBidTotal)}</p>
-                </div>
-              </div>
-            </header>
-
-            <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_340px_280px] xl:items-start">
-              <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 1 · Project inputs</p>
-                <h3 className="mt-1 text-lg font-semibold text-slate-900">Setup snapshot</h3>
-                <p className="mt-2 text-sm text-slate-600">Labor basis, delivery posture, and what is in scope for catalog and takeoff.</p>
-
-                <div className="mt-6 space-y-5">
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <p className="text-xs font-medium text-slate-500">Labor basis</p>
-                      <p className="mt-1 font-semibold text-slate-900">Union baseline</p>
-                      <p className="mt-1 text-xs text-slate-500">Multiplier ×{formatNumberSafe(jobConditions.laborRateMultiplier, 2)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-slate-500">Delivery</p>
-                      <p className="mt-1 font-semibold text-slate-900">
-                        {jobConditions.deliveryQuotedSeparately
-                          ? 'Travel priced separately'
-                          : jobConditions.deliveryRequired
-                            ? 'In scope'
-                            : 'Not included'}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {jobConditions.deliveryQuotedSeparately && isMeaningfulTravelDistanceMiles(jobConditions.travelDistanceMiles)
-                          ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} mi — not in estimate total`
-                          : jobConditions.deliveryRequired
-                            ? jobConditions.deliveryPricingMode === 'flat'
-                              ? formatCurrencySafe(jobConditions.deliveryValue)
-                              : jobConditions.deliveryPricingMode === 'percent'
-                                ? `${formatNumberSafe(jobConditions.deliveryValue, 2)}% of base`
-                                : 'No separate adder'
-                            : 'No delivery allowance applied'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-medium text-slate-500">Scope categories</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {(selectedScopeCategories.length > 0 ? selectedScopeCategories : scopeCategoryOptions).slice(0, 16).map((category) => (
-                        <span
-                          key={category}
-                          className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700"
-                        >
-                          {category}
-                        </span>
-                      ))}
-                      {selectedScopeCategories.length === 0 && scopeCategoryOptions.length === 0 ? (
-                        <span className="text-xs text-slate-500">No catalog categories loaded yet.</span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-medium text-slate-500">Rooms / areas</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {rooms.slice(0, 12).map((room) => (
-                        <span
-                          key={room.id}
-                          className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700"
-                        >
-                          {room.roomName}
-                        </span>
-                      ))}
-                      {rooms.length === 0 ? <span className="text-xs text-slate-500">No rooms yet.</span> : null}
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Pricing rollups</p>
-                <h3 className="mt-1 text-lg font-semibold text-slate-900">Conditions &amp; adders</h3>
-                <p className="mt-2 text-sm text-slate-600">How job conditions and project adders flow into labor dollars.</p>
-
-                <dl className="mt-6 space-y-4 text-sm">
-                  <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 pb-3">
-                    <dt className="text-slate-500">Condition labor mult.</dt>
-                    <dd className="font-semibold tabular-nums text-slate-900">×{formatNumberSafe(summary?.conditionLaborMultiplier || 1, 2)}</dd>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 pb-3">
-                    <dt className="text-slate-500">Condition adjustment</dt>
-                    <dd className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(summary?.conditionAdjustmentAmount)}</dd>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3 border-b border-slate-100 pb-3">
-                    <dt className="text-slate-500">Project adder %</dt>
-                    <dd className="font-semibold tabular-nums text-slate-900">{formatNumberSafe(jobConditions.estimateAdderPercent, 2)}%</dd>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt className="text-slate-500">Project adder $</dt>
-                    <dd className="font-semibold tabular-nums text-slate-900">{formatCurrencySafe(jobConditions.estimateAdderAmount)}</dd>
-                  </div>
-                </dl>
-
-                <div className="mt-6 border-t border-slate-100 pt-4">
-                  <p className="text-xs font-medium text-slate-500">Special notes</p>
-                  <p className="mt-2 text-sm text-slate-700 whitespace-pre-wrap">
-                    {project.specialNotes?.trim() || 'No project-wide notes yet.'}
-                  </p>
-                </div>
-              </section>
-
-              <aside className="space-y-4 xl:sticky xl:top-[88px]">
-                <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active assumptions</p>
-                  {(summary?.conditionAssumptions || []).length > 0 ? (
-                    <div className="mt-2 max-h-56 space-y-1.5 overflow-auto pr-1 text-xs text-slate-700">
-                      {(summary?.conditionAssumptions || []).slice(0, 14).map((assumption) => (
-                        <p key={assumption} className="leading-4">
-                          — {assumption}
-                        </p>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-xs text-slate-500">No project-level assumptions are active.</p>
-                  )}
-                </section>
-                <section className="rounded-2xl border border-dashed border-slate-300/80 bg-slate-50/80 p-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Next step</p>
-                  <p className="mt-2 text-xs text-slate-600">Refine inputs and defaults on Project Setup before locking the estimate.</p>
-                  <button type="button" onClick={() => setActiveTab('setup')} className="ui-btn-secondary mt-3 h-9 w-full text-[11px] font-semibold">
-                    Open Project Setup
-                  </button>
-                </section>
-              </aside>
-            </div>
-          </div>
+          <OverviewPage
+            project={project}
+            rooms={rooms}
+            summary={summary}
+            pricingMode={pricingMode}
+            scopeCategoryOptions={scopeCategoryOptions}
+            selectedScopeCategories={selectedScopeCategories}
+            jobConditions={jobConditions}
+            setActiveTab={setActiveTab}
+            projectFiles={projectFiles}
+            fileUploading={fileUploading}
+            onUploadFile={(f) => void uploadProjectFile(f)}
+            onRemoveFile={(id) => void removeProjectFile(id)}
+          />
         )}
 
         {activeTab === 'setup' && (
-          <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-8 xl:grid-cols-[1fr_300px] items-start">
-            <ProjectSetupWorkspace
-              project={project}
-              setProject={setProject}
-              jobConditions={jobConditions}
-              patchJobConditions={patchJobConditions}
-              showMaterial={showMaterial}
-              scopeCategoryOptions={scopeCategoryOptions}
-              selectedScopeCategories={selectedScopeCategories}
-              toggleScopeCategory={toggleScopeCategory}
-              rooms={rooms}
-              setActiveTab={setActiveTab}
-              summary={summary}
-              settings={settings}
-              distanceError={distanceError}
-              distanceCalculating={distanceCalculating}
-            />
-
-            <aside className="space-y-4 xl:sticky xl:top-[88px]">
-              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">At a glance</p>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
-                    <p className="text-slate-500">Installers</p>
-                    <p className="font-semibold text-slate-900">{jobConditions.installerCount}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
-                    <p className="text-slate-500">Distance</p>
-                    <p className="font-semibold text-slate-900">{jobConditions.travelDistanceMiles !== null ? `${formatNumberSafe(jobConditions.travelDistanceMiles, 1)} mi` : '—'}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
-                    <p className="text-slate-500">Labor mult.</p>
-                    <p className="font-semibold text-slate-900">×{formatNumberSafe(summary?.conditionLaborMultiplier || 1, 2)}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
-                    <p className="text-slate-500">Cond. adj.</p>
-                    <p className="font-semibold text-slate-900">{formatCurrencySafe(summary?.conditionAdjustmentAmount)}</p>
-                  </div>
-                  <div className="col-span-2 rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
-                    <p className="text-slate-500">Adjusted labor subtotal</p>
-                    <p className="font-semibold text-slate-900">{formatCurrencySafe(summary?.adjustedLaborSubtotal)}</p>
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active assumptions</p>
-                {(summary?.conditionAssumptions || []).length > 0 ? (
-                  <div className="mt-2 max-h-48 space-y-1.5 overflow-auto pr-1 text-xs text-slate-700">
-                    {(summary?.conditionAssumptions || []).slice(0, 12).map((assumption) => (
-                      <p key={assumption} className="leading-4">— {assumption}</p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-slate-500">No project-level assumptions are active.</p>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Scope included</p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {selectedScopeCategories.length > 0 ? (
-                    selectedScopeCategories.map((category) => (
-                      <span key={category} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
-                        {category}
-                      </span>
-                    ))
-                  ) : (
-                    <p className="text-xs text-slate-500">No categories selected yet.</p>
-                  )}
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Proposal</p>
-                  <button type="button" onClick={() => setActiveTab('proposal')} className="text-[11px] font-medium text-blue-700 hover:text-blue-800">
-                    Open
-                  </button>
-                </div>
-                <p className="mt-2 text-xs text-slate-600">Review wording and assumptions before export.</p>
-              </section>
-
-              <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Rooms</p>
-                    <p className="mt-1 text-xs text-slate-600">Organize scope by area on Rooms &amp; takeoff.</p>
-                  </div>
-                  <button type="button" onClick={() => setActiveTab('takeoff')} className="ui-btn-secondary h-8 shrink-0 px-2.5 text-[11px] font-semibold">
-                    Open
-                  </button>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {rooms.slice(0, 6).map((room) => (
-                    <span key={room.id} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
-                      {room.roomName}
-                    </span>
-                  ))}
-                  {rooms.length > 6 ? (
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500">+{rooms.length - 6} more</span>
-                  ) : null}
-                </div>
-              </section>
-            </aside>
-          </div>
+          <SetupPage
+            project={project}
+            setProject={setProject}
+            jobConditions={jobConditions}
+            patchJobConditions={patchJobConditions}
+            showMaterial={showMaterial}
+            scopeCategoryOptions={scopeCategoryOptions}
+            selectedScopeCategories={selectedScopeCategories}
+            toggleScopeCategory={toggleScopeCategory}
+            rooms={rooms}
+            setActiveTab={setActiveTab}
+            onOpenEstimateQuantities={() => {
+              setEstimateView('quantities');
+              setActiveTab('estimate');
+            }}
+            summary={summary}
+            settings={settings}
+            distanceError={distanceError}
+            distanceCalculating={distanceCalculating}
+          />
         )}
 
-        {activeTab === 'takeoff' && (
+        {activeTab === 'scope-review' && (
+          <ScopeReviewPage
+            lines={lines}
+            rooms={rooms}
+            categories={categories}
+            roomNamesById={roomNamesById}
+            pricingMode={pricingMode}
+            laborMultiplier={summary?.conditionLaborMultiplier || 1}
+            selectedLineId={selectedLineId}
+            onSelectLine={openLineEditor}
+            onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
+            onDeleteLine={(lineId) => void deleteLine(lineId)}
+            setActiveTab={setActiveTab}
+            onOpenLineInEstimate={(lineId) => {
+              const line = lines.find((l) => l.id === lineId);
+              if (line?.roomId) selectWorkspaceRoom(line.roomId);
+              setSelectedLineId(lineId);
+              setEstimateView('quantities');
+              setActiveTab('estimate');
+              setModifiersModalOpen(true);
+            }}
+          />
+        )}
+
+        {activeTab === 'estimate' && (
           <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,300px)_1fr]">
-            <RoomManager
+            <RoomList
               rooms={rooms}
               activeRoomId={activeRoomId}
               onSelectRoom={selectWorkspaceRoom}
@@ -1559,134 +1369,70 @@ export function ProjectWorkspace() {
               onDuplicateRoom={(room) => void duplicateRoom(room)}
               onDeleteRoom={(room) => void deleteRoom(room)}
             />
-            <div className="min-w-0 space-y-2">
-              <div className="ui-panel-muted px-3 py-2.5">
-                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="text-xs font-semibold text-slate-900">Rooms &amp; takeoff</span>
-                    <span className="ui-typo-muted font-medium text-slate-600">
-                      Qty here ·{' '}
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('estimate')}
-                        className="font-semibold text-blue-800 underline decoration-slate-300 underline-offset-2 hover:text-blue-950"
-                      >
-                        Estimate
-                      </button>{' '}
-                      for $
-                    </span>
-                    <span className="hidden h-3 w-px bg-slate-200 lg:inline" aria-hidden />
-                    <span className="rounded-md border border-slate-200/90 bg-white px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-700">
-                      {takeoffViewStats.lineCount} ln
-                    </span>
-                    <span className="rounded-md border border-slate-200/90 bg-white px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-700">
-                      {formatNumberSafe(takeoffViewStats.totalQty, 1)} qty
-                    </span>
-                    <span className="rounded-md border border-slate-200/90 bg-white px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-700">
-                      {formatLaborDurationMinutes(takeoffViewStats.laborMinutes)}
-                    </span>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('estimate')}
-                      className="ui-btn-secondary inline-flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-semibold"
-                    >
-                      Estimate <ArrowRight className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void addManualLine()}
-                      disabled={!activeRoomId}
-                      className="ui-btn-primary inline-flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Sparkles className="h-3 w-3" /> Add line
-                    </button>
-                  </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <EstimateToolbar
+                view={estimateView}
+                onViewChange={setEstimateView}
+                takeoffRoomFilter={takeoffRoomFilter}
+                onTakeoffRoomFilterChange={(v) => {
+                  if (v === TAKEOFF_ALL_ROOMS) setTakeoffRoomFilter(TAKEOFF_ALL_ROOMS);
+                  else selectWorkspaceRoom(v);
+                }}
+                rooms={rooms}
+                lineCountForFilter={lines.length}
+                takeoffStats={takeoffViewStats}
+                onAddManualLine={() => void addManualLine()}
+                onOpenCatalog={() => setCatalogOpen(true)}
+                onOpenBundles={() => setBundleModalOpen(true)}
+                activeRoomId={activeRoomId}
+                activeRoomLabel={roomNamesById[activeRoomId] || 'select a room'}
+                projectTotal={summary?.baseBidTotal}
+                formatCurrency={(n) => formatCurrencySafe(n)}
+                disabledAdd={!activeRoomId}
+              />
+              {estimateView === 'quantities' ? (
+                <div className="space-y-3">
+                  {takeoffRoomFilter === TAKEOFF_ALL_ROOMS ? (
+                    <p className="text-xs leading-snug text-slate-500">
+                      <span className="font-medium text-slate-700">Combined across rooms:</span> lines that match the same catalog item or SKU are rolled into one row (qty and install time are summed). Room names are listed under each item.{' '}
+                      <span className="text-slate-600">
+                        New lines and bundles still go to the room selected in the left sidebar (
+                        <span className="font-medium text-slate-800">{roomNamesById[activeRoomId] || 'select a room'}</span>
+                        ). Use a single room in the view menu to edit or delete a specific line.
+                      </span>
+                    </p>
+                  ) : null}
+                  <EstimateGrid
+                    lines={takeoffGridLines}
+                    rooms={rooms}
+                    categories={categories}
+                    roomNamesById={roomNamesById}
+                    pricingMode={pricingMode}
+                    viewMode="takeoff"
+                    organizeBy={takeoffRoomFilter === TAKEOFF_ALL_ROOMS ? 'item' : 'room'}
+                    takeoffShowRoom={takeoffRoomFilter === TAKEOFF_ALL_ROOMS}
+                    laborMultiplier={summary?.conditionLaborMultiplier || 1}
+                    selectedLineId={selectedLineId}
+                    onSelectLine={openLineEditor}
+                    onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
+                    onDeleteLine={(lineId) => void deleteLine(lineId)}
+                  />
                 </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                  <label className="block min-w-0 flex-1 text-xs font-medium text-slate-700">
-                    <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">View</span>
-                    <select
-                      className="ui-input h-9 w-full max-w-md text-xs font-medium text-slate-900"
-                      value={takeoffRoomFilter}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === TAKEOFF_ALL_ROOMS) setTakeoffRoomFilter(TAKEOFF_ALL_ROOMS);
-                        else selectWorkspaceRoom(v);
-                      }}
-                    >
-                      <option value={TAKEOFF_ALL_ROOMS}>
-                        All rooms ({lines.length} line{lines.length === 1 ? '' : 's'})
-                      </option>
-                      {rooms.map((room) => {
-                        const metric = roomMetrics[room.id] || { count: 0, subtotal: 0, totalQty: 0, laborMinutes: 0 };
-                        return (
-                          <option key={room.id} value={room.id}>
-                            {room.roomName} ({metric.count} ln)
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </label>
-                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                    <button type="button" onClick={() => setCatalogOpen(true)} className="ui-btn-primary inline-flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-semibold">
-                      Catalog
-                    </button>
-                    <button type="button" onClick={() => setBundleModalOpen(true)} className="ui-btn-secondary h-8 rounded-md px-2.5 text-xs font-medium">
-                      Bundles
-                    </button>
-                  </div>
-                </div>
-                {takeoffRoomFilter === TAKEOFF_ALL_ROOMS ? (
-                  <p className="text-xs leading-snug text-slate-500">
-                    <span className="font-medium text-slate-700">Combined across rooms:</span> lines that match the same catalog item or SKU are rolled into one row (qty and install time are summed). Room names are listed under each item.{' '}
-                    <span className="text-slate-600">
-                      New lines and bundles still go to the room selected in the left sidebar (
-                      <span className="font-medium text-slate-800">{roomNamesById[activeRoomId] || 'select a room'}</span>
-                      ). Use a single room in the view menu to edit or delete a specific line.
-                    </span>
-                  </p>
-                ) : null}
-
-                <EstimateGrid
-                  lines={takeoffGridLines}
-                  rooms={rooms}
-                  categories={categories}
-                  roomNamesById={roomNamesById}
-                  pricingMode={pricingMode}
-                  viewMode="takeoff"
-                  organizeBy={takeoffRoomFilter === TAKEOFF_ALL_ROOMS ? 'item' : 'room'}
-                  takeoffShowRoom={takeoffRoomFilter === TAKEOFF_ALL_ROOMS}
-                  laborMultiplier={summary?.conditionLaborMultiplier || 1}
-                  selectedLineId={selectedLineId}
-                  onSelectLine={openLineEditor}
-                  onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
-                  onDeleteLine={(lineId) => void deleteLine(lineId)}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'estimate' && (
-          <div className="flex min-w-0 flex-col gap-1">
+              ) : (
+              <>
               <div className="ui-panel-muted px-3 py-2 sm:py-2.5">
                 <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                   <div className="min-w-0">
                     <h2 className="ui-typo-page-title">Estimate</h2>
                     <p className="ui-typo-body mt-1 max-w-3xl">
                       <span className="font-semibold text-slate-800">{roomNamesById[activeRoomId] || 'Unassigned'}</span>
-                      <span className="text-slate-500"> — pricing this room&apos;s lines. Quantities and scope come from </span>
+                      <span className="text-slate-500"> — pricing this room&apos;s lines. Quantities and scope: switch to </span>
                       <button
                         type="button"
-                        onClick={() => setActiveTab('takeoff')}
+                        onClick={() => setEstimateView('quantities')}
                         className="font-semibold text-blue-800 underline decoration-blue-300/70 underline-offset-2 hover:text-blue-950"
                       >
-                        Takeoff
+                        Quantities
                       </button>
                       <span className="text-slate-500">.</span>
                     </p>
@@ -1926,89 +1672,9 @@ export function ProjectWorkspace() {
                 onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
                 onDeleteLine={(lineId) => void deleteLine(lineId)}
               />
-          </div>
-        )}
-
-        {activeTab === 'files' && (
-          <div className="space-y-4">
-            <section className="overflow-hidden rounded-[20px] border border-slate-200/80 bg-white p-4 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="max-w-3xl">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Project Files</p>
-                  <h3 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">Keep source files with this project</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">Upload takeoff sheets, drawings, and scope documents.</p>
-                </div>
-                <label className="ui-btn-primary inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full px-5 text-[11px] font-semibold">
-                  <FileUp className="h-4 w-4" />
-                  {fileUploading ? 'Uploading...' : 'Upload File'}
-                  <input type="file" className="hidden" onChange={(e) => void uploadProjectFile(e.target.files?.[0])} disabled={fileUploading} />
-                </label>
-              </div>
-
-              <div className="mt-4 grid gap-2.5 sm:grid-cols-3">
-                <div className="rounded-[14px] bg-white p-3 shadow-sm ring-1 ring-slate-200/80">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Files Stored</p>
-                  <p className="mt-1 text-[22px] font-semibold tracking-[-0.03em] text-slate-950">{projectFiles.length}</p>
-                  <p className="mt-1 text-[10px] text-slate-500">Project reference set</p>
-                </div>
-                <div className="rounded-[14px] bg-white p-3 shadow-sm ring-1 ring-slate-200/80">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Latest Upload</p>
-                  <p className="mt-2 truncate text-sm font-semibold text-slate-950">{projectFiles[0]?.fileName || 'No uploads yet'}</p>
-                  <p className="mt-1 text-[11px] text-slate-600">{projectFiles[0] ? new Date(projectFiles[0].createdAt).toLocaleString() : 'Add your first source file to start building the project record.'}</p>
-                </div>
-                <div className="rounded-[14px] bg-white p-3 shadow-sm ring-1 ring-slate-200/80">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Suggested Use</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-950">Import source + proposal backup</p>
-                  <p className="mt-1 text-[11px] text-slate-600">Keep parser inputs, markups, and client-facing support files in one place.</p>
-                </div>
-              </div>
-            </section>
-
-            <section className="overflow-hidden rounded-[20px] border border-slate-200/80 bg-white shadow-sm">
-              {projectFiles.length === 0 ? (
-                <div className="px-6 py-10 text-center">
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
-                    <Paperclip className="h-6 w-6" />
-                  </div>
-                  <h4 className="mt-4 text-base font-semibold text-slate-900">No project files yet</h4>
-                  <p className="mt-2 text-sm text-slate-500">Upload takeoff sheets, reference drawings, scope docs, or proposal support material to keep this estimate self-contained.</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {projectFiles.map((file) => (
-                    <div key={file.id} className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50/70">
-                      <div className="min-w-0 flex-1">
-                        <div className="inline-flex max-w-full items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-medium text-slate-600">
-                          <Paperclip className="h-3.5 w-3.5" />
-                          <span className="truncate">{file.fileName}</span>
-                        </div>
-                        <div className="mt-3 grid gap-2 text-[11px] text-slate-500 sm:grid-cols-3">
-                          <span>Type: {file.mimeType}</span>
-                          <span>Size: {formatKilobytesSafe(file.sizeBytes)}</span>
-                          <span>Uploaded: {new Date(file.createdAt).toLocaleString()}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <a
-                          href={api.getV1ProjectFileDownloadUrl(project.id, file.id)}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Download
-                        </a>
-                        <button
-                          onClick={() => void removeProjectFile(file.id)}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3.5 text-[11px] font-semibold text-red-700 shadow-sm hover:bg-red-100"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              </>
               )}
-            </section>
+            </div>
           </div>
         )}
 
@@ -2049,49 +1715,15 @@ export function ProjectWorkspace() {
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-2.5 sm:grid-cols-3">
-                <div className="rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-200/70">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Proposal total</p>
-                  <p className="mt-1 text-xl font-semibold tracking-tight text-slate-950 tabular-nums">{formatCurrencySafe(summary?.baseBidTotal)}</p>
-                  <p className="mt-1 text-[10px] text-slate-500">From current estimate</p>
-                </div>
-                <div className="rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-200/70">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Included lines</p>
-                  <p className="mt-1 text-xl font-semibold tracking-tight text-slate-950 tabular-nums">{lines.length}</p>
-                  <p className="mt-1 text-[10px] text-slate-500">In this bid</p>
-                </div>
-                <div className="rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-200/70">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Duration (est.)</p>
-                  <p className="mt-1 text-xl font-semibold tracking-tight text-slate-950 tabular-nums">
-                    {summary?.durationDays != null && summary.durationDays > 0
-                      ? `${formatNumberSafe(summary.durationDays, 1)} d`
-                      : '—'}
-                  </p>
-                  <p className="mt-1 text-[10px] text-slate-500">Schedule model</p>
-                </div>
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-600">
+                  Internal install email lives on the{' '}
+                  <button type="button" onClick={() => setActiveTab('handoff')} className="font-semibold text-blue-800 underline decoration-slate-300 underline-offset-2">
+                    Handoff
+                  </button>{' '}
+                  tab — same workflow as before.
+                </p>
               </div>
-
-              <label className="mt-4 block max-w-md">
-                <span className="text-[11px] font-medium text-slate-700">Proposal layout</span>
-                <select
-                  className="ui-input mt-1.5 h-10 w-full"
-                  value={project.proposalFormat || 'standard'}
-                  onChange={(e) =>
-                    setProject((prev) =>
-                      prev ? { ...prev, proposalFormat: e.target.value as ProjectRecord['proposalFormat'] } : prev
-                    )
-                  }
-                >
-                  {PROPOSAL_FORMAT_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value} title={opt.hint}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="mt-1 block text-[10px] text-slate-500">
-                  {PROPOSAL_FORMAT_OPTIONS.find((o) => o.value === (project.proposalFormat || 'standard'))?.hint}
-                </span>
-              </label>
             </section>
 
             <details className="ui-surface group overflow-hidden open:shadow-md [&_summary::-webkit-details-marker]:hidden">
@@ -2140,177 +1772,29 @@ export function ProjectWorkspace() {
               </div>
             </details>
 
-            <div className="grid gap-4 xl:grid-cols-[minmax(340px,460px)_minmax(0,1fr)] xl:items-start">
+            <div className="grid gap-4 xl:grid-cols-[minmax(260px,300px)_minmax(340px,460px)_minmax(0,1fr)] xl:items-start">
+              <ProposalSettingsRail
+                proposalFormat={project.proposalFormat || 'standard'}
+                onProposalFormatChange={(value) =>
+                  setProject((prev) => (prev ? { ...prev, proposalFormat: value } : prev))
+                }
+                baseBidTotal={summary?.baseBidTotal}
+                lineCount={lines.length}
+                durationDays={summary?.durationDays}
+              />
               <section className="space-y-4">
                 <div className="ui-surface p-4 sm:p-5">
-                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="ui-label">Proposal wording</p>
-                      <h4 className="mt-1 text-base font-semibold tracking-tight text-slate-900">Edit by section</h4>
-                      <p className="mt-1 text-xs text-slate-500">Company defaults load from Settings; use the reset link under each heading for one section at a time.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => resetProposalDefaults('all')}
-                      className="text-[11px] font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 hover:text-slate-900"
-                    >
-                      Reset all to company defaults
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-700">Scope Summary / Intro</span>
-                        <button type="button" onClick={() => resetProposalDefaults('intro')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
-                      </span>
-                      <textarea
-                        rows={6}
-                        className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                        value={settings?.proposalIntro || ''}
-                        onChange={(e) => settings && setSettings({ ...settings, proposalIntro: e.target.value })}
-                      />
-                    </label>
-
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-700">Terms</span>
-                        <button type="button" onClick={() => resetProposalDefaults('terms')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
-                      </span>
-                      <textarea
-                        rows={5}
-                        className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                        value={settings?.proposalTerms || ''}
-                        onChange={(e) => settings && setSettings({ ...settings, proposalTerms: e.target.value })}
-                      />
-                    </label>
-
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-700">Exclusions</span>
-                        <button type="button" onClick={() => resetProposalDefaults('exclusions')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
-                      </span>
-                      <textarea
-                        rows={5}
-                        className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                        value={settings?.proposalExclusions || ''}
-                        onChange={(e) => settings && setSettings({ ...settings, proposalExclusions: e.target.value })}
-                      />
-                    </label>
-
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-700">Clarifications</span>
-                        <button type="button" onClick={() => resetProposalDefaults('clarifications')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
-                      </span>
-                      <textarea
-                        rows={5}
-                        className="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                        value={settings?.proposalClarifications || ''}
-                        onChange={(e) => settings && setSettings({ ...settings, proposalClarifications: e.target.value })}
-                      />
-                    </label>
-
-                    <label className="block rounded-[22px] border border-slate-200/80 bg-slate-50/65 p-3 text-xs text-slate-600">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-700">Acceptance Label</span>
-                        <button type="button" onClick={() => resetProposalDefaults('acceptance')} className="text-[11px] font-semibold text-blue-700 hover:text-blue-800">Reset Default</button>
-                      </span>
-                      <input
-                        className="mt-2 h-10 w-full rounded-[16px] border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                        value={settings?.proposalAcceptanceLabel || ''}
-                        onChange={(e) => settings && setSettings({ ...settings, proposalAcceptanceLabel: e.target.value })}
-                      />
-                    </label>
-                  </div>
+                  {settings ? (
+                    <ProposalSectionEditor
+                      settings={settings}
+                      setSettings={setSettings}
+                      onResetSection={(scope) => resetProposalDefaults(scope)}
+                      onResetAll={() => resetProposalDefaults('all')}
+                    />
+                  ) : (
+                    <p className="text-sm text-slate-500">Loading proposal defaults…</p>
+                  )}
                 </div>
-
-                <details className="ui-surface group overflow-hidden open:shadow-md [&_summary::-webkit-details-marker]:hidden">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-slate-50/80 sm:px-5">
-                    <div className="min-w-0">
-                      <p className="ui-label">Internal — not on the client PDF</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">Install handoff email</p>
-                      <p className="mt-0.5 text-[11px] text-slate-500">Estimator summary for crews (optional)</p>
-                    </div>
-                    <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-180" />
-                  </summary>
-                  <div className="border-t border-slate-200/80 px-3 pb-4 pt-1 sm:px-4">
-                    <div className="flex flex-wrap items-center justify-end gap-2 pb-3">
-                      <button
-                        type="button"
-                        onClick={() => void generateInstallReviewEmail()}
-                        disabled={installReviewGenerating}
-                        className="inline-flex h-9 items-center justify-center rounded-full border border-slate-200 bg-white px-3.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        {installReviewGenerating ? 'Generating...' : installReviewDraft ? 'Regenerate' : 'Generate'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void copyInstallReviewEmailBody()}
-                        disabled={!installReviewDraft}
-                        className="ui-btn-primary h-9 rounded-full px-3.5 text-[11px] font-semibold disabled:opacity-50"
-                      >
-                        Copy Email
-                      </button>
-                    </div>
-                    {installReviewDraft ? (
-                      <div className="space-y-2.5">
-                        <div className="rounded-[14px] bg-slate-50 p-3 ring-1 ring-slate-200/80">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Subject</p>
-                          <p className="mt-1 text-sm font-semibold text-slate-900">{installReviewDraft.subject}</p>
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <div className="rounded-[14px] bg-slate-50 p-3 ring-1 ring-slate-200/80">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Location</p>
-                            <p className="mt-1 text-sm font-semibold text-slate-900">{installReviewDraft.summary.location || 'Location TBD'}</p>
-                          </div>
-                          <div className="rounded-[14px] bg-slate-50 p-3 ring-1 ring-slate-200/80">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Timeline</p>
-                            <p className="mt-1 text-sm font-semibold text-slate-900">{installReviewDraft.summary.timeline || 'Verify schedule with GC'}</p>
-                          </div>
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-3">
-                          <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Crew</p>
-                            <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{installReviewDraft.summary.crewSize ?? 'TBD'}</p>
-                          </div>
-                          <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Hours</p>
-                            <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{formatNumberSafe(installReviewDraft.summary.estimatedHours || 0, 1)}</p>
-                          </div>
-                          <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Days</p>
-                            <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{formatNumberSafe(installReviewDraft.summary.estimatedDays || 0, 1)}</p>
-                          </div>
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-3">
-                          <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Material</p>
-                            <p className="mt-1 text-base font-semibold text-slate-900">{formatCurrencySafe(installReviewDraft.summary.materialTotal || 0)}</p>
-                          </div>
-                          <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Labor</p>
-                            <p className="mt-1 text-base font-semibold text-slate-900">{formatCurrencySafe(installReviewDraft.summary.laborTotal || 0)}</p>
-                          </div>
-                          <div className="rounded-[22px] bg-slate-50/80 p-3 ring-1 ring-slate-200/80">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Project Modifiers</p>
-                            <p className="mt-1 text-base font-semibold text-slate-900">{installReviewDraft.summary.projectConditions.length}</p>
-                          </div>
-                        </div>
-                        <textarea
-                          readOnly
-                          rows={14}
-                          className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-sm leading-6 text-slate-700 outline-none"
-                          value={installReviewDraft.body}
-                        />
-                      </div>
-                    ) : (
-                      <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50/70 px-4 py-6 text-sm text-slate-500">
-                        Generate after scope and project conditions are set.
-                      </div>
-                    )}
-                  </div>
-                </details>
               </section>
 
               <div className="space-y-3 xl:sticky xl:top-4">
@@ -2332,6 +1816,16 @@ export function ProjectWorkspace() {
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === 'handoff' && (
+          <HandoffPage
+            setActiveTab={setActiveTab}
+            installReviewDraft={installReviewDraft}
+            installReviewGenerating={installReviewGenerating}
+            onGenerateInstallReview={() => void generateInstallReviewEmail()}
+            onCopyInstallReview={() => void copyInstallReviewEmailBody()}
+          />
         )}
       </div>
 
@@ -2358,11 +1852,15 @@ export function ProjectWorkspace() {
         activeRoomId={activeRoomId}
         onClose={() => setBundleModalOpen(false)}
         onApplyBundle={applyBundle}
+        presentation="drawer"
       />
 
       {modifiersModalOpen && selectedLine && (
-        <div className="fixed inset-0 z-50 bg-[radial-gradient(circle_at_top,rgba(10,34,77,0.18)_0%,rgba(15,23,42,0.55)_60%)] p-2 backdrop-blur-sm sm:p-4" onClick={() => setModifiersModalOpen(false)}>
-          <div className="mx-auto flex max-h-[min(92vh,880px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-[0_24px_48px_rgba(15,23,42,0.18)]" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-[2px]" onClick={() => setModifiersModalOpen(false)}>
+          <div
+            className="flex h-full w-full max-w-[min(100vw-0.5rem,56rem)] flex-col overflow-hidden border-l border-slate-200/90 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-[-12px_0_40px_rgba(15,23,42,0.14)]"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="border-b border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(246,248,251,0.96)_100%)] px-3 py-2.5 sm:px-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 max-w-[min(100%,42rem)]">
@@ -2413,11 +1911,9 @@ export function ProjectWorkspace() {
                         <label className="text-[11px] font-medium text-slate-700">Unit
                           <input className="ui-input mt-1 h-9 rounded-lg" value={selectedLine.unit} onChange={(e) => patchLineLocal(selectedLine.id, { unit: e.target.value })} onBlur={() => void persistLine(selectedLine.id)} />
                         </label>
-                        {activeTab !== 'estimate' ? (
-                          <label className="text-[11px] font-medium text-slate-700 md:col-span-2">Notes
-                            <textarea rows={3} className="ui-textarea mt-1 rounded-xl min-h-[72px]" value={selectedLine.notes || ''} onChange={(e) => patchLineLocal(selectedLine.id, { notes: e.target.value || null })} onBlur={() => void persistLine(selectedLine.id)} />
-                          </label>
-                        ) : null}
+                        <label className="text-[11px] font-medium text-slate-700 md:col-span-2">Notes
+                          <textarea rows={3} className="ui-textarea mt-1 rounded-xl min-h-[72px]" value={selectedLine.notes || ''} onChange={(e) => patchLineLocal(selectedLine.id, { notes: e.target.value || null })} onBlur={() => void persistLine(selectedLine.id)} />
+                        </label>
                       </div>
                     </div>
 

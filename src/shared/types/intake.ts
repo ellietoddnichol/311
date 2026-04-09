@@ -384,10 +384,21 @@ export interface IntakeLineEstimateSuggestion {
   } | null;
 }
 
+/** Project-level job-condition suggestions (toggles), distinct from catalog modifier IDs. */
+export interface IntakeSuggestedJobConditionPatch {
+  id: string;
+  label: string;
+  suggestedState: boolean;
+  reason?: string;
+  applicationStatus: IntakeApplicationStatus;
+}
+
 export interface IntakeProjectEstimateSuggestion {
   applicationStatus: IntakeApplicationStatus;
   suggestedProjectModifierIds: string[];
   marketingNotes: string[];
+  /** Derived from AI / matcher; empty when not available. */
+  suggestedJobConditionsPatch?: IntakeSuggestedJobConditionPatch[];
 }
 
 export interface IntakeEstimateDraft {
