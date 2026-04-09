@@ -32,6 +32,8 @@ export function calculateEstimateSummary(project: ProjectRecord, lines: TakeoffL
   const taxAmount = pricingMode === 'labor_only' ? 0 : materialSubtotal * (effects.taxPercentApplied / 100);
   const baseBidTotal = lineSubtotal + burdenAmount + overheadAmount + profitAmount + taxAmount;
 
+  const crewRecommendation = computeCrewRecommendation(totalLaborHours, lines, jobConditions);
+
   return {
     materialSubtotal,
     laborSubtotal,

@@ -476,4 +476,12 @@ export function initEstimatorSchema() {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run('catalog', null, null, 'never', null, 0, 0, 0, 0, '[]');
   }
+
+  const projectFilesColumns = estimatorDb.prepare('PRAGMA table_info(project_files_v1)').all() as Array<{ name: string }>;
+  if (!projectFilesColumns.some((column) => column.name === 'gcs_bucket')) {
+    estimatorDb.exec('ALTER TABLE project_files_v1 ADD COLUMN gcs_bucket TEXT');
+  }
+  if (!projectFilesColumns.some((column) => column.name === 'gcs_object_name')) {
+    estimatorDb.exec('ALTER TABLE project_files_v1 ADD COLUMN gcs_object_name TEXT');
+  }
 }

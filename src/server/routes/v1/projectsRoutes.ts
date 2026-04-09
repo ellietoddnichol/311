@@ -1,6 +1,13 @@
 import { Router } from 'express';
 import { archiveProject, createProject, deleteProject, getProject, listProjects, updateProject } from '../../repos/projectsRepo.ts';
-import { createProjectFile, deleteProjectFile, getProjectFile, listProjectFiles } from '../../repos/projectFilesRepo.ts';
+import {
+  createProjectFile,
+  deleteProjectFile,
+  getProjectFile,
+  listProjectFiles,
+  purgeProjectFilesFromGcs,
+  readProjectFileBuffer,
+} from '../../repos/projectFilesRepo.ts';
 
 export const projectsRouter = Router();
 
@@ -31,8 +38,13 @@ projectsRouter.put('/:projectId', (req, res) => {
   return res.json({ data: project });
 });
 
-projectsRouter.delete('/:projectId', (req, res) => {
+projectsRouter.delete('/:projectId', async (req, res) => {
   if (String(req.query.permanent || '') === 'true') {
+    try {
+      await purgeProjectFilesFromGcs(req.params.projectId);
+    } catch (err) {
+      console.error('GCS purge before project delete failed:', err);
+    }
     const deleted = deleteProject(req.params.projectId);
     if (!deleted) {
       return res.status(404).json({ error: 'Project not found' });
@@ -58,7 +70,7 @@ projectsRouter.get('/:projectId/files', (req, res) => {
   return res.json({ data: listProjectFiles(req.params.projectId) });
 });
 
-projectsRouter.post('/:projectId/files', (req, res) => {
+projectsRouter.post('/:projectId/files', async (req, res) => {
   const project = getProject(req.params.projectId);
   if (!project) {
     return res.status(404).json({ error: 'Project not found' });
@@ -77,31 +89,44 @@ projectsRouter.post('/:projectId/files', (req, res) => {
     return res.status(400).json({ error: 'File too large. Maximum size is 10 MB.' });
   }
 
-  const created = createProjectFile({
-    projectId: req.params.projectId,
-    fileName,
-    mimeType,
-    sizeBytes,
-    dataBase64,
-  });
-
-  return res.status(201).json({ data: created });
+  try {
+    const created = await createProjectFile({
+      projectId: req.params.projectId,
+      fileName,
+      mimeType,
+      sizeBytes,
+      dataBase64,
+    });
+    return res.status(201).json({ data: created });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Upload failed.';
+    console.error('Project file upload failed:', err);
+    return res.status(500).json({ error: message });
+  }
 });
 
-projectsRouter.get('/:projectId/files/:fileId/download', (req, res) => {
+projectsRouter.get('/:projectId/files/:fileId/download', async (req, res) => {
   const file = getProjectFile(req.params.projectId, req.params.fileId);
   if (!file) {
     return res.status(404).json({ error: 'File not found' });
   }
 
-  const data = Buffer.from(file.dataBase64, 'base64');
-  res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.fileName)}"`);
-  return res.send(data);
+  try {
+    const data = await readProjectFileBuffer(req.params.projectId, req.params.fileId);
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.fileName)}"`);
+    return res.send(data);
+  } catch (err) {
+    console.error('Project file download failed:', err);
+    return res.status(500).json({ error: 'Download failed.' });
+  }
 });
 
-projectsRouter.delete('/:projectId/files/:fileId', (req, res) => {
-  const deleted = deleteProjectFile(req.params.projectId, req.params.fileId);
+projectsRouter.delete('/:projectId/files/:fileId', async (req, res) => {
+  const deleted = await deleteProjectFile(req.params.projectId, req.params.fileId);
   if (!deleted) {
     return res.status(404).json({ error: 'File not found' });
   }
