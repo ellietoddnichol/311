@@ -23,7 +23,7 @@ const HEADER_ALIASES: Record<CanonicalColumn, string[]> = {
   itemDescription: ['item', 'item name', 'description', 'scope item', 'work description', 'product', 'material'],
   quantity: ['qty', 'quantity', 'count', 'amount'],
   unit: ['unit', 'uom', 'measure', 'unit of measure'],
-  manufacturer: ['manufacturer', 'mfr', 'brand', 'vendor'],
+  manufacturer: ['manufacturer', 'mfr', 'vendor'],
   model: ['model', 'model number', 'series', 'part number'],
   finish: ['finish', 'color', 'coating'],
   notes: ['notes', 'remarks', 'comments', 'clarifications', 'exclusions', 'inclusions'],

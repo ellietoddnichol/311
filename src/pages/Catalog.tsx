@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowUpDown, Database, Edit2, Package, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { ResumeProjectBanner } from '../components/ResumeProjectBanner';
 import { api } from '../services/api';
 import { CatalogSyncStatusRecord, BundleRecord, ModifierRecord } from '../shared/types/estimator';
 import { CatalogItem } from '../types';
@@ -85,7 +86,9 @@ export function Catalog() {
           item.sku.toLowerCase().includes(query) ||
           item.category.toLowerCase().includes(query) ||
           (item.family || '').toLowerCase().includes(query) ||
-          (item.subcategory || '').toLowerCase().includes(query);
+          (item.subcategory || '').toLowerCase().includes(query) ||
+          (item.manufacturer || '').toLowerCase().includes(query) ||
+          (item.model || '').toLowerCase().includes(query);
 
         const categoryMatch = categoryFilter === 'all' || item.category === categoryFilter;
         const activeMatch =
@@ -156,6 +159,8 @@ export function Catalog() {
       sku: 'SKU-' + Math.floor(Math.random() * 10000),
       category: 'Toilet Accessories',
       description: 'New Catalog Item',
+      manufacturer: '',
+      model: '',
       uom: 'EA',
       baseMaterialCost: 0,
       baseLaborMinutes: 0,
@@ -271,6 +276,7 @@ export function Catalog() {
 
   return (
     <div className="ui-page space-y-3 w-full max-w-full px-0">
+      <ResumeProjectBanner />
       <section className="ui-surface p-3 space-y-3">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -355,7 +361,7 @@ export function Catalog() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={activeTab === 'items' ? 'Search SKU, description, category' : activeTab === 'modifiers' ? 'Search modifier key, name, categories' : 'Search bundle id, name, category'}
+              placeholder={activeTab === 'items' ? 'Search SKU, description, manufacturer, category' : activeTab === 'modifiers' ? 'Search modifier key, name, categories' : 'Search bundle id, name, category'}
               className="ui-input h-8 pl-8 text-xs"
             />
           </div>
@@ -458,6 +464,10 @@ export function Catalog() {
                         </div>
                       </td>
                       <td className="py-2 px-2 text-slate-700">{item.category}</td>
+                      <td className="py-2 px-2 text-slate-700 align-top">
+                        <div className="font-medium text-slate-800">{item.manufacturer || '—'}</div>
+                        {item.model ? <div className="text-[10px] text-slate-500">Model: {item.model}</div> : null}
+                      </td>
                       <td className="py-2 px-2 text-slate-700">{item.uom}</td>
                       <td className="py-2 px-2 text-right text-slate-700">{formatNumberSafe(item.baseLaborMinutes, 1)} min</td>
                       <td className="py-2 px-2 text-right text-slate-700">{formatCurrencySafe(item.baseMaterialCost)}</td>
@@ -639,6 +649,24 @@ export function Catalog() {
                     className="w-full h-9 px-2 border border-slate-300 rounded text-sm"
                     value={editingItem.category}
                     onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 mb-1">Manufacturer</label>
+                  <input
+                    type="text"
+                    className="w-full h-9 px-2 border border-slate-300 rounded text-sm"
+                    value={editingItem.manufacturer || ''}
+                    onChange={(e) => setEditingItem({ ...editingItem, manufacturer: e.target.value || undefined })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 mb-1">Model</label>
+                  <input
+                    type="text"
+                    className="w-full h-9 px-2 border border-slate-300 rounded text-sm"
+                    value={editingItem.model || ''}
+                    onChange={(e) => setEditingItem({ ...editingItem, model: e.target.value || undefined })}
                   />
                 </div>
                 <div>

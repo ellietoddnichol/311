@@ -39,7 +39,7 @@ function extractLabeledValue(text: string, patterns: RegExp[]): string | null {
 
 function extractManufacturerModelFinish(text: string): Pick<NormalizedIntakeItem, 'manufacturer' | 'model' | 'finish'> {
   return {
-    manufacturer: extractLabeledValue(text, [/manufacturer\s*[:\-]\s*([^,;]+)/i, /mfr\s*[:\-]\s*([^,;]+)/i, /brand\s*[:\-]\s*([^,;]+)/i]),
+    manufacturer: extractLabeledValue(text, [/manufacturer\s*[:\-]\s*([^,;]+)/i, /mfr\s*[:\-]\s*([^,;]+)/i]),
     model: extractLabeledValue(text, [/model\s*[:\-]\s*([^,;]+)/i, /series\s*[:\-]\s*([^,;]+)/i]),
     finish: extractLabeledValue(text, [/finish\s*[:\-]\s*([^,;]+)/i, /color\s*[:\-]\s*([^,;]+)/i, /(powder coat[^,;]*)/i]),
   };

@@ -11,7 +11,9 @@ import {
   Plus,
   Upload,
 } from 'lucide-react';
+import { ResumeProjectBanner } from '../components/ResumeProjectBanner';
 import { api } from '../services/api';
+import { fireCatalogSyncForNewWork } from '../utils/catalogBackgroundSync';
 import { ProjectRecord } from '../shared/types/estimator';
 import { getCanonicalProjectDate, getCanonicalProjectDateTimestamp } from '../shared/utils/projectDates';
 import { format } from 'date-fns';
@@ -147,8 +149,14 @@ export function Dashboard() {
     );
   }
 
+  function goNewProject() {
+    fireCatalogSyncForNewWork();
+    navigate('/project/new');
+  }
+
   return (
     <div className="ui-page space-y-4 w-full max-w-full px-0">
+      <ResumeProjectBanner />
       <div className="ui-surface px-5 py-4 md:px-6 md:py-5 flex flex-wrap justify-between items-end gap-4">
         <div>
           <p className="ui-label">Operations Snapshot</p>
@@ -157,7 +165,7 @@ export function Dashboard() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => navigate('/project/new')}
+            onClick={() => goNewProject()}
             className="ui-btn-primary inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" /> New Project
@@ -196,10 +204,10 @@ export function Dashboard() {
       <section className="ui-surface p-4">
         <h2 className="text-sm font-semibold text-slate-900 mb-3">Quick Actions</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-          <button onClick={() => navigate('/project/new')} className="ui-btn-secondary h-10 flex items-center justify-center gap-2">
+          <button onClick={() => goNewProject()} className="ui-btn-secondary h-10 flex items-center justify-center gap-2">
             <Plus className="w-4 h-4" /> New Project
           </button>
-          <button onClick={() => navigate('/project/new')} className="ui-btn-secondary h-10 flex items-center justify-center gap-2">
+          <button onClick={() => goNewProject()} className="ui-btn-secondary h-10 flex items-center justify-center gap-2">
             <Upload className="w-4 h-4" /> Upload Takeoff
           </button>
           <button onClick={() => navigate('/catalog')} className="ui-btn-secondary h-10 flex items-center justify-center gap-2">

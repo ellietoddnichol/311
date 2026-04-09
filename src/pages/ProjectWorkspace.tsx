@@ -39,6 +39,7 @@ import { calculateEstimateSummary } from '../shared/utils/estimateSummary';
 import { calculateWorkDuration, formatWorkWeeksLabel } from '../shared/utils/workDuration';
 import { formatCurrencySafe, formatKilobytesSafe, formatNumberSafe } from '../utils/numberFormat';
 import { getDistanceInMiles } from '../utils/geo';
+import { setWorkspaceResumeProject } from '../utils/workspaceResume';
 
 interface RoomCreationDraft {
   roomName: string;
@@ -169,6 +170,12 @@ export function ProjectWorkspace() {
       };
     });
   }, [userEmail]);
+
+  useEffect(() => {
+    if (project?.id && project.projectName) {
+      setWorkspaceResumeProject(project.id, project.projectName);
+    }
+  }, [project?.id, project?.projectName]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);

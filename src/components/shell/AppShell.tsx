@@ -1,7 +1,12 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { SidebarNav } from './SidebarNav';
+import { maybeSyncCatalogInBackground } from '../../utils/catalogBackgroundSync';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    maybeSyncCatalogInBackground();
+  }, []);
+
   return (
     <div className="h-screen w-screen flex overflow-hidden p-0 m-0 bg-white">
       <SidebarNav />

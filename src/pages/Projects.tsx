@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowUpDown, Archive, Filter, Plus, Search } from 'lucide-react';
 import { format } from 'date-fns';
+import { ResumeProjectBanner } from '../components/ResumeProjectBanner';
 import { api } from '../services/api';
+import { fireCatalogSyncForNewWork } from '../utils/catalogBackgroundSync';
 import { ProjectRecord } from '../shared/types/estimator';
 import { getCanonicalProjectDateTimestamp } from '../shared/utils/projectDates';
 
@@ -93,8 +95,14 @@ export function Projects() {
     }
   }
 
+  function goNewProject() {
+    fireCatalogSyncForNewWork();
+    navigate('/project/new');
+  }
+
   return (
     <div className="ui-page space-y-4">
+      <ResumeProjectBanner />
       <div className="ui-surface px-5 py-4 md:px-6 md:py-5 flex items-end justify-between gap-4">
         <div>
           <p className="ui-label">Project Library</p>
@@ -102,7 +110,7 @@ export function Projects() {
           <p className="ui-subtitle mt-1">Search, filter, sort, and manage every estimate from one operational index.</p>
         </div>
         <button
-          onClick={() => navigate('/project/new')}
+          onClick={() => goNewProject()}
           className="ui-btn-primary h-10 px-4 inline-flex items-center gap-2"
         >
           <Plus className="w-4 h-4" /> New Project

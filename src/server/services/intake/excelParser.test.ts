@@ -36,7 +36,7 @@ test('parseExcelUpload maps ugly header aliases into canonical spreadsheet field
     ['Project', 'Alias Heavy School'],
     ['Owner', 'County District'],
     [],
-    ['Area Name', 'Product', 'Count', 'Measure', 'Brand', 'Series', 'Color', 'Comments'],
+    ['Area Name', 'Product', 'Count', 'Measure', 'Manufacturer', 'Series', 'Color', 'Comments'],
     ['Vestibule', 'Directory Sign', 1, 'EA', 'ASI', 'D-100', 'Brushed', 'Entry sign'],
   ]);
   const workbook = xlsx.utils.book_new();

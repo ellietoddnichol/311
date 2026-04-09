@@ -316,7 +316,7 @@ export async function upsertItemInGoogleSheet(input: {
     keyValue: key,
     setters: [
       { aliases: ['Category', 'Scope Category'], value: input.category || '' },
-      { aliases: ['Manufacturer', 'Brand'], value: input.manufacturer || '' },
+      { aliases: ['Manufacturer', 'Mfr', 'Mfg'], value: input.manufacturer || '' },
       { aliases: ['Model', 'Model Number'], value: input.model || '' },
       { aliases: ['Description', 'Item Description'], value: input.description || '' },
       { aliases: ['Unit', 'UOM', 'Base Unit'], value: input.unit || 'EA' },
@@ -478,7 +478,7 @@ function upsertItems(rows: string[][], warnings: string[]): number {
   const skuCol = columnIndex(headers, ['sku', 'item sku']);
   const itemKeyCol = columnIndex(headers, ['item id', 'itemid', 'item key', 'search key', 'search key', 'search_key', 'key']);
   const categoryCol = columnIndex(headers, ['scope category', 'category']);
-  const manufacturerCol = columnIndex(headers, ['manufacturer', 'brand']);
+  const manufacturerCol = columnIndex(headers, ['manufacturer', 'mfr', 'mfg', 'brand']);
   const modelCol = columnIndex(headers, ['model', 'model number', 'modelnumber']);
   const descriptionCol = columnIndex(headers, ['description', 'item description']);
   const itemCol = columnIndex(headers, ['item', 'item name', 'itemname']);

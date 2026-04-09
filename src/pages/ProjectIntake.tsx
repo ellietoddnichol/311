@@ -15,6 +15,7 @@ import {
 import { collectPastProjectDateErrors, mapProjectDateErrors } from '../shared/utils/projectDateValidation';
 import { OFFICE_ADDRESS, getDistanceInMiles } from '../utils/geo';
 import { formatNumberSafe } from '../utils/numberFormat';
+import { touchCatalogSyncTimestamp } from '../utils/catalogBackgroundSync';
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
 type IntakeStep = 1 | 2 | 3 | 4 | 5;
@@ -1128,6 +1129,12 @@ export function ProjectIntake() {
 
   useEffect(() => {
     void (async () => {
+      try {
+        await api.syncV1Catalog();
+        touchCatalogSyncTimestamp();
+      } catch {
+        /* non-fatal; local catalog may be stale */
+      }
       const [projectData, catalogData, settingsData] = await Promise.all([api.getV1Projects(), api.getCatalog(), api.getV1Settings()]);
       setProjects(projectData);
       setCatalog(catalogData);
