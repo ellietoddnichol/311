@@ -1,7 +1,12 @@
 import * as xlsx from 'xlsx';
 import { parse as parseCsv } from 'csv-parse/sync';
 import type { CatalogItem } from '../../types.ts';
-import type { IntakeCatalogMatch, IntakeProjectMetadata, IntakeSourceKind } from '../../shared/types/intake.ts';
+import type {
+  IntakeCatalogMatch,
+  IntakeProjectMetadata,
+  IntakeReasoningEnvelope,
+  IntakeSourceKind,
+} from '../../shared/types/intake.ts';
 import { detectSpreadsheetHeaderRow, extractSpreadsheetPreludeText } from './spreadsheetInterpretationService.ts';
 import { shouldSkipSpreadsheetSheet } from './fileClassifierService.ts';
 import {
@@ -36,6 +41,7 @@ export interface NormalizedIntakeLine {
   suggestedMatch?: IntakeCatalogMatch | null;
   semanticTags?: string[];
   bundleCandidates?: string[];
+  reasoning?: IntakeReasoningEnvelope;
 }
 
 export interface StructuredSpreadsheetResult {

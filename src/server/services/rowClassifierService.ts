@@ -4,6 +4,7 @@ import {
   looksLikeIntakePricingSummaryOrDisclaimerLine,
   looksLikeIntakeSectionHeaderOrTitleLine,
 } from '../../shared/utils/intakeTextGuards.ts';
+import { matchesDiv10CommercialOrMetadataLine } from './bidReasoning/div10BidReasoningService.ts';
 import { extractMetadataFromCells, hasProjectMetadataValue, intakeAsText, normalizeComparableText } from './metadataExtractorService.ts';
 
 export type ParsedChunkType = 'project_metadata' | 'header_row' | 'section_header' | 'actual_scope_line' | 'ignore';
@@ -120,6 +121,7 @@ export function classifyParsedChunk(cells: string[], lineIndex: number, knownMet
   const metadata = extractMetadataFromCells(compactCells);
 
   if (!text) return { kind: 'ignore', metadata };
+  if (matchesDiv10CommercialOrMetadataLine(text)) return { kind: 'ignore', metadata };
   if (looksLikeIntakePricingSummaryOrDisclaimerLine(text)) return { kind: 'ignore', metadata };
   if (looksLikeHeaderChunk(compactCells)) return { kind: 'header_row', metadata };
   if (hasProjectMetadataValue(metadata) || looksLikeProjectMetadataChunk(text, lineIndex, knownMetadata)) return { kind: 'project_metadata', metadata };
@@ -140,6 +142,7 @@ export function shouldKeepNormalizedLine(line: RowClassifierLineLike, lineIndex:
   const identity = intakeAsText(line.description || line.itemName);
   if (!identity) return false;
   if (looksLikeIntakeContactOrNonScopeLine(identity)) return false;
+  if (matchesDiv10CommercialOrMetadataLine(identity)) return false;
   if (looksLikeIntakeSectionHeaderOrTitleLine(identity)) return false;
 
   const classification = classifyParsedChunk([

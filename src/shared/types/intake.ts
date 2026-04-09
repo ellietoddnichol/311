@@ -254,6 +254,89 @@ export type IntakeApplicationStatus = 'suggested' | 'accepted' | 'replaced' | 'i
 /** Catalog auto-apply policy tier for intake / estimate review (company settings control server behavior). */
 export type IntakeCatalogAutoApplyTier = 'A' | 'B' | 'C';
 
+/** Division 10 bid-reasoning: document block classification (debug + routing). */
+export type IntakeParserBlockType =
+  | 'company_header'
+  | 'proposal_metadata'
+  | 'scope_header'
+  | 'scope_item'
+  | 'scope_option'
+  | 'subtotal'
+  | 'commercial_term'
+  | 'inclusion_note'
+  | 'unknown';
+
+export type IntakeExtractionBucket =
+  | 'scope'
+  | 'commercial_term'
+  | 'alternate'
+  | 'assumption_signal'
+  | 'exclusion'
+  | 'hidden_scope_signal'
+  | 'unknown';
+
+export type IntakeProposalScopeTypeHint = 'material_only' | 'install_only' | 'material_and_install' | 'unknown';
+
+/** Structured reasoning attached to intake lines (and discarded-line debug snapshots). */
+export interface IntakeReasoningConfidenceAdjustments {
+  /** Subtract from line confidence (0–1 scale), e.g. 0.1 = −10 points. */
+  lineConfidencePenalty: number;
+  /** Additional penalty toward scope completeness (0–1). */
+  scopeCompletenessPenalty: number;
+  /** 0–100, higher = more hidden-scope / field-verify risk. */
+  hiddenScopeRiskScore: number;
+  needsSpecCrosscheck: boolean;
+  /** Human-readable document-level bump labels applied to this line text. */
+  document_bump_labels?: string[];
+}
+
+export interface IntakeReasoningEnvelope {
+  parser_block_type: IntakeParserBlockType;
+  /** Model bucket when present; local heuristics may set `unknown`. */
+  extraction_bucket?: IntakeExtractionBucket;
+  install_object_ids?: string[];
+  /** Normalized intents from construction_semantics + install_objects (e.g. locker_base_carpentry). */
+  install_intelligence_tags?: string[];
+  hidden_scope_tags?: string[];
+  labor_recipe_candidates?: string[];
+  recommended_questions_internal?: string[];
+  crew_bump_signals?: string[];
+  crew_recommendation?: {
+    /** Internal install_family key (e.g. locker_system). */
+    install_family?: string;
+    /** Human-readable family label from crew suggestion rules. */
+    install_family_display_name?: string;
+    /** Baseline crew from family rules (not quantity-driven). */
+    default_crew?: number;
+    /** After bump triggers; same as suggested_crew_size when both set. */
+    recommended_crew?: number;
+    /** @deprecated Prefer recommended_crew — kept for older clients. */
+    suggested_crew_size?: number;
+    bump_factors?: string[];
+    /** Structured trigger ids that increased crew (e.g. tile_or_cmu_drilling). */
+    crew_bump_factor_ids?: string[];
+    reasoning?: string;
+  };
+  /** 0–1 rolled up after penalties (for UI / automation). */
+  reasoning_confidence?: number;
+  non_scope_meaning?: {
+    proposal_scope_type?: IntakeProposalScopeTypeHint;
+    logistics_flags?: string[];
+    commercial_flags?: string[];
+  };
+  confidence_adjustments?: IntakeReasoningConfidenceAdjustments;
+  /** Gemini / local classifier rationale (short). */
+  classification_rationale?: string;
+}
+
+/** Lines classified as non-scope but kept for debugging (parser_block_type + drop reason). */
+export interface IntakeDiscardedLineSnapshot {
+  descriptionPreview: string;
+  parser_block_type: IntakeParserBlockType;
+  dropReason: string;
+  reasoning?: IntakeReasoningEnvelope;
+}
+
 export interface IntakeReviewLine {
   lineId: string;
   /** Stable content key for reorder-safe correction logging and estimate draft rows. */
@@ -286,6 +369,8 @@ export interface IntakeReviewLine {
   suggestedBundle: IntakeBundleMatch | null;
   warnings: string[];
   semanticTags?: string[];
+  /** Division 10 bid reasoning + install intelligence (structured). */
+  reasoning?: IntakeReasoningEnvelope;
 }
 
 export interface IntakeRoomCandidate {
@@ -444,4 +529,6 @@ export interface IntakeParseResult {
   aiSuggestions?: IntakeAiSuggestions;
   /** Matcher + read-only pricing preview; omitted when catalog matching is disabled. */
   estimateDraft?: IntakeEstimateDraft;
+  /** Non-scope lines dropped before review (parser classification for debugging). */
+  discardedLineSnapshots?: IntakeDiscardedLineSnapshot[];
 }

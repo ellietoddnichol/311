@@ -12,6 +12,7 @@ import {
   isMapsGroundingEnabled,
   shouldAttemptMapsGroundingForAddress,
 } from './mapsGroundingLiteService.ts';
+import { getDiv10BidReasoningGeminiPromptAddendum } from './bidReasoning/div10BidReasoningService.ts';
 
 export interface GeminiExtractionLine {
   roomArea: string;
@@ -35,6 +36,8 @@ export interface GeminiExtractionLine {
   rationale?: string;
   evidenceText?: string;
   requiresGroundingLine?: boolean;
+  parserBlockType?: string;
+  extractionBucket?: string;
 }
 
 export interface GeminiExtractionResult {
@@ -109,6 +112,8 @@ function sanitizeResult(value: any): GeminiExtractionResult {
           rationale: asText(line?.rationale),
           evidenceText: asText(line?.evidenceText),
           requiresGroundingLine: Boolean(line?.requiresGroundingLine),
+          parserBlockType: asText(line?.parserBlockType),
+          extractionBucket: asText(line?.extractionBucket),
         }))
         .filter((line: GeminiExtractionLine) => line.description || line.itemName)
         .filter((line: GeminiExtractionLine) => {
@@ -340,6 +345,7 @@ export async function extractIntakeFromGemini(input: ExtractInput): Promise<Gemi
     'applicationMethod (attach_to_item, apply_globally, info_only, unknown), lineConfidence (0-1), rationale (one sentence), evidenceText (short quote), requiresGroundingLine (true only if part numbers/spec language needs web lookup).',
     'suggestedGlobalModifiers: array of { phrase, confidence, rationale, evidenceText } for project-wide conditions implied by the doc (night work, occupied building, prevailing wage, delivery, demo, etc.) — phrases only, not dollar amounts.',
     'requiresGrounding: string array of reasons the model needs external verification (ambiguous manufacturer, unfamiliar spec section, etc.). Leave empty when not needed.',
+    getDiv10BidReasoningGeminiPromptAddendum(),
   ]
     .filter(Boolean)
     .join('\n');

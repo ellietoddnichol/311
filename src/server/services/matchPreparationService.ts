@@ -90,6 +90,16 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
     const unmatchedReason = warnings.find((warning) => /catalog coverage may be missing|no catalog candidate found/i.test(warning));
     const matchExplanation = catalogMatch?.reason || suggestedMatch?.reason || unmatchedReason || 'No confident catalog candidate was found.';
 
+    const lineConfidencePenalty = line.reasoning?.confidence_adjustments?.lineConfidencePenalty ?? 0;
+    let adjustedConfidence = Math.max(0.05, Math.min(1, Number((line.confidence - lineConfidencePenalty).toFixed(3))));
+    const hiddenRisk = line.reasoning?.confidence_adjustments?.hiddenScopeRiskScore ?? 0;
+    if (hiddenRisk > 45) {
+      warnings.push('Bid reasoning: elevated hidden-scope / field-verify risk on this line.');
+    }
+    if (line.reasoning?.confidence_adjustments?.needsSpecCrosscheck) {
+      warnings.push('Bid reasoning: spec cross-check suggested for this line.');
+    }
+
     const bundleCandidates =
       line.bundleCandidates && line.bundleCandidates.length > 0
         ? line.bundleCandidates
@@ -144,6 +154,7 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
       suggestedBundle,
       warnings: Array.from(new Set(warnings)),
       semanticTags: line.semanticTags,
+      reasoning: line.reasoning,
     };
   });
 }

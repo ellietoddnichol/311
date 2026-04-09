@@ -5,10 +5,12 @@ import type { CatalogItem } from '../../types.ts';
 import type { ModifierRecord, SettingsRecord } from '../../shared/types/estimator.ts';
 import type {
   IntakeAiSuggestions,
+  IntakeDiscardedLineSnapshot,
   IntakeParseRequest,
   IntakeParseResult,
   IntakeProjectAssumption,
   IntakeProjectMetadata,
+  IntakeReasoningEnvelope,
   IntakeReviewLine,
   IntakeRoomCandidate,
   IntakeSourceKind,
@@ -47,6 +49,11 @@ import { classifyParsedChunk as classifyParsedChunkFromService, normalizeExtract
 import { parseSpreadsheetInput, extractSpreadsheetStructuredMetadata, type NormalizedIntakeLine as NormalizedIntakeLineFromService } from './spreadsheetInterpreterService.ts';
 import { detectBundleCandidates } from './intake/normalizer.ts';
 import { enrichIntakeServiceLineNotes } from './intake/intakeSemantics.ts';
+import {
+  buildIntakeReasoningEnvelopeForLine,
+  formatDiv10ReasoningNote,
+  inferBidReasoningAssumptionsFromDocumentText,
+} from './bidReasoning/div10BidReasoningService.ts';
 
 interface NormalizedIntakeLine {
   roomName: string;
@@ -67,6 +74,7 @@ interface NormalizedIntakeLine {
   unitWasDefaulted?: boolean;
   semanticTags?: string[];
   bundleCandidates?: string[];
+  reasoning?: IntakeReasoningEnvelope;
 }
 
 interface StructuredSpreadsheetResult {
@@ -1038,45 +1046,78 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       );
 
       warnings.push(...filterSpreadsheetGeminiWarnings(gemini.warnings));
-      const geminiLines = gemini.parsedLines
-        .map((line) => {
-          const description = line.description || line.itemName || '';
-          const enriched = enrichIntakeServiceLineNotes({
-            description,
-            itemName: line.itemName || '',
-            category: line.category || '',
-            notes: line.notes || '',
-            fieldAssemblyHint: line.fieldAssembly === true,
-          });
-          const semanticTags = [...enriched.semanticTags];
-          const lk = (line.lineKind || '').toLowerCase();
-          if (lk === 'modifier') semanticTags.push('gemini_line_kind_modifier');
-          if (lk === 'bundle') semanticTags.push('gemini_line_kind_bundle');
-          return {
-            roomName: normalizeRoomName(line.roomArea || 'General'),
-            category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
-            itemCode: line.itemCode || '',
-            itemName: line.itemName || description,
-            description,
-            quantity: parsePositiveNumber(line.quantity, 1),
-            unit: line.unit || 'EA',
-            notes: enriched.notes,
-            sourceReference: fileName,
-            laborIncluded: null,
-            materialIncluded: null,
-            confidence: 0.88,
-            parserTag: 'gemini-spreadsheet',
-            warnings: [],
+      const discardedSpreadsheetSnapshots: IntakeDiscardedLineSnapshot[] = [];
+      const mappedGeminiSheet: NormalizedIntakeLine[] = gemini.parsedLines.map((line) => {
+        const description = line.description || line.itemName || '';
+        const enriched = enrichIntakeServiceLineNotes({
+          description,
+          itemName: line.itemName || '',
+          category: line.category || '',
+          notes: line.notes || '',
+          fieldAssemblyHint: line.fieldAssembly === true,
+        });
+        const combinedNotes = [line.notes || '', enriched.notes].filter(Boolean).join(' | ');
+        const reasoning = buildIntakeReasoningEnvelopeForLine({
+          description,
+          itemName: line.itemName || '',
+          category: line.category || '',
+          notes: combinedNotes,
+          geminiParserBlockType: line.parserBlockType,
+          geminiExtractionBucket: line.extractionBucket,
+          geminiRationale: line.rationale,
+        });
+        const noteHint = formatDiv10ReasoningNote(reasoning);
+        const finalNotes = [combinedNotes, noteHint].filter(Boolean).join(' | ');
+        const semanticTags = [...enriched.semanticTags];
+        if (noteHint) semanticTags.push('div10_install_intel');
+        const lk = (line.lineKind || '').toLowerCase();
+        if (lk === 'modifier') semanticTags.push('gemini_line_kind_modifier');
+        if (lk === 'bundle') semanticTags.push('gemini_line_kind_bundle');
+        return {
+          roomName: normalizeRoomName(line.roomArea || 'General'),
+          category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
+          itemCode: line.itemCode || '',
+          itemName: line.itemName || description,
+          description,
+          quantity: parsePositiveNumber(line.quantity, 1),
+          unit: line.unit || 'EA',
+          notes: finalNotes,
+          sourceReference: fileName,
+          laborIncluded: null,
+          materialIncluded: null,
+          confidence: 0.88,
+          parserTag: 'gemini-spreadsheet',
+          warnings: [],
           semanticTags: semanticTags.length ? Array.from(new Set(semanticTags)) : undefined,
           bundleCandidates: detectBundleCandidates(description, line.category || ''),
+          reasoning,
         };
-      })
-        .filter((line, index) => shouldKeepNormalizedLineFromService(line, index, structuredMetadata));
+      });
 
-      const alignmentSafe = geminiLines.length === deterministicRows.length && deterministicRows.every((row, index) => lineAlignmentLooksSafe(row, gemini.parsedLines[index]));
+      const geminiLines: NormalizedIntakeLine[] = [];
+      mappedGeminiSheet.forEach((row, index) => {
+        if (shouldKeepNormalizedLineFromService(row, index, structuredMetadata)) {
+          geminiLines.push(row);
+        } else {
+          const bt = row.reasoning?.parser_block_type ?? 'unknown';
+          discardedSpreadsheetSnapshots.push({
+            descriptionPreview: (row.description || '').slice(0, 240),
+            parser_block_type: bt,
+            dropReason:
+              bt === 'commercial_term' || bt === 'subtotal' || bt === 'company_header' || bt === 'proposal_metadata'
+                ? `parser_block:${bt}`
+                : 'row_classifier',
+            reasoning: row.reasoning,
+          });
+        }
+      });
+
+      const alignmentSafe =
+        mappedGeminiSheet.length === deterministicRows.length &&
+        deterministicRows.every((row, index) => lineAlignmentLooksSafe(row, gemini.parsedLines[index]));
       if (alignmentSafe) {
         normalizedLines = deterministicRows.map((row, index) => {
-          const enriched = geminiLines[index];
+          const enriched = mappedGeminiSheet[index];
           return {
             ...row,
             roomName: row.roomName || enriched.roomName,
@@ -1093,6 +1134,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
             unitWasDefaulted: false,
             semanticTags: Array.from(new Set([...(row.semanticTags || []), ...(enriched.semanticTags || [])])),
             bundleCandidates: Array.from(new Set([...(row.bundleCandidates || []), ...(enriched.bundleCandidates || [])])),
+            reasoning: enriched.reasoning,
           };
         });
         metadataSources.push('gemini-enrichment');
@@ -1112,7 +1154,10 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
           proposalDate: normalizeDateValueFromService(gemini.proposalDate),
           estimator: gemini.estimator,
           sourceFiles: [fileName],
-          assumptions: gemini.assumptions,
+          assumptions: mergeAssumptions(
+            gemini.assumptions,
+            inferBidReasoningAssumptionsFromDocumentText(`${preludeText}\n${flattenedText}`)
+          ),
           pricingBasis: inferPricingBasis(`${preludeText}\n${flattenedText}`, normalizedLines.map((line) => line.unit), gemini.pricingBasis),
         },
         structuredMetadata,
@@ -1141,6 +1186,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         proposalAssist,
         aiSuggestions,
         ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines, aiSuggestions, intakeSettings),
+        discardedLineSnapshots: discardedSpreadsheetSnapshots.length ? discardedSpreadsheetSnapshots : undefined,
       };
       emitIntakeParseMetrics(out, parseStarted, intakeSettings);
       return out;
@@ -1184,46 +1230,77 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
     });
 
     warnings.push(...gemini.warnings);
-    const geminiLines: NormalizedIntakeLine[] = (
-      gemini.parsedLines
-        .map((line) => {
-          const docKind = String(line.documentLineKind || '').toLowerCase();
-          if (docKind === 'informational_only' || docKind === 'clarification') {
-            return null;
-          }
-          const description = line.description || line.itemName || '';
-          const enriched = enrichIntakeServiceLineNotes({
-            description,
-            itemName: line.itemName || '',
-            category: line.category || '',
-            notes: line.notes || '',
-            fieldAssemblyHint: line.fieldAssembly === true,
-          });
-          const semanticTags = [...enriched.semanticTags];
-          const lk = (line.lineKind || '').toLowerCase();
-          if (lk === 'modifier') semanticTags.push('gemini_line_kind_modifier');
-          if (lk === 'bundle') semanticTags.push('gemini_line_kind_bundle');
-          return {
-            roomName: normalizeRoomName(line.roomArea || 'General'),
-            category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
-            itemCode: line.itemCode || '',
-            itemName: line.itemName || description,
-            description,
-            quantity: parsePositiveNumber(line.quantity, 1),
-            unit: normalizeIntakeUnit(line.unit) || String(line.unit || 'EA').trim().toUpperCase() || 'EA',
-            notes: enriched.notes,
-            sourceReference: fileName,
-            laborIncluded: null,
-            materialIncluded: null,
-            confidence: 0.9,
-            parserTag: sourceType === 'pdf' ? 'gemini-pdf' : 'gemini-document',
-            warnings: [],
-            semanticTags: semanticTags.length ? Array.from(new Set(semanticTags)) : undefined,
-            bundleCandidates: detectBundleCandidates(description, line.category || ''),
-          };
-        })
-        .filter((line) => line !== null) as NormalizedIntakeLine[]
-    ).filter((line, index) => shouldKeepNormalizedLineFromService(line, index, heuristicMetadata));
+    const discardedLineSnapshots: IntakeDiscardedLineSnapshot[] = [];
+    const mappedBeforeClassifier: NormalizedIntakeLine[] = gemini.parsedLines
+      .map((line) => {
+        const docKind = String(line.documentLineKind || '').toLowerCase();
+        if (docKind === 'informational_only' || docKind === 'clarification') {
+          return null;
+        }
+        const description = line.description || line.itemName || '';
+        const enriched = enrichIntakeServiceLineNotes({
+          description,
+          itemName: line.itemName || '',
+          category: line.category || '',
+          notes: line.notes || '',
+          fieldAssemblyHint: line.fieldAssembly === true,
+        });
+        const combinedNotes = [line.notes || '', enriched.notes].filter(Boolean).join(' | ');
+        const reasoning = buildIntakeReasoningEnvelopeForLine({
+          description,
+          itemName: line.itemName || '',
+          category: line.category || '',
+          notes: combinedNotes,
+          geminiParserBlockType: line.parserBlockType,
+          geminiExtractionBucket: line.extractionBucket,
+          geminiRationale: line.rationale,
+        });
+        const noteHint = formatDiv10ReasoningNote(reasoning);
+        const finalNotes = [combinedNotes, noteHint].filter(Boolean).join(' | ');
+        const semanticTags = [...enriched.semanticTags];
+        if (noteHint) semanticTags.push('div10_install_intel');
+        const lk = (line.lineKind || '').toLowerCase();
+        if (lk === 'modifier') semanticTags.push('gemini_line_kind_modifier');
+        if (lk === 'bundle') semanticTags.push('gemini_line_kind_bundle');
+        return {
+          roomName: normalizeRoomName(line.roomArea || 'General'),
+          category: normalizeExtractedCategoryFromService(line.category, `${line.itemName} ${line.description}`),
+          itemCode: line.itemCode || '',
+          itemName: line.itemName || description,
+          description,
+          quantity: parsePositiveNumber(line.quantity, 1),
+          unit: normalizeIntakeUnit(line.unit) || String(line.unit || 'EA').trim().toUpperCase() || 'EA',
+          notes: finalNotes,
+          sourceReference: fileName,
+          laborIncluded: null,
+          materialIncluded: null,
+          confidence: 0.9,
+          parserTag: sourceType === 'pdf' ? 'gemini-pdf' : 'gemini-document',
+          warnings: [],
+          semanticTags: semanticTags.length ? Array.from(new Set(semanticTags)) : undefined,
+          bundleCandidates: detectBundleCandidates(description, line.category || ''),
+          reasoning,
+        };
+      })
+      .filter((line) => line !== null) as NormalizedIntakeLine[];
+
+    const geminiLines: NormalizedIntakeLine[] = [];
+    mappedBeforeClassifier.forEach((row, index) => {
+      if (shouldKeepNormalizedLineFromService(row, index, heuristicMetadata)) {
+        geminiLines.push(row);
+      } else {
+        const bt = row.reasoning?.parser_block_type ?? 'unknown';
+        discardedLineSnapshots.push({
+          descriptionPreview: (row.description || '').slice(0, 240),
+          parser_block_type: bt,
+          dropReason:
+            bt === 'commercial_term' || bt === 'subtotal' || bt === 'company_header' || bt === 'proposal_metadata'
+              ? `parser_block:${bt}`
+              : 'row_classifier',
+          reasoning: row.reasoning,
+        });
+      }
+    });
 
     const usableGeminiLines = geminiLines.filter((line) => line.description && line.quantity > 0);
     const normalizedLines = usableGeminiLines.length ? usableGeminiLines : fallbackLines;
@@ -1241,7 +1318,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         proposalDate: normalizeDateValueFromService(gemini.proposalDate),
         estimator: gemini.estimator,
         sourceFiles: [fileName],
-        assumptions: gemini.assumptions,
+        assumptions: mergeAssumptions(gemini.assumptions, inferBidReasoningAssumptionsFromDocumentText(extractedText)),
         pricingBasis: inferPricingBasis(extractedText, normalizedLines.map((line) => line.unit), gemini.pricingBasis),
       },
       heuristicMetadata,
@@ -1269,6 +1346,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       proposalAssist,
       aiSuggestions: aiSuggestionsDoc,
       ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines, aiSuggestionsDoc, intakeSettings),
+      discardedLineSnapshots: discardedLineSnapshots.length ? discardedLineSnapshots : undefined,
     };
     emitIntakeParseMetrics(out, parseStarted, intakeSettings);
     return out;

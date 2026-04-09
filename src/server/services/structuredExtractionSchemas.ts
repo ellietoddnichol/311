@@ -97,6 +97,16 @@ export const intakeGeminiResponseSchema = {
           rationale: { type: Type.STRING },
           evidenceText: { type: Type.STRING },
           requiresGroundingLine: { type: Type.BOOLEAN },
+          parserBlockType: {
+            type: Type.STRING,
+            description:
+              'Document block classification: company_header, proposal_metadata, scope_header, scope_item, scope_option, subtotal, commercial_term, inclusion_note, unknown',
+          },
+          extractionBucket: {
+            type: Type.STRING,
+            description:
+              'scope | commercial_term | alternate | assumption_signal | exclusion | hidden_scope_signal | unknown — commercial_term/assumption_signal rows must not appear in parsedLines; use assumptions instead',
+          },
         },
         required: ['description', 'quantity', 'unit'],
       },
