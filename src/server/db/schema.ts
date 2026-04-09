@@ -199,6 +199,13 @@ export function initEstimatorSchema(db: Database) {
     CREATE INDEX IF NOT EXISTS idx_bundle_items_v1_bundle ON bundle_items_v1(bundle_id);
     CREATE INDEX IF NOT EXISTS idx_line_modifiers_v1_line ON line_modifiers_v1(line_id);
     CREATE INDEX IF NOT EXISTS idx_project_files_v1_project ON project_files_v1(project_id);
+
+    CREATE TABLE IF NOT EXISTS intake_catalog_memory_v1 (
+      memory_key TEXT PRIMARY KEY,
+      catalog_item_id TEXT NOT NULL,
+      hit_count INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   const settingsExists = db.prepare('SELECT 1 FROM settings_v1 WHERE id = ?').get('global');
@@ -227,6 +234,15 @@ export function initEstimatorSchema(db: Database) {
   const hasDefaultLaborOverheadPercent = settingsColumns.some((column) => column.name === 'default_labor_overhead_percent');
   if (!hasDefaultLaborOverheadPercent) {
     db.exec('ALTER TABLE settings_v1 ADD COLUMN default_labor_overhead_percent REAL NOT NULL DEFAULT 5');
+  }
+
+  const settingsColsAutomation = db.prepare('PRAGMA table_info(settings_v1)').all() as Array<{ name: string }>;
+  if (!settingsColsAutomation.some((column) => column.name === 'intake_catalog_auto_apply_mode')) {
+    db.exec("ALTER TABLE settings_v1 ADD COLUMN intake_catalog_auto_apply_mode TEXT NOT NULL DEFAULT 'off'");
+  }
+  const settingsColsAutomation2 = db.prepare('PRAGMA table_info(settings_v1)').all() as Array<{ name: string }>;
+  if (!settingsColsAutomation2.some((column) => column.name === 'intake_catalog_tier_a_min_score')) {
+    db.exec('ALTER TABLE settings_v1 ADD COLUMN intake_catalog_tier_a_min_score REAL NOT NULL DEFAULT 0.82');
   }
 
   const takeoffColumns = db.prepare("PRAGMA table_info(takeoff_lines_v1)").all() as Array<{ name: string }>;
@@ -292,6 +308,16 @@ export function initEstimatorSchema(db: Database) {
   const hasProposalFormat = projectColumns.some((column) => column.name === 'proposal_format');
   if (!hasProposalFormat) {
     db.exec("ALTER TABLE projects_v1 ADD COLUMN proposal_format TEXT NOT NULL DEFAULT 'standard'");
+  }
+
+  const hasProposalIncludeCatalogImages = projectColumns.some((column) => column.name === 'proposal_include_catalog_images');
+  if (!hasProposalIncludeCatalogImages) {
+    db.exec('ALTER TABLE projects_v1 ADD COLUMN proposal_include_catalog_images INTEGER NOT NULL DEFAULT 0');
+  }
+
+  const projectCols2 = db.prepare('PRAGMA table_info(projects_v1)').all() as Array<{ name: string }>;
+  if (!projectCols2.some((column) => column.name === 'structured_assumptions_json')) {
+    db.exec("ALTER TABLE projects_v1 ADD COLUMN structured_assumptions_json TEXT NOT NULL DEFAULT '[]'");
   }
 
   db.exec("UPDATE projects_v1 SET job_conditions_json = '{}' WHERE job_conditions_json IS NULL OR trim(job_conditions_json) = ''");

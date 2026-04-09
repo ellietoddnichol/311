@@ -37,12 +37,12 @@ function ConfidencePill({ tier }: { tier: 'high' | 'medium' | 'low' }) {
         ? 'bg-amber-50 text-amber-900 ring-1 ring-amber-200/70'
         : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/80';
   const label = tier === 'high' ? 'High confidence' : tier === 'medium' ? 'Medium' : 'Low';
-  return <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}>{label}</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-[12px] font-medium ${cls}`}>{label}</span>;
 }
 
 function StatusPill({ status }: { status: IntakeApplicationStatus }) {
   if (status === 'suggested') {
-    return <span className="text-[10px] text-slate-500">Not confirmed</span>;
+    return <span className="text-[12px] text-slate-500">Not confirmed</span>;
   }
   const cls =
     status === 'accepted'
@@ -50,7 +50,7 @@ function StatusPill({ status }: { status: IntakeApplicationStatus }) {
       : status === 'replaced'
         ? 'bg-sky-700 text-white'
         : 'bg-slate-400 text-white';
-  return <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>{applicationStatusLabel(status)}</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-[12px] font-semibold ${cls}`}>{applicationStatusLabel(status)}</span>;
 }
 
 function ScopeChip({ bucket }: { bucket: IntakeScopeBucket }) {
@@ -61,7 +61,7 @@ function ScopeChip({ bucket }: { bucket: IntakeScopeBucket }) {
         ? 'bg-sky-50 text-sky-900 ring-sky-200/60'
         : 'bg-slate-50 text-slate-700 ring-slate-200/60';
   return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${muted}`} title={bucket}>
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-[12px] font-medium ring-1 ${muted}`} title={bucket}>
       {scopeBucketShortLabel(bucket)}
     </span>
   );
@@ -126,7 +126,10 @@ export interface IntakeEstimateReviewPanelProps {
   onReplaceLineWithCatalogId: (fingerprint: string, catalogItemId: string) => void;
   onIgnoreLine: (fingerprint: string) => void;
   onBulkAcceptHighConfidence: () => void;
+  /** Accept matcher Tier A rows and Tier B rows that already have a strong catalog match. */
+  onBulkAcceptTierAStrongB: () => void;
   onBulkIgnoreLowConfidence: () => void;
+  onBulkAcceptAllSuggestedProjectModifiers: () => void;
   onOpenCatalogPicker: (fingerprint: string) => void;
   jobConditionById: Record<string, IntakeApplicationStatus>;
   onSetJobConditionStatus: (id: string, status: IntakeApplicationStatus) => void;
@@ -148,7 +151,9 @@ export function IntakeEstimateReviewPanel({
   onReplaceLineWithCatalogId,
   onIgnoreLine,
   onBulkAcceptHighConfidence,
+  onBulkAcceptTierAStrongB,
   onBulkIgnoreLowConfidence,
+  onBulkAcceptAllSuggestedProjectModifiers,
   onOpenCatalogPicker,
   jobConditionById,
   onSetJobConditionStatus,
@@ -217,9 +222,9 @@ export function IntakeEstimateReviewPanel({
           isSelected ? 'border-sky-400 bg-sky-50/80 ring-1 ring-sky-300/60' : 'border-slate-200 bg-white'
         }`}
       >
-        <div className="font-mono text-[11px] font-semibold text-slate-900">{c.sku}</div>
-        <div className="text-[11px] leading-snug text-slate-800 line-clamp-2">{c.description}</div>
-        {meta ? <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{meta}</div> : null}
+        <div className="font-mono text-[12px] font-semibold text-slate-900">{c.sku}</div>
+        <div className="text-[12px] leading-snug text-slate-800 line-clamp-2">{c.description}</div>
+        {meta ? <div className="mt-0.5 text-[12px] text-slate-500 line-clamp-1">{meta}</div> : null}
       </button>
     );
   }
@@ -244,17 +249,31 @@ export function IntakeEstimateReviewPanel({
         <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-4">
           {/* Left: source */}
           <div className="min-w-0 flex-1 lg:max-w-[min(100%,280px)]">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Source line</p>
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Source line</p>
             <p className="mt-0.5 text-sm font-medium leading-snug text-slate-900">{linePreviewText(fp)}</p>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               <ScopeChip bucket={row.scopeBucket} />
+              {row.catalogAutoApplyTier ? (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ring-1 ${
+                    row.catalogAutoApplyTier === 'A'
+                      ? 'bg-emerald-50 text-emerald-900 ring-emerald-200/80'
+                      : row.catalogAutoApplyTier === 'B'
+                        ? 'bg-amber-50 text-amber-950 ring-amber-200/70'
+                        : 'bg-slate-100 text-slate-600 ring-slate-200/80'
+                  }`}
+                  title="Automation tier: A = eligible for auto-link / pre-accept; B = suggest; C = needs review"
+                >
+                  Tier {row.catalogAutoApplyTier}
+                </span>
+              ) : null}
               {needsReview ? (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-950 ring-1 ring-amber-200/80">
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[12px] font-semibold text-amber-950 ring-1 ring-amber-200/80">
                   Review needed
                 </span>
               ) : null}
             </div>
-            {hint ? <p className="mt-1 text-[10px] leading-snug text-slate-500">{hint}</p> : null}
+            {hint ? <p className="mt-1 text-[12px] leading-snug text-slate-500">{hint}</p> : null}
             <p className="mt-1 font-mono text-[9px] text-slate-400" title={fp}>
               {fp.slice(0, 12)}…
             </p>
@@ -263,11 +282,11 @@ export function IntakeEstimateReviewPanel({
           {/* Middle: match */}
           <div className="min-w-0 flex-[1.4] border-t border-slate-100 pt-2 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Current choice</p>
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Current choice</p>
               {st.applicationStatus === 'accepted' || st.applicationStatus === 'replaced' ? (
                 <StatusPill status={st.applicationStatus} />
               ) : (
-                <span className="text-[10px] text-slate-500">Not confirmed</span>
+                <span className="text-[12px] text-slate-500">Not confirmed</span>
               )}
             </div>
             {match && selectedId ? (
@@ -275,7 +294,7 @@ export function IntakeEstimateReviewPanel({
                 <div className="mt-1 font-mono text-sm font-semibold text-slate-900">{catItem?.sku ?? match.sku}</div>
                 <div className="text-[12px] leading-snug text-slate-800">{catItem?.description ?? match.description}</div>
                 {catItem ? (
-                  <p className="mt-0.5 text-[10px] text-slate-500">
+                  <p className="mt-0.5 text-[12px] text-slate-500">
                     {[catItem.category, catItem.manufacturer].filter(Boolean).join(' · ') || null}
                   </p>
                 ) : null}
@@ -290,16 +309,16 @@ export function IntakeEstimateReviewPanel({
                     </span>
                   ))}
                 </div>
-                <p className="mt-1 text-[11px] leading-snug text-slate-600 line-clamp-2">{shortMatchReason(match.reason)}</p>
+                <p className="mt-1 text-[12px] leading-snug text-slate-600 line-clamp-2">{shortMatchReason(match.reason)}</p>
                 <button
                   type="button"
-                  className="mt-1 text-[10px] font-medium text-sky-700 hover:underline"
+                  className="mt-1 text-[12px] font-medium text-sky-700 hover:underline"
                   onClick={() => setOpenTechnicalFp((cur) => (cur === fp ? null : fp))}
                 >
                   {openTechnicalFp === fp ? 'Hide technical details' : 'Technical details (score, full reason)'}
                 </button>
                 {openTechnicalFp === fp ? (
-                  <div className="mt-1 rounded border border-slate-100 bg-slate-50/90 px-2 py-1.5 font-mono text-[10px] text-slate-600">
+                  <div className="mt-1 rounded border border-slate-100 bg-slate-50/90 px-2 py-1.5 font-mono text-[12px] text-slate-600">
                     <div>Score: {formatNumberSafe(match.score, 3)}</div>
                     <div className="mt-0.5 whitespace-pre-wrap break-words">{match.reason}</div>
                   </div>
@@ -311,7 +330,7 @@ export function IntakeEstimateReviewPanel({
 
             {row.topCatalogCandidates.filter((c) => c.catalogItemId !== selectedId).length > 0 ? (
               <div className="mt-2 border-t border-slate-100 pt-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Other likely matches</p>
+                <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Other likely matches</p>
                 <div className="mt-1 grid gap-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                   {row.topCatalogCandidates
                     .filter((c) => c.catalogItemId !== selectedId)
@@ -326,13 +345,13 @@ export function IntakeEstimateReviewPanel({
           <div className="flex shrink-0 flex-col gap-1.5 border-t border-slate-100 pt-2 lg:w-[140px] lg:border-l lg:border-t-0 lg:pl-3 lg:pt-0">
             <button
               type="button"
-              className="h-8 rounded-md bg-slate-900 px-3 text-center text-[11px] font-semibold text-white shadow-sm hover:bg-slate-800"
+              className="h-8 rounded-md bg-slate-900 px-3 text-center text-[12px] font-semibold text-white shadow-sm hover:bg-slate-800"
               onClick={() => onAcceptLine(fp)}
             >
               Accept
             </button>
             <details className="group/replace rounded-md border border-slate-200 bg-slate-50/80">
-              <summary className="flex h-8 cursor-pointer list-none items-center justify-center gap-1 rounded-md px-2 text-[11px] font-medium text-slate-800 hover:bg-slate-100 [&::-webkit-details-marker]:hidden">
+              <summary className="flex h-8 cursor-pointer list-none items-center justify-center gap-1 rounded-md px-2 text-[12px] font-medium text-slate-800 hover:bg-slate-100 [&::-webkit-details-marker]:hidden">
                 Replace
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500 transition group-open/replace:rotate-180" />
               </summary>
@@ -343,7 +362,7 @@ export function IntakeEstimateReviewPanel({
                 </div>
                 <button
                   type="button"
-                  className="w-full rounded border border-slate-200 bg-white py-1.5 text-[10px] font-medium text-slate-700 hover:bg-slate-50"
+                  className="w-full rounded border border-slate-200 bg-white py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50"
                   onClick={() => {
                     onOpenCatalogPicker(fp);
                   }}
@@ -354,7 +373,7 @@ export function IntakeEstimateReviewPanel({
             </details>
             <button
               type="button"
-              className="py-1.5 text-center text-[11px] font-medium text-red-700/90 hover:text-red-800 hover:underline"
+              className="py-1.5 text-center text-[12px] font-medium text-red-700/90 hover:text-red-800 hover:underline"
               onClick={() => onIgnoreLine(fp)}
             >
               Ignore
@@ -369,9 +388,9 @@ export function IntakeEstimateReviewPanel({
     <div className="mt-4 space-y-3">
       {/* Prominent draft summary — always visible */}
       <div className="rounded-lg border border-amber-200/90 bg-gradient-to-r from-amber-50/90 to-white px-3 py-2.5 shadow-sm">
-        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-amber-950/90">Draft estimate basis</p>
-        <p className="text-[10px] text-amber-900/80">Preliminary only — not final bid pricing.</p>
-        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-slate-800">
+        <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-amber-950/90">Draft estimate basis</p>
+        <p className="text-[12px] text-amber-900/80">Preliminary only — not final bid pricing.</p>
+        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-slate-800">
           <span>
             <span className="text-slate-500">Accepted lines</span>{' '}
             <span className="font-bold tabular-nums text-slate-900">{basisSummary.acceptedPricedLines}</span>
@@ -402,12 +421,12 @@ export function IntakeEstimateReviewPanel({
           </span>
         </div>
         {aiSuggestions?.pricingModeSuggested ? (
-          <button type="button" className="mt-2 h-7 rounded-md border border-amber-300/80 bg-white px-2 text-[10px] font-semibold text-amber-950 hover:bg-amber-50" onClick={onApplySuggestedPricingMode}>
+          <button type="button" className="mt-2 h-7 rounded-md border border-amber-300/80 bg-white px-2 text-[12px] font-semibold text-amber-950 hover:bg-amber-50" onClick={onApplySuggestedPricingMode}>
             Apply suggested pricing mode to project draft
           </button>
         ) : null}
         {basisSummary.warnings.length > 0 ? (
-          <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[10px] text-amber-950/90">
+          <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[12px] text-amber-950/90">
             {basisSummary.warnings.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
@@ -418,17 +437,24 @@ export function IntakeEstimateReviewPanel({
       <details className="group rounded-lg border border-slate-200 bg-white open:shadow-sm" open>
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">Review suggested matches</p>
-            <p className="text-[11px] text-slate-600">Confirm or change each catalog link before creating the project.</p>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-600">Review suggested matches</p>
+            <p className="text-[12px] text-slate-600">Confirm or change each catalog link before creating the project.</p>
           </div>
           <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180" />
         </summary>
         <div className="border-t border-slate-100 px-3 pb-3 pt-2">
           <div className="mb-2 flex flex-wrap gap-2">
-            <button type="button" className="h-8 rounded-md bg-slate-900 px-3 text-[11px] font-semibold text-white hover:bg-slate-800" onClick={onBulkAcceptHighConfidence}>
+            <button type="button" className="h-8 rounded-md bg-slate-900 px-3 text-[12px] font-semibold text-white hover:bg-slate-800" onClick={onBulkAcceptHighConfidence}>
               Accept all strong matches
             </button>
-            <button type="button" className="ui-btn-secondary h-8 px-3 text-[11px]" onClick={onBulkIgnoreLowConfidence}>
+            <button
+              type="button"
+              className="h-8 rounded-md border border-slate-300 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-50"
+              onClick={onBulkAcceptTierAStrongB}
+            >
+              Accept Tier A + strong Tier B
+            </button>
+            <button type="button" className="ui-btn-secondary h-8 px-3 text-[12px]" onClick={onBulkIgnoreLowConfidence}>
               Ignore weak matches (score &lt; {ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD})
             </button>
           </div>
@@ -436,7 +462,7 @@ export function IntakeEstimateReviewPanel({
             {sectionGroups.map((section) => (
               <details key={section.key} className="group/sec rounded-md border border-slate-100 bg-slate-50/40" open={section.defaultOpen}>
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-1.5 text-left [&::-webkit-details-marker]:hidden">
-                  <span className="text-[11px] font-bold text-slate-800">
+                  <span className="text-[12px] font-bold text-slate-800">
                     {section.title}
                     <span className="ml-1.5 font-normal text-slate-500">({section.rows.length})</span>
                   </span>
@@ -453,13 +479,13 @@ export function IntakeEstimateReviewPanel({
         <details className="group rounded-lg border border-slate-200 bg-white">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">Suggested job conditions</p>
-              <p className="text-[11px] text-slate-600">Document-derived conditions — suggestion only until you accept.</p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-600">Suggested job conditions</p>
+              <p className="text-[12px] text-slate-600">Document-derived conditions — suggestion only until you accept.</p>
             </div>
             <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180" />
           </summary>
           <div className="space-y-2 border-t border-slate-100 px-3 pb-3 pt-2">
-            <button type="button" className="ui-btn-secondary mb-2 h-8 px-3 text-[11px]" onClick={onApplyAllSuggestedJobConditions}>
+            <button type="button" className="ui-btn-secondary mb-2 h-8 px-3 text-[12px]" onClick={onApplyAllSuggestedJobConditions}>
               Apply all suggested job conditions to draft
             </button>
             {jobPatches.map((jc) => {
@@ -467,7 +493,7 @@ export function IntakeEstimateReviewPanel({
               return (
                 <div key={jc.id} className="flex flex-wrap items-start justify-between gap-2 rounded border border-slate-100 bg-slate-50/80 p-2">
                   <div className="min-w-0 flex-1">
-                    <label className="flex items-start gap-2 text-[11px]">
+                    <label className="flex items-start gap-2 text-[12px]">
                       <input type="checkbox" checked={jc.suggestedState} readOnly className="mt-0.5" aria-label="Suggested state" />
                       <span>
                         <span className="font-semibold text-slate-900">{jc.label}</span>
@@ -485,10 +511,10 @@ export function IntakeEstimateReviewPanel({
                     </div>
                   </div>
                   <div className="flex gap-1">
-                    <button type="button" className="ui-btn-secondary h-7 px-2 text-[10px]" onClick={() => onSetJobConditionStatus(jc.id, 'accepted')}>
+                    <button type="button" className="ui-btn-secondary h-7 px-2 text-[12px]" onClick={() => onSetJobConditionStatus(jc.id, 'accepted')}>
                       Accept
                     </button>
-                    <button type="button" className="h-7 rounded border border-slate-200 bg-white px-2 text-[10px]" onClick={() => onSetJobConditionStatus(jc.id, 'ignored')}>
+                    <button type="button" className="h-7 rounded border border-slate-200 bg-white px-2 text-[12px]" onClick={() => onSetJobConditionStatus(jc.id, 'ignored')}>
                       Ignore
                     </button>
                   </div>
@@ -503,20 +529,23 @@ export function IntakeEstimateReviewPanel({
         <details className="group rounded-lg border border-emerald-200/80 bg-emerald-50/20">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-900">Suggested project modifiers</p>
-              <p className="text-[11px] text-emerald-950/80">Catalog modifiers (project scope) — not line-level pricing adders in this step.</p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-emerald-900">Suggested project modifiers</p>
+              <p className="text-[12px] text-emerald-950/80">Catalog modifiers (project scope) — not line-level pricing adders in this step.</p>
             </div>
             <ChevronDown className="h-4 w-4 shrink-0 text-emerald-800 transition group-open:rotate-180" />
           </summary>
           <div className="space-y-2 border-t border-emerald-100 px-3 pb-3 pt-2">
+            <button type="button" className="ui-btn-secondary mb-2 h-8 px-3 text-[11px]" onClick={onBulkAcceptAllSuggestedProjectModifiers}>
+              Accept all suggested project modifiers
+            </button>
             {projectModIds.map((modId) => {
               const st = projectModifierById[modId] ?? 'suggested';
               const name = modifierLabel.get(modId) || modId;
               return (
                 <div key={modId} className="flex flex-wrap items-center justify-between gap-2 rounded border border-emerald-100 bg-white p-2">
                   <div>
-                    <p className="text-[11px] font-semibold text-slate-900">{name}</p>
-                    <p className="text-[10px] text-slate-500">Matcher / catalog mapping</p>
+                    <p className="text-[12px] font-semibold text-slate-900">{name}</p>
+                    <p className="text-[12px] text-slate-500">Matcher / catalog mapping</p>
                     <span
                       className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[9px] font-semibold ${
                         st === 'accepted' ? 'bg-emerald-600 text-white' : st === 'ignored' ? 'bg-slate-300 text-slate-800' : 'bg-slate-200 text-slate-700'
@@ -526,10 +555,10 @@ export function IntakeEstimateReviewPanel({
                     </span>
                   </div>
                   <div className="flex gap-1">
-                    <button type="button" className="ui-btn-secondary h-7 px-2 text-[10px]" onClick={() => onSetProjectModifierStatus(modId, 'accepted')}>
+                    <button type="button" className="ui-btn-secondary h-7 px-2 text-[12px]" onClick={() => onSetProjectModifierStatus(modId, 'accepted')}>
                       Accept
                     </button>
-                    <button type="button" className="h-7 rounded border border-slate-200 bg-white px-2 text-[10px]" onClick={() => onSetProjectModifierStatus(modId, 'ignored')}>
+                    <button type="button" className="h-7 rounded border border-slate-200 bg-white px-2 text-[12px]" onClick={() => onSetProjectModifierStatus(modId, 'ignored')}>
                       Ignore
                     </button>
                   </div>

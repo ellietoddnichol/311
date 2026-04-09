@@ -1,5 +1,5 @@
 import { getEstimatorDb } from '../db/connection.ts';
-import { CatalogSyncStatusRecord, SettingsRecord } from '../../shared/types/estimator.ts';
+import { CatalogSyncStatusRecord, SettingsRecord, type IntakeCatalogAutoApplyMode } from '../../shared/types/estimator.ts';
 import { sanitizeProposalSettings } from '../../shared/utils/proposalDefaults.ts';
 
 type SettingsDbRow = {
@@ -20,8 +20,22 @@ type SettingsDbRow = {
   proposal_exclusions: string | null;
   proposal_clarifications: string | null;
   proposal_acceptance_label: string | null;
+  intake_catalog_auto_apply_mode: string | null;
+  intake_catalog_tier_a_min_score: number | null;
   updated_at: string;
 };
+
+function coerceIntakeCatalogAutoApplyMode(raw: unknown): IntakeCatalogAutoApplyMode {
+  const s = String(raw ?? 'off').trim();
+  if (s === 'preselect_only' || s === 'auto_link_tier_a') return s;
+  return 'off';
+}
+
+function coerceIntakeTierAMinScore(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 0.82;
+  return Math.min(0.99, Math.max(0.5, n));
+}
 
 type CatalogSyncStatusDbRow = {
   id: string;
@@ -67,6 +81,8 @@ function mapSettingsRow(row: SettingsDbRow): SettingsRecord {
     proposalExclusions: row.proposal_exclusions,
     proposalClarifications: row.proposal_clarifications,
     proposalAcceptanceLabel: row.proposal_acceptance_label,
+    intakeCatalogAutoApplyMode: coerceIntakeCatalogAutoApplyMode(row.intake_catalog_auto_apply_mode),
+    intakeCatalogTierAMinScore: coerceIntakeTierAMinScore(row.intake_catalog_tier_a_min_score),
     updatedAt: row.updated_at
   }) as SettingsRecord;
 }
@@ -83,15 +99,24 @@ export function updateSettings(input: Partial<SettingsRecord>): SettingsRecord {
     ...input,
     id: 'global',
     updatedAt: new Date().toISOString(),
+    intakeCatalogAutoApplyMode: coerceIntakeCatalogAutoApplyMode(
+      input.intakeCatalogAutoApplyMode ?? current.intakeCatalogAutoApplyMode
+    ),
+    intakeCatalogTierAMinScore: coerceIntakeTierAMinScore(
+      input.intakeCatalogTierAMinScore ?? current.intakeCatalogTierAMinScore
+    ),
   };
   const next = sanitizeProposalSettings(merged) as SettingsRecord;
   next.updatedAt = merged.updatedAt;
+  next.intakeCatalogAutoApplyMode = merged.intakeCatalogAutoApplyMode;
+  next.intakeCatalogTierAMinScore = merged.intakeCatalogTierAMinScore;
 
   getEstimatorDb().prepare(`
     UPDATE settings_v1 SET
       company_name = ?, company_address = ?, company_phone = ?, company_email = ?, logo_url = ?, default_labor_rate_per_hour = ?,
       default_overhead_percent = ?, default_profit_percent = ?, default_tax_percent = ?, default_labor_burden_percent = ?, default_labor_overhead_percent = ?,
-      proposal_intro = ?, proposal_terms = ?, proposal_exclusions = ?, proposal_clarifications = ?, proposal_acceptance_label = ?, updated_at = ?
+      proposal_intro = ?, proposal_terms = ?, proposal_exclusions = ?, proposal_clarifications = ?, proposal_acceptance_label = ?,
+      intake_catalog_auto_apply_mode = ?, intake_catalog_tier_a_min_score = ?, updated_at = ?
     WHERE id = 'global'
   `).run(
     next.companyName,
@@ -110,6 +135,8 @@ export function updateSettings(input: Partial<SettingsRecord>): SettingsRecord {
     next.proposalExclusions,
     next.proposalClarifications,
     next.proposalAcceptanceLabel,
+    next.intakeCatalogAutoApplyMode,
+    next.intakeCatalogTierAMinScore,
     next.updatedAt
   );
 

@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { EstimateSummary, ProjectRecord, SettingsRecord, TakeoffLineRecord } from '../../shared/types/estimator';
+import { isDisplayableCatalogImageUrl } from '../../shared/utils/catalogImageUrl';
 import {
   buildInvestmentBreakdownRows,
   buildProposalScheduleSections,
@@ -8,14 +9,33 @@ import {
 import { DEFAULT_PROPOSAL_ACCEPTANCE_LABEL, DEFAULT_PROPOSAL_CLARIFICATIONS, DEFAULT_PROPOSAL_EXCLUSIONS, DEFAULT_PROPOSAL_INTRO, DEFAULT_PROPOSAL_TERMS } from '../../shared/utils/proposalDefaults';
 import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat';
 
+function ProposalLineThumb({ src, compact }: { src: string; compact: boolean }) {
+  const [bad, setBad] = useState(false);
+  const box = compact ? 'h-9 w-9' : 'h-11 w-11';
+  if (bad) {
+    return <span className={`block shrink-0 rounded border border-dashed border-slate-200 bg-slate-50 ${box}`} aria-hidden />;
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      className={`shrink-0 rounded border border-slate-200/90 bg-white object-contain ${box}`}
+      loading="lazy"
+      onError={() => setBad(true)}
+    />
+  );
+}
+
 interface Props {
   project: ProjectRecord;
   settings: SettingsRecord | null;
   lines: TakeoffLineRecord[];
   summary: EstimateSummary | null;
+  /** Catalog id → image URL for lines linked to catalog rows. */
+  catalogImageById?: ReadonlyMap<string, string> | null;
 }
 
-export function ProposalPreview({ project, settings, lines, summary }: Props) {
+export function ProposalPreview({ project, settings, lines, summary, catalogImageById = null }: Props) {
   if (!summary) return <div className="text-sm text-slate-500">No estimate data yet.</div>;
 
   const fmt = project.proposalFormat || 'standard';
@@ -36,9 +56,18 @@ export function ProposalPreview({ project, settings, lines, summary }: Props) {
   const clarificationLines = splitProposalTextLines(settings?.proposalClarifications || DEFAULT_PROPOSAL_CLARIFICATIONS);
 
   const proposalSections = useMemo(
-    () => buildProposalScheduleSections(lines, showMaterial, showLabor, summary.conditionLaborHoursMultiplier || 1),
-    [lines, showLabor, showMaterial, summary.conditionLaborHoursMultiplier]
+    () =>
+      buildProposalScheduleSections(
+        lines,
+        showMaterial,
+        showLabor,
+        summary.conditionLaborHoursMultiplier || 1,
+        catalogImageById
+      ),
+    [catalogImageById, lines, showLabor, showMaterial, summary.conditionLaborHoursMultiplier]
   );
+
+  const showLineImages = !isExecutive && project.proposalIncludeCatalogImages;
 
   const investmentRows = useMemo(
     () => buildInvestmentBreakdownRows(summary, pricingMode),
@@ -78,7 +107,13 @@ export function ProposalPreview({ project, settings, lines, summary }: Props) {
         ? 'Scope rollups by category. Line detail lives in the working estimate.'
         : 'Quantities and descriptions are listed by scope. Section totals are direct catalog material + labor; taxes and markups are itemized in the investment summary below.';
 
-  const lineGrid = showLineAmounts ? 'grid-cols-[1fr_auto_auto]' : 'grid-cols-[1fr_auto]';
+  const lineGrid = showLineAmounts
+    ? showLineImages
+      ? 'grid-cols-[2.625rem_1fr_auto_auto]'
+      : 'grid-cols-[1fr_auto_auto]'
+    : showLineImages
+      ? 'grid-cols-[2.625rem_1fr_auto]'
+      : 'grid-cols-[1fr_auto]';
 
   return (
     <article
@@ -168,17 +203,32 @@ export function ProposalPreview({ project, settings, lines, summary }: Props) {
                   <div
                     className={`mt-3 grid ${lineGrid} gap-x-6 border-b border-slate-100 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400`}
                   >
+                    {showLineImages ? <span className="sr-only">Image</span> : null}
                     <span>Item</span>
                     {showLineAmounts ? <span className="text-right">Ext.</span> : null}
                     <span className="text-right">Qty</span>
                   </div>
                   {section.items.map((item) => {
                     const ext = Number((item.materialCost + item.laborCost).toFixed(2));
+                    const thumbSrc =
+                      item.imageUrl && isDisplayableCatalogImageUrl(item.imageUrl) ? item.imageUrl : null;
                     return (
                       <div
                         key={item.id}
                         className={`proposal-line-item grid ${lineGrid} gap-x-6 border-b border-slate-100 ${isCondensed ? 'py-1.5' : 'py-2.5'}`}
                       >
+                        {showLineImages ? (
+                          <div className="flex items-start justify-center">
+                            {thumbSrc ? (
+                              <ProposalLineThumb src={thumbSrc} compact={isCondensed} />
+                            ) : (
+                              <span
+                                className={`block shrink-0 rounded border border-dashed border-slate-200 bg-slate-50 ${isCondensed ? 'h-9 w-9' : 'h-11 w-11'}`}
+                                aria-hidden
+                              />
+                            )}
+                          </div>
+                        ) : null}
                         <div className="min-w-0 pr-2 leading-snug text-slate-800">
                           <p className="font-medium text-slate-900">{item.description}</p>
                           {item.subtitle ? (
@@ -226,17 +276,6 @@ export function ProposalPreview({ project, settings, lines, summary }: Props) {
           <h2 className={sectionHeadingClass}>Additional notes</h2>
           <p className={`max-w-[42rem] whitespace-pre-wrap text-[14px] leading-[1.65] text-slate-600 ${isCondensed ? 'mt-3 text-[12px]' : 'mt-5'}`}>
             {project.specialNotes}
-          </p>
-        </section>
-      ) : null}
-
-      {pricingMode === 'material_only' && (summary.laborCompanionProposalTotal ?? 0) > 0 && summary.totalLaborHours > 0 ? (
-        <section className={`${secY} proposal-section proposal-avoid-break`}>
-          <h2 className={sectionHeadingClass}>Subcontractor labor (separate scope)</h2>
-          <p className="mt-4 max-w-[42rem] text-[13px] leading-relaxed text-slate-600">
-            This proposal total reflects <strong>material scope only</strong>. For the same quantities, loaded subcontractor installation is estimated at{' '}
-            <strong className="tabular-nums text-slate-900">{formatCurrencySafe(summary.laborCompanionProposalTotal)}</strong>{' '}
-            ({formatNumberSafe(summary.totalLaborHours, 1)} hr), including sub burden, labor overhead, and labor profit on labor only.
           </p>
         </section>
       ) : null}

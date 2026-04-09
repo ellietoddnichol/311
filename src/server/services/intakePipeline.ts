@@ -2,7 +2,7 @@ import * as xlsx from 'xlsx';
 import { randomUUID } from 'crypto';
 import { parse as parseCsv } from 'csv-parse/sync';
 import type { CatalogItem } from '../../types.ts';
-import type { ModifierRecord } from '../../shared/types/estimator.ts';
+import type { ModifierRecord, SettingsRecord } from '../../shared/types/estimator.ts';
 import type {
   IntakeAiSuggestions,
   IntakeParseRequest,
@@ -26,6 +26,7 @@ import { classifyIntakeSourceType, deriveDocumentSourceKind } from './fileClassi
 import { extractDocumentWithGemini, extractSpreadsheetWithGemini } from './geminiExtractionService.ts';
 import { buildIntakeAiSuggestionsFromGemini } from './intakeAiSuggestions.ts';
 import { getErrorMessage } from '../../shared/utils/errorMessage.ts';
+import { getSettings } from '../repos/settingsRepo.ts';
 import {
   coerceSafeProjectName,
   isPlausibleProjectTitle,
@@ -36,7 +37,11 @@ import {
   extractMetadataFromText as extractMetadataFromTextFromService,
   normalizeDateValue as normalizeDateValueFromService,
 } from './metadataExtractorService.ts';
-import { buildRoomCandidates as buildRoomCandidatesFromService, toReviewLines as toReviewLinesFromService } from './matchPreparationService.ts';
+import {
+  buildRoomCandidates as buildRoomCandidatesFromService,
+  finalizeIntakeReviewLines,
+  toReviewLines as toReviewLinesFromService,
+} from './matchPreparationService.ts';
 import { classifyParsedChunk as classifyParsedChunkFromService, normalizeExtractedCategory as normalizeExtractedCategoryFromService, shouldKeepNormalizedLine as shouldKeepNormalizedLineFromService } from './rowClassifierService.ts';
 import { parseSpreadsheetInput, extractSpreadsheetStructuredMetadata, type NormalizedIntakeLine as NormalizedIntakeLineFromService } from './spreadsheetInterpreterService.ts';
 import { detectBundleCandidates } from './intake/normalizer.ts';
@@ -887,7 +892,8 @@ function attachEstimateDraft(
   catalog: CatalogItem[],
   modifiers: ModifierRecord[],
   reviewLines: IntakeReviewLine[],
-  aiSuggestions?: IntakeAiSuggestions
+  aiSuggestions?: IntakeAiSuggestions | null,
+  intakeSettings?: SettingsRecord | null
 ): Pick<IntakeParseResult, 'estimateDraft'> {
   if (!matchCatalog || !catalog.length) return {};
   const estimateDraft = buildIntakeEstimateDraft({
@@ -895,8 +901,43 @@ function attachEstimateDraft(
     catalog,
     modifiers,
     aiSuggestions: aiSuggestions ?? null,
+    intakeAutomation: intakeSettings
+      ? { mode: intakeSettings.intakeCatalogAutoApplyMode, tierAMinScore: intakeSettings.intakeCatalogTierAMinScore }
+      : undefined,
   });
   return estimateDraft ? { estimateDraft } : {};
+}
+
+function emitIntakeParseMetrics(result: IntakeParseResult, started: number, intakeSettings: SettingsRecord) {
+  const lines = result.reviewLines;
+  const tierCounts = { A: 0, B: 0, C: 0 };
+  for (const l of lines) {
+    const k = l.catalogAutoApplyTier || 'C';
+    if (k === 'A' || k === 'B' || k === 'C') tierCounts[k] += 1;
+  }
+  const autoLinked = lines.filter((l) => l.catalogAutoLinked).length;
+  const draft = result.estimateDraft;
+  let draftPreAcceptedLines = 0;
+  if (draft) {
+    for (const row of draft.lineSuggestions) {
+      if (row.applicationStatus === 'accepted') draftPreAcceptedLines += 1;
+    }
+  }
+  console.log(
+    JSON.stringify({
+      event: 'intake_parse_complete',
+      sourceType: result.sourceType,
+      sourceKind: result.sourceKind,
+      lineCount: lines.length,
+      tierCounts,
+      autoLinkedCatalogLines: autoLinked,
+      draftPreAcceptedLines,
+      automationMode: intakeSettings.intakeCatalogAutoApplyMode,
+      tierAMinScore: intakeSettings.intakeCatalogTierAMinScore,
+      assumptionCount: result.projectMetadata?.assumptions?.length ?? 0,
+      durationMs: Date.now() - started,
+    })
+  );
 }
 
 function buildDiagnostics(sourceKind: IntakeSourceKind, parserStrategy: string, metadata: IntakeProjectMetadata, reviewLines: IntakeReviewLine[], warnings: string[]) {
@@ -920,6 +961,13 @@ function deriveSourceKindFromDocument(fileName: string, mimeType: string, text: 
 }
 
 export async function parseIntakeRequest(input: IntakeParseRequest): Promise<IntakeParseResult> {
+  const parseStarted = Date.now();
+  const intakeSettings = getSettings();
+  const intakeAutomation = {
+    mode: intakeSettings.intakeCatalogAutoApplyMode,
+    tierAMinScore: intakeSettings.intakeCatalogTierAMinScore,
+  };
+
   const fileName = asText(input.fileName) || 'upload';
   const mimeType = asText(input.mimeType) || 'application/octet-stream';
   const sourceType = classifyIntakeSourceType(fileName, mimeType, input.sourceType);
@@ -940,12 +988,13 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       const fallbackLines = detectScopeLinesFromText(fallbackText, fileName);
       const metadata = mergeResolvedMetadataFromService(extractMetadataFromTextFromService(fallbackText), structuredMetadata, ['spreadsheet-fallback', 'text-heuristics']);
       const reviewLines = toReviewLinesFromService(fallbackLines as unknown as NormalizedIntakeLineFromService[], catalog, matchCatalog, bundles);
+      finalizeIntakeReviewLines(reviewLines, intakeAutomation);
       const proposalAssist = buildProposalAssist({
         metadata,
         assumptions: metadata.assumptions,
         lineDescriptions: reviewLines.map((line) => line.description),
       });
-      return {
+      const out: IntakeParseResult = {
         sourceType,
         sourceKind: 'spreadsheet-unstructured',
         project: metadata,
@@ -956,8 +1005,10 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         warnings,
         diagnostics: buildDiagnostics('spreadsheet-unstructured', 'spreadsheet-fallback', metadata, reviewLines, warnings),
         proposalAssist,
-        ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines),
+        ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines, null, intakeSettings),
       };
+      emitIntakeParseMetrics(out, parseStarted, intakeSettings);
+      return out;
     }
 
     let normalizedLines = deterministicRows as unknown as NormalizedIntakeLineFromService[];
@@ -1067,6 +1118,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         [...metadataSources, 'text-heuristics']
       );
       const reviewLines = toReviewLinesFromService(normalizedLines, catalog, matchCatalog, bundles);
+      finalizeIntakeReviewLines(reviewLines, intakeAutomation);
       const enrichedMetadata = mergeResolvedMetadataFromService(metadata, extractMetadataFromTextFromService(`${preludeText}\n${flattenedText}`), [...metadata.sources, 'text-heuristics']);
       const proposalAssist = buildProposalAssist({
         metadata: enrichedMetadata,
@@ -1075,7 +1127,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         geminiAssist: gemini.proposalAssist,
       });
       const aiSuggestions = buildIntakeAiSuggestionsFromGemini(gemini);
-      return {
+      const out: IntakeParseResult = {
         sourceType,
         sourceKind: parsedSheets[0]?.sourceKind || 'spreadsheet-row',
         project: enrichedMetadata,
@@ -1087,8 +1139,10 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
         diagnostics: buildDiagnostics(parsedSheets[0]?.sourceKind || 'spreadsheet-row', 'spreadsheet-structure+gemini', enrichedMetadata, reviewLines, warnings),
         proposalAssist,
         aiSuggestions,
-        ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines, aiSuggestions),
+        ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines, aiSuggestions, intakeSettings),
       };
+      emitIntakeParseMetrics(out, parseStarted, intakeSettings);
+      return out;
     } catch (error: unknown) {
       warnings.push(getErrorMessage(error, 'Gemini enrichment failed for spreadsheet parsing.'));
       const metadata = mergeResolvedMetadataFromService(structuredMetadata, extractMetadataFromTextFromService(`${preludeText}\n${flattenedText}`), ['spreadsheet-structure', 'text-heuristics']);
@@ -1187,13 +1241,15 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       ['gemini', 'text-heuristics']
     );
     const reviewLines = toReviewLinesFromService(normalizedLines as unknown as NormalizedIntakeLineFromService[], catalog, matchCatalog, bundles);
+    finalizeIntakeReviewLines(reviewLines, intakeAutomation);
     const proposalAssist = buildProposalAssist({
       metadata,
       assumptions: metadata.assumptions,
       lineDescriptions: reviewLines.map((line) => line.description),
       geminiAssist: gemini.proposalAssist,
     });
-    return {
+    const aiSuggestionsDoc = buildIntakeAiSuggestionsFromGemini(gemini);
+    const out: IntakeParseResult = {
       sourceType,
       sourceKind,
       project: metadata,
@@ -1204,18 +1260,22 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       warnings: Array.from(new Set(warnings)),
       diagnostics: buildDiagnostics(sourceKind, usableGeminiLines.length ? 'gemini-first' : 'gemini+fallback', metadata, reviewLines, warnings),
       proposalAssist,
-      aiSuggestions: buildIntakeAiSuggestionsFromGemini(gemini),
+      aiSuggestions: aiSuggestionsDoc,
+      ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines, aiSuggestionsDoc, intakeSettings),
     };
+    emitIntakeParseMetrics(out, parseStarted, intakeSettings);
+    return out;
   } catch (error: unknown) {
     warnings.push(getErrorMessage(error, 'Gemini extraction failed; fallback text parsing used.'));
     const metadata = mergeResolvedMetadataFromService({ ...heuristicMetadata, sourceFiles: [fileName] }, {}, ['text-heuristics']);
     const reviewLines = toReviewLinesFromService(fallbackLines as unknown as NormalizedIntakeLineFromService[], catalog, matchCatalog, bundles);
+    finalizeIntakeReviewLines(reviewLines, intakeAutomation);
     const proposalAssist = buildProposalAssist({
       metadata,
       assumptions: metadata.assumptions,
       lineDescriptions: reviewLines.map((line) => line.description),
     });
-    return {
+    const out: IntakeParseResult = {
       sourceType,
       sourceKind,
       project: metadata,
@@ -1226,7 +1286,9 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
       warnings: Array.from(new Set(warnings)),
       diagnostics: buildDiagnostics(sourceKind, 'text-fallback', metadata, reviewLines, warnings),
       proposalAssist,
-      ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines),
+      ...attachEstimateDraft(matchCatalog, catalog, modifiers, reviewLines, null, intakeSettings),
     };
+    emitIntakeParseMetrics(out, parseStarted, intakeSettings);
+    return out;
   }
 }

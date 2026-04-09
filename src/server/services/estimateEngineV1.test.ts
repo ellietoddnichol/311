@@ -43,7 +43,9 @@ function buildProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     notes: null,
     specialNotes: null,
     proposalIncludeSpecialNotes: false,
+    proposalIncludeCatalogImages: false,
     proposalFormat: 'standard',
+    structuredAssumptions: [],
     createdAt: '2026-03-19T00:00:00.000Z',
     updatedAt: '2026-03-19T00:00:00.000Z',
   };

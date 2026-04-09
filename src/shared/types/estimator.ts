@@ -1,4 +1,19 @@
 export type ProjectStatus = 'Draft' | 'Submitted' | 'Awarded' | 'Lost' | 'Archived';
+
+/** Company-wide intake automation: Tier A lines can be auto-linked or pre-accepted in estimate review. */
+export type IntakeCatalogAutoApplyMode = 'off' | 'preselect_only' | 'auto_link_tier_a';
+
+/** Machine-readable assumption captured at intake or added later (proposal / overview). */
+export interface ProjectStructuredAssumption {
+  id: string;
+  source: 'intake' | 'peer' | 'manual';
+  ruleId?: string;
+  text: string;
+  confidence: number;
+  appliedFields?: string[];
+  createdAt: string;
+}
+
 export type PricingMode = 'material_only' | 'labor_only' | 'labor_and_material';
 export type ProposalFormat = 'standard' | 'condensed' | 'schedule_with_amounts' | 'executive_summary';
 export type DeliveryPricingMode = 'included' | 'flat' | 'percent';
@@ -55,6 +70,10 @@ export interface ProjectJobConditions {
   remoteTravelMultiplier: number;
   scheduleCompression: boolean;
   scheduleCompressionMultiplier: number;
+  /** Performance / surety bond expected on this job (question in setup). */
+  performanceBondRequired: boolean;
+  /** Percent of base bid (material + labor subtotals before job-wide tax/O&P) included as a bond allowance adder. */
+  performanceBondPercent: number;
   estimateAdderPercent: number;
   estimateAdderAmount: number;
   /** Legacy / display; estimate duration uses 8 hr × installer count (no break deduction). */
@@ -69,6 +88,16 @@ export interface ProjectJobConditions {
   installerFieldSuppliesPercent: number;
   /** Legacy; not applied in estimate math. */
   installerFieldSuppliesFlat: number;
+}
+
+/** Suggested field values from a past project with the same client or GC (intake helper). */
+export interface PeerIntakeDefaultsResponse {
+  sourceProjectId: string | null;
+  matchedBy: 'client' | 'general_contractor' | null;
+  jobConditions: ProjectJobConditions | null;
+  selectedScopeCategories: string[] | null;
+  pricingMode: PricingMode | null;
+  taxPercent: number | null;
 }
 
 export interface ProjectRecord {
@@ -110,8 +139,12 @@ export interface ProjectRecord {
   specialNotes: string | null;
   /** When true, project special notes appear on proposal print/export. */
   proposalIncludeSpecialNotes: boolean;
+  /** When true, matched catalog product images appear next to scope lines on the proposal. */
+  proposalIncludeCatalogImages: boolean;
   /** Client-facing proposal layout (preview / print). */
   proposalFormat: ProposalFormat;
+  /** Intake / automation assumptions for estimators and proposal text. */
+  structuredAssumptions: ProjectStructuredAssumption[];
   createdAt: string;
   updatedAt: string;
 }
@@ -227,6 +260,10 @@ export interface SettingsRecord {
   proposalExclusions: string;
   proposalClarifications: string;
   proposalAcceptanceLabel: string;
+  /** Intake catalog automation (company-wide). */
+  intakeCatalogAutoApplyMode: IntakeCatalogAutoApplyMode;
+  /** Minimum catalog match score (0–1) for Tier A auto-link / pre-accept. */
+  intakeCatalogTierAMinScore: number;
   updatedAt: string;
 }
 

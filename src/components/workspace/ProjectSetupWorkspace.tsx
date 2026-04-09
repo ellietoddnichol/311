@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ChevronDown, Info } from 'lucide-react';
 import type { ProjectJobConditions, ProjectRecord, RoomRecord, SettingsRecord } from '../../shared/types/estimator';
 import { OFFICE_FIELD_SCHEDULE_DEFAULTS, recommendDeliveryPlan } from '../../shared/utils/jobConditions';
+import { PROJECT_JOB_SIZE_OPTIONS, suggestProjectJobSizeTier } from '../../shared/utils/projectJobSizeTiers';
 import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat';
 
 type SummaryLite = {
@@ -9,12 +10,14 @@ type SummaryLite = {
   conditionAdjustmentAmount?: number;
   adjustedLaborSubtotal?: number;
   conditionAssumptions?: string[];
+  durationDays?: number;
+  baseBidTotal?: number;
 };
 
 function FieldBadge({ kind }: { kind: 'required' | 'optional' | 'office' }) {
   if (kind === 'required') {
     return (
-      <span className="ml-1.5 inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-900">
+      <span className="ml-1.5 inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-900">
         Required
       </span>
     );
@@ -27,7 +30,7 @@ function FieldBadge({ kind }: { kind: 'required' | 'optional' | 'office' }) {
     );
   }
   return (
-    <span className="ml-1.5 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-600">
+    <span className="ml-1.5 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
       Office default
     </span>
   );
@@ -123,13 +126,23 @@ export function ProjectSetupWorkspace({
       installerCount: 1,
       estimateAdderPercent: 0,
       estimateAdderAmount: 0,
+      performanceBondRequired: false,
+      performanceBondPercent: 0,
     });
   }
 
   const deliveryOn = jobConditions.deliveryRequired;
 
+  const suggestedJobSize = useMemo(() => {
+    if (!summary?.durationDays && !summary?.baseBidTotal) return null;
+    return suggestProjectJobSizeTier(summary.durationDays ?? 0, summary.baseBidTotal ?? 0);
+  }, [summary?.durationDays, summary?.baseBidTotal]);
+  const suggestedJobSizeLabel = suggestedJobSize
+    ? PROJECT_JOB_SIZE_OPTIONS.find((o) => o.value === suggestedJobSize)?.label
+    : null;
+
   return (
-    <div className="w-full min-w-0 space-y-10 pb-2">
+    <div className="w-full min-w-0 space-y-8 pb-2">
       {/* 1 — Project inputs */}
       <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-5">
@@ -557,7 +570,33 @@ export function ProjectSetupWorkspace({
                 </label>
               </div>
             </details>
-            <label className="text-[11px] font-medium text-slate-700">
+            <div className="sm:col-span-2 md:col-span-3 rounded-lg border border-amber-200/80 bg-amber-50/50 p-3">
+              <p className="text-[13px] font-semibold text-slate-900">Performance / surety bond</p>
+              <p className="mt-1 text-[12px] text-slate-600">
+                If bonding is required, add an allowance as a percent of the base bid (catalog material + labor subtotals before job-wide tax and markups).
+              </p>
+              <label className="mt-2 flex items-center gap-2 text-[12px] font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={jobConditions.performanceBondRequired}
+                  onChange={(e) => patchJobConditions({ performanceBondRequired: e.target.checked })}
+                />
+                Bond required on this project
+              </label>
+              <label className="mt-2 block text-[12px] font-medium text-slate-700">
+                Bond allowance % of base bid
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  className="ui-input mt-1 h-8 max-w-[8rem]"
+                  value={jobConditions.performanceBondPercent}
+                  onChange={(e) => patchJobConditions({ performanceBondPercent: Number(e.target.value) || 0 })}
+                  disabled={!jobConditions.performanceBondRequired}
+                />
+              </label>
+            </div>
+            <label className="text-[12px] font-medium text-slate-700">
               Project adder %
               <FieldBadge kind="optional" />
               <input
@@ -568,7 +607,7 @@ export function ProjectSetupWorkspace({
                 onChange={(e) => patchJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })}
               />
             </label>
-            <label className="text-[11px] font-medium text-slate-700">
+            <label className="text-[12px] font-medium text-slate-700">
               Project adder $
               <FieldBadge kind="optional" />
               <input
@@ -776,6 +815,20 @@ export function ProjectSetupWorkspace({
           <span>
             <span className="font-medium text-slate-800">Include on proposal</span>
             <span className="mt-0.5 block text-[10px] text-slate-500">When off, notes stay in setup only.</span>
+          </span>
+        </label>
+        <label className="mt-3 flex cursor-pointer items-start gap-2 text-[11px] text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={project.proposalIncludeCatalogImages}
+            onChange={(e) => setProject({ ...project, proposalIncludeCatalogImages: e.target.checked })}
+          />
+          <span>
+            <span className="font-medium text-slate-800">Show catalog images on proposal</span>
+            <span className="mt-0.5 block text-[10px] text-slate-500">
+              Adds product thumbnails next to scope lines when takeoff rows are linked to catalog items with image URLs.
+            </span>
           </span>
         </label>
       </section>

@@ -62,6 +62,8 @@ const DEFAULT_JOB_CONDITIONS: ProjectJobConditions = {
   remoteTravelMultiplier: 0.09,
   scheduleCompression: false,
   scheduleCompressionMultiplier: 0.1,
+  performanceBondRequired: false,
+  performanceBondPercent: 0,
   estimateAdderPercent: 0,
   estimateAdderAmount: 0,
   ...OFFICE_FIELD_SCHEDULE_DEFAULTS,
@@ -69,6 +71,28 @@ const DEFAULT_JOB_CONDITIONS: ProjectJobConditions = {
 
 export function createDefaultProjectJobConditions(): ProjectJobConditions {
   return { ...DEFAULT_JOB_CONDITIONS };
+}
+
+/** First percentage like `5%` or `5.5 %` in text; for bond / fee cues from intake. */
+export function extractLeadingPercentFromText(text: string): number | null {
+  const m = String(text || '').match(/(\d+(?:\.\d+)?)\s*%/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+  return n;
+}
+
+export function bondJobConditionsPatchFromAssumptions(
+  assumptions: Array<{ kind: string; text: string }>
+): Partial<ProjectJobConditions> {
+  const out: Partial<ProjectJobConditions> = {};
+  for (const a of assumptions) {
+    if (a.kind !== 'bond') continue;
+    out.performanceBondRequired = true;
+    const p = extractLeadingPercentFromText(a.text);
+    if (p !== null) out.performanceBondPercent = p;
+  }
+  return out;
 }
 
 /** True when travel miles should appear in proposal / assumption copy (omit null and zero — not customer-useful). */
@@ -111,6 +135,12 @@ export function normalizeProjectJobConditions(input?: Partial<ProjectJobConditio
     installerPaidDayHours
   );
 
+  const performanceBondPercent = clampPercent(
+    numeric((merged as Partial<ProjectJobConditions>).performanceBondPercent, DEFAULT_JOB_CONDITIONS.performanceBondPercent),
+    0,
+    100
+  );
+
   return {
     ...merged,
     unionWage: false,
@@ -148,6 +178,8 @@ export function normalizeProjectJobConditions(input?: Partial<ProjectJobConditio
     smallJobMultiplier: numeric(merged.smallJobMultiplier, DEFAULT_JOB_CONDITIONS.smallJobMultiplier),
     remoteTravelMultiplier: numeric(merged.remoteTravelMultiplier, DEFAULT_JOB_CONDITIONS.remoteTravelMultiplier),
     scheduleCompressionMultiplier: numeric(merged.scheduleCompressionMultiplier, DEFAULT_JOB_CONDITIONS.scheduleCompressionMultiplier),
+    performanceBondRequired: Boolean((merged as Partial<ProjectJobConditions>).performanceBondRequired),
+    performanceBondPercent,
     estimateAdderPercent: Number.isFinite(Number(merged.estimateAdderPercent)) ? Number(merged.estimateAdderPercent) : 0,
     estimateAdderAmount: Number.isFinite(Number(merged.estimateAdderAmount)) ? Number(merged.estimateAdderAmount) : 0,
     deliveryQuotedSeparately: Boolean((merged as Partial<ProjectJobConditions>).deliveryQuotedSeparately),
@@ -444,7 +476,16 @@ export function computeProjectConditionEffects(
 
   const laborAdjustmentAmount = (laborSubtotal * multipliers.cost) - laborSubtotal;
   const percentAdderAmount = baseLineSubtotal * (job.estimateAdderPercent / 100);
-  const estimateAdderAmount = percentAdderAmount + job.estimateAdderAmount + directAdjustmentAmount;
+  const bondAdderAmount =
+    job.performanceBondRequired && job.performanceBondPercent > 0
+      ? baseLineSubtotal * (job.performanceBondPercent / 100)
+      : 0;
+  if (bondAdderAmount > 0) {
+    assumptions.push(
+      `Performance/surety bond allowance (${formatPercentSafe(job.performanceBondPercent)} of base bid) included in condition adders.`
+    );
+  }
+  const estimateAdderAmount = percentAdderAmount + job.estimateAdderAmount + directAdjustmentAmount + bondAdderAmount;
   const rawMaterialTaxPercent = job.locationTaxPercent ?? project.taxPercent;
   const taxPercentApplied = materialSubtotal > 0 ? rawMaterialTaxPercent : 0;
 
@@ -520,6 +561,11 @@ export function buildProjectConditionSummaryLines(jobConditions?: Partial<Projec
   }
   if (job.estimateAdderPercent !== 0) lines.push(`Project-wide pricing adder of ${formatPercentSafe(job.estimateAdderPercent)} was included.`);
   if (job.estimateAdderAmount !== 0) lines.push(`Project-wide lump-sum adder of ${formatCurrencySafe(job.estimateAdderAmount)} was included.`);
+  if (job.performanceBondRequired && job.performanceBondPercent > 0) {
+    lines.push(
+      `Performance/surety bond allowance of ${formatPercentSafe(job.performanceBondPercent)} of the base bid was included.`
+    );
+  }
   if (job.locationLabel.trim()) lines.push(`Location assumptions: ${job.locationLabel.trim()}.`);
   const travelMilesForSummary = job.travelDistanceMiles;
   if (isMeaningfulTravelDistanceMiles(travelMilesForSummary) && !(job.deliveryRequired && job.deliveryQuotedSeparately)) {

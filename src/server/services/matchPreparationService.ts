@@ -1,7 +1,9 @@
 import { randomUUID } from 'crypto';
 import type { CatalogItem } from '../../types.ts';
-import type { BundleRecord } from '../../shared/types/estimator.ts';
+import type { BundleRecord, IntakeCatalogAutoApplyMode } from '../../shared/types/estimator.ts';
 import type { IntakeReviewLine, IntakeRoomCandidate } from '../../shared/types/intake.ts';
+import { computeCatalogAutoApplyTier } from '../../shared/utils/intakeAutomation.ts';
+import { getIntakeCatalogMemoryCatalogId, intakeLineMemoryKeyFromFields } from '../repos/intakeCatalogMemoryRepo.ts';
 import { prepareBundleMatch } from './intake/bundleIntakeMatching.ts';
 import { detectBundleCandidates } from './intake/normalizer.ts';
 import { prepareCatalogMatch } from './catalogMatchService.ts';
@@ -34,22 +36,47 @@ export function buildRoomCandidates(lines: IntakeReviewLine[]): IntakeRoomCandid
     .sort((left, right) => right.lineCount - left.lineCount || left.roomName.localeCompare(right.roomName));
 }
 
+export function finalizeIntakeReviewLines(
+  reviewLines: IntakeReviewLine[],
+  automation: { mode: IntakeCatalogAutoApplyMode; tierAMinScore: number }
+): void {
+  const min = Number.isFinite(automation.tierAMinScore) ? automation.tierAMinScore : 0.82;
+  for (const line of reviewLines) {
+    line.catalogAutoApplyTier = computeCatalogAutoApplyTier(line, min);
+    line.catalogAutoLinked = false;
+    if (automation.mode === 'auto_link_tier_a' && line.catalogAutoApplyTier === 'A' && line.catalogMatch) {
+      line.matchStatus = 'matched';
+      line.matchedCatalogItemId = line.catalogMatch.catalogItemId;
+      line.catalogAutoLinked = true;
+    }
+  }
+}
+
 export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogItem[], matchCatalog: boolean, bundles: BundleRecord[] = []): IntakeReviewLine[] {
+  const useMemory = matchCatalog && catalog.length > 0;
   return lines.map((line) => {
     const description = line.description || line.itemName;
     const seededMatch = line.catalogMatch || null;
     const seededSuggestion = line.suggestedMatch || null;
+    const memKey = useMemory
+      ? intakeLineMemoryKeyFromFields({ itemCode: line.itemCode, itemName: line.itemName, description })
+      : '';
+    const memoryCatalogItemId = useMemory && memKey ? getIntakeCatalogMemoryCatalogId(memKey) : null;
     const { catalogMatch, suggestedMatch } = seededMatch || seededSuggestion
       ? { catalogMatch: seededMatch, suggestedMatch: seededSuggestion }
       : matchCatalog
-        ? prepareCatalogMatch({
-            itemCode: line.itemCode,
-            itemName: line.itemName,
-            description,
-            category: line.category,
-            notes: line.notes,
-            unit: line.unit,
-          }, catalog)
+        ? prepareCatalogMatch(
+            {
+              itemCode: line.itemCode,
+              itemName: line.itemName,
+              description,
+              category: line.category,
+              notes: line.notes,
+              unit: line.unit,
+            },
+            catalog,
+            { memoryCatalogItemId: memoryCatalogItemId }
+          )
         : { catalogMatch: null, suggestedMatch: null };
 
     const resolvedCategory = line.category || catalogMatch?.category || suggestedMatch?.category || '';
@@ -59,6 +86,7 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
     if (!catalogMatch && !suggestedMatch) warnings.push('No catalog match identified.');
     if (suggestedMatch && !catalogMatch) warnings.push('Catalog match is uncertain and should be reviewed before import.');
     const matchStatus = catalogMatch ? 'matched' : suggestedMatch ? 'suggested' : 'needs_match';
+    const matchedCatalogItemId = catalogMatch?.catalogItemId ?? null;
     const unmatchedReason = warnings.find((warning) => /catalog coverage may be missing|no catalog candidate found/i.test(warning));
     const matchExplanation = catalogMatch?.reason || suggestedMatch?.reason || unmatchedReason || 'No confident catalog candidate was found.';
 
@@ -108,7 +136,7 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
       confidence: Number(line.confidence.toFixed(2)),
       completeness,
       matchStatus,
-      matchedCatalogItemId: catalogMatch?.catalogItemId || suggestedMatch?.catalogItemId || null,
+      matchedCatalogItemId,
       matchExplanation,
       catalogMatch,
       suggestedMatch,

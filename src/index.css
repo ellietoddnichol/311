@@ -68,11 +68,11 @@
 
 @layer utilities {
   .ui-page {
-    @apply mx-auto w-full max-w-[1600px] px-3 py-2 md:px-4 md:py-3;
+    @apply mx-auto w-full max-w-[1600px] px-3 py-1.5 md:px-4 md:py-2.5;
   }
 
   .ui-page-narrow {
-    @apply mx-auto w-full max-w-[1240px] px-3 py-2 md:px-4 md:py-3;
+    @apply mx-auto w-full max-w-[1240px] px-3 py-1.5 md:px-4 md:py-2.5;
   }
 
   .ui-surface {
@@ -94,18 +94,18 @@
 
   .ui-subtitle {
     color: var(--text-muted);
-    @apply text-sm leading-relaxed;
+    @apply text-base leading-relaxed;
   }
 
   .ui-label {
     color: var(--text-subtle);
-    @apply text-[11px] font-semibold uppercase tracking-[0.08em];
+    @apply text-xs font-semibold uppercase tracking-[0.08em];
   }
 
   /** Page / section hierarchy — use on every screen for consistency */
   .ui-typo-kicker {
     color: var(--text-subtle);
-    @apply text-[11px] font-semibold uppercase tracking-[0.08em];
+    @apply text-xs font-semibold uppercase tracking-[0.08em];
   }
 
   .ui-typo-page-title {

@@ -279,11 +279,32 @@ export function listCatalogMatchScores(
     .sort((a, b) => b.score - a.score);
 }
 
-export function prepareCatalogMatch(input: CatalogMatchInput, catalog: CatalogItem[]): {
+export function prepareCatalogMatch(
+  input: CatalogMatchInput,
+  catalog: CatalogItem[],
+  options?: { memoryCatalogItemId?: string | null }
+): {
   catalogMatch: IntakeCatalogMatch | null;
   suggestedMatch: IntakeCatalogMatch | null;
 } {
-  const ranked = listCatalogMatchScores(input, catalog, { minScore: 0.28 });
+  let ranked = listCatalogMatchScores(input, catalog, { minScore: 0.28 });
+  const memId = options?.memoryCatalogItemId?.trim() || null;
+  if (memId && catalog.some((c) => c.id === memId)) {
+    ranked = ranked
+      .map((s) => {
+        if (s.item.id !== memId) return s;
+        const newScore = Math.min(1, s.score + 0.12);
+        const confidence: IntakeMatchConfidence =
+          newScore >= 0.8 ? 'strong' : newScore >= 0.5 ? 'possible' : s.confidence;
+        return {
+          ...s,
+          score: newScore,
+          confidence,
+          reason: `${s.reason}; Prior estimator choice`,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+  }
   const best = ranked[0] || null;
 
   if (!best) {

@@ -75,5 +75,15 @@ export function sanitizeProposalSettings(input: Partial<SettingsRecord>): Partia
 }
 
 export function ensureProposalDefaults(settings: SettingsRecord): SettingsRecord {
-  return sanitizeProposalSettings(settings) as SettingsRecord;
+  const mode = settings.intakeCatalogAutoApplyMode ?? 'off';
+  const tier =
+    typeof settings.intakeCatalogTierAMinScore === 'number' && Number.isFinite(settings.intakeCatalogTierAMinScore)
+      ? settings.intakeCatalogTierAMinScore
+      : 0.82;
+  const sanitized = sanitizeProposalSettings({
+    ...settings,
+    intakeCatalogAutoApplyMode: mode,
+    intakeCatalogTierAMinScore: tier,
+  }) as SettingsRecord;
+  return { ...sanitized, intakeCatalogAutoApplyMode: mode, intakeCatalogTierAMinScore: tier };
 }

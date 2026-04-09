@@ -11,7 +11,7 @@ export function createInitialProjectDraft(settings?: SettingsRecord | null): Par
     address: '',
     proposalDate: '',
     projectType: 'Commercial',
-    projectSize: 'Medium',
+    projectSize: 'T3_standard',
     floorLevel: 'Ground',
     accessDifficulty: 'Easy',
     installHeight: 'Standard',

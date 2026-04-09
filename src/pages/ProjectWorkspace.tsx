@@ -312,7 +312,12 @@ export function ProjectWorkspace() {
         api.getV1ProjectFiles(projectId),
       ]);
 
-      const normalizedProject = { ...projectData, proposalFormat: projectData.proposalFormat ?? 'standard' };
+      const normalizedProject = {
+        ...projectData,
+        proposalFormat: projectData.proposalFormat ?? 'standard',
+        proposalIncludeCatalogImages: projectData.proposalIncludeCatalogImages ?? false,
+        structuredAssumptions: projectData.structuredAssumptions ?? [],
+      };
       setProject(normalizedProject);
       lastPersistedFingerprintRef.current = fingerprintProjectStable(normalizedProject);
       setLastSavedAt(projectData.updatedAt);
@@ -514,6 +519,15 @@ export function ProjectWorkspace() {
       return searchMatch && categoryMatch;
     });
   }, [catalog, catalogSearch, catalogCategory]);
+
+  const catalogImageById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const item of catalog) {
+      const u = item.imageUrl?.trim();
+      if (u) m.set(item.id, u);
+    }
+    return m;
+  }, [catalog]);
 
   function resolveLocalLinePricing(line: TakeoffLineRecord): TakeoffLineRecord {
     const pricingSource = line.pricingSource === 'manual' ? 'manual' : 'auto';
@@ -1103,6 +1117,17 @@ export function ProjectWorkspace() {
     setProjectFiles((prev) => prev.filter((file) => file.id !== fileId));
   }
 
+  async function removeStructuredAssumption(assumptionId: string) {
+    if (!project) return;
+    const next = (project.structuredAssumptions || []).filter((a) => a.id !== assumptionId);
+    try {
+      const saved = await api.updateV1Project(project.id, { structuredAssumptions: next });
+      setProject(saved);
+    } catch (error: unknown) {
+      window.alert(getErrorMessage(error, 'Could not update assumptions.'));
+    }
+  }
+
   async function generateProposalDraft(mode: 'scope_summary' | 'proposal_text' | 'terms_and_conditions' | 'default_short') {
     if (!project || !settings || !summary) return;
 
@@ -1240,6 +1265,7 @@ export function ProjectWorkspace() {
             fileUploading={fileUploading}
             onUploadFile={(f) => void uploadProjectFile(f)}
             onRemoveFile={(id) => void removeProjectFile(id)}
+            onRemoveStructuredAssumption={(id) => void removeStructuredAssumption(id)}
           />
         )}
 
@@ -1727,6 +1753,10 @@ export function ProjectWorkspace() {
                 onProposalFormatChange={(value) =>
                   setProject((prev) => (prev ? { ...prev, proposalFormat: value } : prev))
                 }
+                proposalIncludeCatalogImages={project.proposalIncludeCatalogImages}
+                onProposalIncludeCatalogImagesChange={(value) =>
+                  setProject((prev) => (prev ? { ...prev, proposalIncludeCatalogImages: value } : prev))
+                }
                 baseBidTotal={summary?.baseBidTotal}
                 lineCount={lines.length}
                 durationDays={summary?.durationDays}
@@ -1760,6 +1790,7 @@ export function ProjectWorkspace() {
                     settings={settings}
                     lines={lines}
                     summary={summary}
+                    catalogImageById={catalogImageById}
                   />
                 </div>
               </div>

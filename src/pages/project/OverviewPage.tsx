@@ -1,6 +1,6 @@
 import React from 'react';
 import { Download, FileUp, Paperclip, Trash2 } from 'lucide-react';
-import type { ProjectFileRecord, ProjectJobConditions, ProjectRecord, RoomRecord } from '../../shared/types/estimator';
+import type { ProjectFileRecord, ProjectJobConditions, ProjectRecord, ProjectStructuredAssumption, RoomRecord } from '../../shared/types/estimator';
 import type { WorkspaceTab } from '../../shared/types/projectWorkflow';
 import { isMeaningfulTravelDistanceMiles } from '../../shared/utils/jobConditions';
 import { formatCurrencySafe, formatKilobytesSafe, formatNumberSafe } from '../../utils/numberFormat';
@@ -28,6 +28,7 @@ interface OverviewPageProps {
   fileUploading: boolean;
   onUploadFile: (file: File | undefined) => void;
   onRemoveFile: (fileId: string) => void;
+  onRemoveStructuredAssumption: (assumptionId: string) => void;
 }
 
 export function OverviewPage({
@@ -43,7 +44,10 @@ export function OverviewPage({
   fileUploading,
   onUploadFile,
   onRemoveFile,
+  onRemoveStructuredAssumption,
 }: OverviewPageProps) {
+  const structuredAssumptions: ProjectStructuredAssumption[] = project.structuredAssumptions ?? [];
+
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-8">
       <header className="rounded-2xl border border-slate-200/70 bg-white px-5 py-5 shadow-sm">
@@ -185,7 +189,32 @@ export function OverviewPage({
 
         <aside className="space-y-4 xl:sticky xl:top-[88px]">
           <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active assumptions</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Recorded assumptions</p>
+            <p className="mt-1 text-[11px] text-slate-500">Intake and automation notes stored on the project (proposal / audit).</p>
+            {structuredAssumptions.length > 0 ? (
+              <ul className="mt-2 max-h-52 space-y-2 overflow-auto pr-1 text-xs text-slate-700">
+                {structuredAssumptions.map((a) => (
+                  <li key={a.id} className="flex gap-2 rounded-md border border-slate-100 bg-slate-50/80 p-2 leading-snug">
+                    <span className="min-w-0 flex-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{a.source}</span>
+                      <span className="mt-0.5 block">{a.text}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="shrink-0 self-start rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100"
+                      onClick={() => onRemoveStructuredAssumption(a.id)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-xs text-slate-500">No structured assumptions on this project yet.</p>
+            )}
+          </section>
+          <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active condition assumptions</p>
             {(summary?.conditionAssumptions || []).length > 0 ? (
               <div className="mt-2 max-h-56 space-y-1.5 overflow-auto pr-1 text-xs text-slate-700">
                 {(summary?.conditionAssumptions || []).slice(0, 14).map((assumption) => (
@@ -195,7 +224,7 @@ export function OverviewPage({
                 ))}
               </div>
             ) : (
-              <p className="mt-2 text-xs text-slate-500">No project-level assumptions are active.</p>
+              <p className="mt-2 text-xs text-slate-500">No live condition assumptions from the current estimate.</p>
             )}
           </section>
           <section className="rounded-2xl border border-dashed border-slate-300/80 bg-slate-50/80 p-4">

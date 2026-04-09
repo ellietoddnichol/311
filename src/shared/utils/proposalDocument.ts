@@ -1,4 +1,5 @@
 import { EstimateSummary, PricingMode, ProposalFormat, TakeoffLineRecord } from '../types/estimator';
+import { isDisplayableCatalogImageUrl } from './catalogImageUrl';
 
 export const PROPOSAL_FORMAT_OPTIONS: Array<{ value: ProposalFormat; label: string; hint: string }> = [
   { value: 'standard', label: 'Standard', hint: 'Full schedule, detailed investment breakdown' },
@@ -36,6 +37,8 @@ export interface ProposalScheduleItem {
   materialCost: number;
   laborCost: number;
   laborHours: number;
+  /** Resolved from matched catalog row when `buildProposalScheduleSections` receives a catalog image map. */
+  imageUrl: string | null;
 }
 
 export interface ProposalScheduleSection {
@@ -290,7 +293,8 @@ export function buildProposalScheduleSections(
   lines: TakeoffLineRecord[],
   showMaterial: boolean,
   showLabor: boolean,
-  laborHourMultiplier = 1
+  laborHourMultiplier = 1,
+  catalogImageById?: ReadonlyMap<string, string> | Map<string, string> | null
 ): ProposalScheduleSection[] {
   const normalizedLaborHourMultiplier = Number.isFinite(laborHourMultiplier) && laborHourMultiplier > 0
     ? laborHourMultiplier
@@ -306,6 +310,10 @@ export function buildProposalScheduleSections(
     const display = formatClientProposalItemDisplay(rawCompact, line.sku);
     if (!display.title) return;
 
+    const rawCatalogImage = line.catalogItemId ? catalogImageById?.get(line.catalogItemId)?.trim() : '';
+    const safeCatalogImage =
+      rawCatalogImage && isDisplayableCatalogImageUrl(rawCatalogImage) ? rawCatalogImage : null;
+
     const sectionItems = sectionMap.get(section) || new Map<string, ProposalScheduleItem>();
     const key = [String(line.sku || '').trim().toLowerCase(), rawCompact.toLowerCase(), unit.toLowerCase()].join('|');
     const existing = sectionItems.get(key) || {
@@ -317,7 +325,12 @@ export function buildProposalScheduleSections(
       materialCost: 0,
       laborCost: 0,
       laborHours: 0,
+      imageUrl: safeCatalogImage,
     };
+
+    if (!existing.imageUrl && safeCatalogImage) {
+      existing.imageUrl = safeCatalogImage;
+    }
 
     const quantity = Number(line.qty || 0);
     existing.quantity += quantity;

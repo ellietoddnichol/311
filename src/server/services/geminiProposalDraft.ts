@@ -69,7 +69,16 @@ export async function generateProposalDraftFromGemini(input: ProposalDraftInput)
   const ai = new GoogleGenAI({ apiKey });
   const mode = input.mode || 'default_short';
   const lines = Array.isArray(input.lines) ? input.lines : [];
-  const assumptions = Array.isArray(input.summary?.conditionAssumptions) ? input.summary?.conditionAssumptions : [];
+  const structuredTexts = (input.project?.structuredAssumptions ?? [])
+    .map((a) => String(a.text || '').trim())
+    .filter(Boolean);
+  const structuredKey = new Set(structuredTexts.map((t) => t.toLowerCase()));
+  const summaryAssumptions = Array.isArray(input.summary?.conditionAssumptions) ? input.summary!.conditionAssumptions : [];
+  const extraSummary = summaryAssumptions.filter((t) => {
+    const s = String(t || '').trim();
+    return s && !structuredKey.has(s.toLowerCase());
+  });
+  const assumptions = [...structuredTexts, ...extraSummary];
 
   const modeInstruction = mode === 'scope_summary'
     ? 'Focus on drafting a short scope summary for the proposal intro field. Use no more than two short sentences.'

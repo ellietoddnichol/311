@@ -1,13 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronDown, FileUp, FolderInput, Info, PlusCircle, Save, Search, Upload, WandSparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import {
   ModifierRecord,
+  PeerIntakeDefaultsResponse,
   PricingMode,
   ProjectJobConditions,
   ProjectRecord,
+  ProjectStructuredAssumption,
   RoomRecord,
   SettingsRecord,
   TakeoffLineRecord,
@@ -17,6 +19,7 @@ import { IntakeAiSuggestions, IntakeParseResult, IntakeReviewLine } from '../sha
 import { CatalogItem } from '../types';
 import {
   createDefaultProjectJobConditions,
+  bondJobConditionsPatchFromAssumptions,
   normalizeProjectJobConditions,
   OFFICE_FIELD_SCHEDULE_DEFAULTS,
   recommendDeliveryPlan,
@@ -50,6 +53,7 @@ import {
 import { IntakeEstimateReviewPanel } from '../components/intake/IntakeEstimateReviewPanel';
 import { IntakeFieldBadge, IntakeFieldLegend } from '../components/intake/IntakeFieldChrome';
 import { createInitialProjectDraft } from './intake/projectIntakeDraft';
+import { normalizeProjectSizeSelectValue, PROJECT_JOB_SIZE_OPTIONS } from '../shared/utils/projectJobSizeTiers';
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
 type IntakeStep = 1 | 2 | 3 | 4 | 5;
@@ -1159,6 +1163,9 @@ export function ProjectIntake() {
   const [estimateReviewProjectMods, setEstimateReviewProjectMods] = useState<Record<string, IntakeApplicationStatus>>({});
   const [intakeModifiers, setIntakeModifiers] = useState<ModifierRecord[]>([]);
   const [catalogPickerTarget, setCatalogPickerTarget] = useState<CatalogPickerTarget | null>(null);
+  const [peerIntakeHint, setPeerIntakeHint] = useState<PeerIntakeDefaultsResponse | null>(null);
+  const peerHintDismissedForKey = useRef<string | null>(null);
+  const [peerSetupAssumptionNote, setPeerSetupAssumptionNote] = useState<string | null>(null);
 
   const [roomSuggestions, setRoomSuggestions] = useState<RoomSuggestion[]>([]);
   const [lineSuggestions, setLineSuggestions] = useState<LineSuggestion[]>([]);
@@ -1218,6 +1225,27 @@ export function ProjectIntake() {
     }, 650);
     return () => clearTimeout(timer);
   }, [projectDraft.address]);
+
+  useEffect(() => {
+    if (step < 3) return;
+    const c = String(projectDraft.clientName || '').trim();
+    const g = String(projectDraft.generalContractor || '').trim();
+    if (!c && !g) {
+      setPeerIntakeHint(null);
+      return;
+    }
+    const dismissKey = `${c.toLowerCase()}\t${g.toLowerCase()}`;
+    if (peerHintDismissedForKey.current === dismissKey) {
+      setPeerIntakeHint(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void api.getV1PeerIntakeDefaults({ clientName: c || undefined, generalContractor: g || undefined }).then((data) => {
+        setPeerIntakeHint(data?.sourceProjectId ? data : null);
+      });
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [step, projectDraft.clientName, projectDraft.generalContractor]);
 
   const availableProjectSources = useMemo(
     () => projects.filter((project) => project.id !== sourceProjectId),
@@ -1474,7 +1502,11 @@ export function ProjectIntake() {
       proposalDate: prev.proposalDate || normalizeDateString(result.projectMetadata.proposalDate) || prev.proposalDate,
       pricingMode: prev.pricingMode || result.projectMetadata.pricingBasis || prev.pricingMode,
       notes: mergeDistinctText(mergeSourceNote(prev.notes, sourceLabel), [assumptionNotes]),
-      specialNotes: mergeDistinctText(prev.specialNotes, [result.proposalAssist.scopeSummaryDraft, result.proposalAssist.clarificationsDraft, result.proposalAssist.exclusionsDraft]),
+      specialNotes: prev.specialNotes,
+      jobConditions: normalizeProjectJobConditions({
+        ...(prev.jobConditions || createDefaultProjectJobConditions()),
+        ...bondJobConditionsPatchFromAssumptions(result.projectMetadata.assumptions || []),
+      }),
     }));
 
     if (String(importedAddress || '').trim()) {
@@ -1946,6 +1978,81 @@ export function ProjectIntake() {
     setLineSuggestions(dedupeSuggestions(parsed));
   }
 
+  function intakeMemoryFieldsForFingerprint(fingerprint: string | undefined): { itemCode?: string; itemName?: string; description?: string } {
+    if (fingerprint) {
+      const rl = lastIntakeParse?.reviewLines?.find((l) => l.reviewLineFingerprint === fingerprint);
+      if (rl) {
+        return { itemCode: rl.itemCode, itemName: rl.itemName, description: rl.description };
+      }
+      const line = lineSuggestions.find((l) => l.reviewLineFingerprint === fingerprint);
+      if (line) {
+        return { itemCode: line.sku || undefined, itemName: line.itemName, description: line.description };
+      }
+    }
+    return {};
+  }
+
+  function intakeMemoryFieldsForLineId(lineId: string): { itemCode?: string; itemName?: string; description?: string } {
+    const line = lineSuggestions.find((l) => l.id === lineId);
+    return intakeMemoryFieldsForFingerprint(line?.reviewLineFingerprint);
+  }
+
+  function rememberIntakeCatalogChoice(
+    catalogItemId: string,
+    fields: { itemCode?: string; itemName?: string; description?: string }
+  ) {
+    void api.postV1IntakeCatalogMemory({ catalogItemId, ...fields }).catch((err) => console.warn('intake catalog memory', err));
+  }
+
+  function dismissPeerIntakeHint() {
+    const c = String(projectDraft.clientName || '').trim();
+    const g = String(projectDraft.generalContractor || '').trim();
+    peerHintDismissedForKey.current = `${c.toLowerCase()}\t${g.toLowerCase()}`;
+    setPeerIntakeHint(null);
+  }
+
+  function applyPeerIntakeHint() {
+    if (!peerIntakeHint?.sourceProjectId || !peerIntakeHint.jobConditions) return;
+    setProjectDraft((prev) => ({
+      ...prev,
+      jobConditions: normalizeProjectJobConditions(peerIntakeHint.jobConditions!),
+      selectedScopeCategories:
+        peerIntakeHint.selectedScopeCategories?.length ? peerIntakeHint.selectedScopeCategories : prev.selectedScopeCategories,
+      pricingMode: peerIntakeHint.pricingMode ?? prev.pricingMode,
+      taxPercent: peerIntakeHint.taxPercent ?? prev.taxPercent,
+    }));
+    const label = peerIntakeHint.matchedBy === 'client' ? 'client' : 'general contractor';
+    setPeerSetupAssumptionNote(
+      `Job setup pre-filled from a recent project for the same ${label}. Review all fields before bidding.`
+    );
+    setPeerIntakeHint(null);
+  }
+
+  function buildStructuredAssumptionsForNewProject(): ProjectStructuredAssumption[] {
+    const fromIntake = (lastIntakeParse?.projectMetadata?.assumptions ?? []).map((a) => ({
+      id: crypto.randomUUID(),
+      source: 'intake' as const,
+      ruleId: `intake:${a.kind}`,
+      text: a.text,
+      confidence: a.confidence,
+      appliedFields: ['intake', 'proposal'],
+      createdAt: new Date().toISOString(),
+    }));
+    if (!peerSetupAssumptionNote) return fromIntake;
+    return [
+      ...fromIntake,
+      {
+        id: crypto.randomUUID(),
+        source: 'peer' as const,
+        ruleId: 'peer-intake-defaults',
+        text: peerSetupAssumptionNote,
+        confidence: 0.85,
+        appliedFields: ['jobConditions', 'pricing'],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+
   function applyCatalogToLineId(lineId: string, item: CatalogItem, matchReason = 'User-selected catalog item') {
     setLineSuggestions((prev) =>
       prev.map((line) => {
@@ -1969,6 +2076,7 @@ export function ProjectIntake() {
         };
       })
     );
+    rememberIntakeCatalogChoice(item.id, intakeMemoryFieldsForLineId(lineId));
   }
 
   function applyCatalogPickerSelection(item: CatalogItem) {
@@ -1980,6 +2088,8 @@ export function ProjectIntake() {
       const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === target.fingerprint)?.id;
       if (lineId) {
         applyCatalogToLineId(lineId, item, 'Estimate review catalog pick');
+      } else {
+        rememberIntakeCatalogChoice(item.id, intakeMemoryFieldsForFingerprint(target.fingerprint));
       }
       setEstimateReviewLines((prev) => ({
         ...prev,
@@ -2105,6 +2215,65 @@ export function ProjectIntake() {
     );
   }
 
+  function bulkAcceptTierAStrongBEstimateRows() {
+    const draft = lastIntakeParse?.estimateDraft;
+    if (!draft) return;
+    const nextReview: Record<string, EstimateReviewLineState> = { ...estimateReviewLines };
+    for (const row of draft.lineSuggestions) {
+      if (row.scopeBucket !== 'priced_base_scope') continue;
+      const st = nextReview[row.reviewLineFingerprint] ?? {
+        applicationStatus: row.applicationStatus,
+        selectedCatalogItemId: row.suggestedCatalogItemId,
+      };
+      const m = getActiveCatalogMatchForRow(row, st);
+      const tier = row.catalogAutoApplyTier || 'C';
+      const eligible =
+        !!m && (tier === 'A' || (tier === 'B' && m.confidence === ESTIMATE_REVIEW_HIGH_CONFIDENCE));
+      if (!eligible) continue;
+      nextReview[row.reviewLineFingerprint] = {
+        applicationStatus: 'accepted',
+        selectedCatalogItemId: st.selectedCatalogItemId ?? row.suggestedCatalogItemId,
+      };
+    }
+    setEstimateReviewLines(nextReview);
+    setLineSuggestions((prev) =>
+      prev.map((line) => {
+        const fp = line.reviewLineFingerprint;
+        if (!fp) return line;
+        if (nextReview[fp]?.applicationStatus !== 'accepted') return line;
+        const row = draft.lineSuggestions.find((r) => r.reviewLineFingerprint === fp);
+        if (!row || row.scopeBucket !== 'priced_base_scope') return line;
+        const catId = nextReview[fp].selectedCatalogItemId ?? row.suggestedCatalogItemId;
+        const item = catId ? catalog.find((c) => c.id === catId) : undefined;
+        if (!item) return line;
+        return {
+          ...line,
+          include: true,
+          matched: true,
+          description: item.description,
+          category: item.category,
+          sku: item.sku,
+          unit: item.uom,
+          catalogItemId: item.id,
+          materialCost: item.baseMaterialCost,
+          laborMinutes: item.baseLaborMinutes,
+          matchConfidence: 'strong',
+          matchReason: 'Bulk accept Tier A + strong Tier B (estimate review)',
+        };
+      })
+    );
+  }
+
+  function bulkAcceptAllSuggestedProjectModifiers() {
+    const ids = lastIntakeParse?.estimateDraft?.projectSuggestion.suggestedProjectModifierIds ?? [];
+    if (!ids.length) return;
+    setEstimateReviewProjectMods((prev) => {
+      const next = { ...prev };
+      for (const id of ids) next[id] = 'accepted';
+      return next;
+    });
+  }
+
   function setJobConditionReviewStatus(id: string, status: IntakeApplicationStatus) {
     setEstimateReviewJobConditions((prev) => ({ ...prev, [id]: status }));
     if (status === 'accepted') {
@@ -2220,7 +2389,7 @@ export function ProjectIntake() {
       ...prev,
       projectName: prev.projectName || 'Division 10 Template Project',
       projectType: 'Commercial',
-      projectSize: 'Medium',
+      projectSize: 'T3_standard',
       notes: 'Created from Division 10 starter template'
     }));
 
@@ -2430,6 +2599,7 @@ export function ProjectIntake() {
         jobConditions: normalizedJobConditions,
         notes: projectDraft.notes || null,
         specialNotes: specialNotesAppend || null,
+        structuredAssumptions: buildStructuredAssumptionsForNewProject(),
       });
 
       const includedRooms = roomSuggestions.filter((room) => room.include);
@@ -2770,6 +2940,26 @@ export function ProjectIntake() {
                     : 'Aligns with Project Setup: core inputs first, light job-condition toggles, pricing defaults collapsed unless you need them.'}
                 </p>
               </div>
+              {peerIntakeHint?.sourceProjectId ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50/90 px-3 py-2.5 text-sm text-slate-800">
+                  <p className="min-w-0 flex-1">
+                    <span className="font-semibold">Similar project in your library</span>
+                    <span className="text-slate-600">
+                      {' '}
+                      — apply scope categories, pricing mode, tax, and job conditions from a recent job for this{' '}
+                      {peerIntakeHint.matchedBy === 'client' ? 'client' : 'general contractor'}.
+                    </span>
+                  </p>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <button type="button" className="ui-btn-primary h-8 px-3 text-xs" onClick={applyPeerIntakeHint}>
+                      Apply defaults
+                    </button>
+                    <button type="button" className="ui-btn-secondary h-8 px-3 text-xs" onClick={dismissPeerIntakeHint}>
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)]">
                 <div className="space-y-4">
                   {step === 3 ? (
@@ -2842,11 +3032,20 @@ export function ProjectIntake() {
                               Project size
                               <IntakeFieldBadge kind="optional" />
                             </span>
-                            <select className="ui-input mt-1.5 h-10" value={projectDraft.projectSize || 'Medium'} onChange={(e) => patchProjectDraft({ projectSize: e.target.value })}>
-                              <option value="Small">Small</option>
-                              <option value="Medium">Medium</option>
-                              <option value="Large">Large</option>
+                            <select
+                              className="ui-input mt-1.5 h-10"
+                              value={normalizeProjectSizeSelectValue(projectDraft.projectSize)}
+                              onChange={(e) => patchProjectDraft({ projectSize: e.target.value })}
+                            >
+                              {PROJECT_JOB_SIZE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
                             </select>
+                            <span className="mt-1 block text-[11px] text-slate-500">
+                              Tiers align with typical crew-duration and bid size; pick what matches the job.
+                            </span>
                           </label>
 
                           <label className="text-[11px] font-medium text-slate-800">
@@ -3286,6 +3485,32 @@ export function ProjectIntake() {
                                 </label>
                               </div>
                             </details>
+                            <div className="sm:col-span-2 rounded-lg border border-amber-200/80 bg-amber-50/50 p-3">
+                              <p className="text-[12px] font-semibold text-slate-900">Performance / surety bond</p>
+                              <p className="mt-1 text-[11px] text-slate-600">
+                                If the job requires bonding, include an allowance as a percent of the base bid (before job-wide tax and markups).
+                              </p>
+                              <label className="mt-2 flex items-center gap-2 text-[11px] font-medium text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={draftJob.performanceBondRequired}
+                                  onChange={(e) => patchDraftJobConditions({ performanceBondRequired: e.target.checked })}
+                                />
+                                Bond required on this project
+                              </label>
+                              <label className="mt-2 block text-[11px] font-medium text-slate-700">
+                                Bond allowance % of base bid
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min={0}
+                                  className="ui-input mt-1 h-9 max-w-[8rem]"
+                                  value={draftJob.performanceBondPercent}
+                                  onChange={(e) => patchDraftJobConditions({ performanceBondPercent: Number(e.target.value) || 0 })}
+                                  disabled={!draftJob.performanceBondRequired}
+                                />
+                              </label>
+                            </div>
                             <label className="text-[11px] font-medium text-slate-700">
                               Project adder %
                               <input type="number" step="0.01" className="ui-input mt-1 h-9" value={draftJob.estimateAdderPercent} onChange={(e) => patchDraftJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} />
@@ -3620,7 +3845,9 @@ export function ProjectIntake() {
                 onReplaceLineWithCatalogId={handleReplaceEstimateLineWithCatalogId}
                 onIgnoreLine={handleIgnoreEstimateLine}
                 onBulkAcceptHighConfidence={bulkAcceptHighConfidenceEstimateRows}
+                onBulkAcceptTierAStrongB={bulkAcceptTierAStrongBEstimateRows}
                 onBulkIgnoreLowConfidence={bulkIgnoreLowConfidenceEstimateRows}
+                onBulkAcceptAllSuggestedProjectModifiers={bulkAcceptAllSuggestedProjectModifiers}
                 onOpenCatalogPicker={(fingerprint) => setCatalogPickerTarget({ kind: 'fingerprint', fingerprint })}
                 jobConditionById={estimateReviewJobConditions}
                 onSetJobConditionStatus={setJobConditionReviewStatus}

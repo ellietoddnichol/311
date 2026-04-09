@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
-import { CatalogSyncStatusRecord, SettingsRecord } from '../shared/types/estimator';
+import { CatalogSyncStatusRecord, IntakeCatalogAutoApplyMode, SettingsRecord } from '../shared/types/estimator';
 import { ensureProposalDefaults } from '../shared/utils/proposalDefaults';
 import { getErrorMessage } from '../shared/utils/errorMessage';
 
@@ -299,6 +299,41 @@ export function Settings() {
           </div>
         </section>
       </div>
+
+      <section className="ui-surface mx-auto max-w-[1600px] space-y-3 p-4">
+        <h2 className="ui-label">Intake &amp; catalog automation</h2>
+        <p className="text-xs text-slate-500">
+          Company-wide policy for catalog matching during file intake. Tier A lines are strong matches with compatible units; thresholds apply on the server when building review rows and estimate drafts.
+        </p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <label className="text-xs text-slate-600 block">
+            Auto-apply mode
+            <select
+              className="ui-input mt-1"
+              value={settings.intakeCatalogAutoApplyMode}
+              onChange={(e) =>
+                setSettings({ ...settings, intakeCatalogAutoApplyMode: e.target.value as IntakeCatalogAutoApplyMode })
+              }
+            >
+              <option value="off">Off — manual review only</option>
+              <option value="preselect_only">Pre-accept Tier A in estimate draft (no auto-link)</option>
+              <option value="auto_link_tier_a">Auto-link Tier A lines to catalog</option>
+            </select>
+          </label>
+          <label className="text-xs text-slate-600 block">
+            Tier A minimum match score (0.5–0.99)
+            <input
+              type="number"
+              step={0.01}
+              min={0.5}
+              max={0.99}
+              className="ui-input mt-1"
+              value={settings.intakeCatalogTierAMinScore}
+              onChange={(e) => setSettings({ ...settings, intakeCatalogTierAMinScore: Number(e.target.value) || 0.82 })}
+            />
+          </label>
+        </div>
+      </section>
     </div>
   );
 }

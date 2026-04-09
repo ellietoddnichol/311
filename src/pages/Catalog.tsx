@@ -4,6 +4,30 @@ import { api } from '../services/api';
 import { CatalogSyncStatusRecord, BundleRecord, ModifierRecord } from '../shared/types/estimator';
 import { CatalogItem } from '../types';
 import { formatCurrencySafe, formatNumberSafe, formatPercentSafe } from '../utils/numberFormat';
+import { isDisplayableCatalogImageUrl } from '../shared/utils/catalogImageUrl';
+
+function CatalogItemThumb({ url }: { url: string | undefined }) {
+  const [broken, setBroken] = useState(false);
+  if (!url || !isDisplayableCatalogImageUrl(url) || broken) {
+    return (
+      <div
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-dashed border-slate-200 bg-slate-50 text-[9px] text-slate-400"
+        title={url && !isDisplayableCatalogImageUrl(url) ? 'URL not shown as image' : undefined}
+      >
+        —
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      className="h-10 w-10 shrink-0 rounded border border-slate-200/90 bg-white object-contain"
+      loading="lazy"
+      onError={() => setBroken(true)}
+    />
+  );
+}
 
 type SortKey = 'sku-asc' | 'sku-desc' | 'name-asc' | 'name-desc' | 'category-asc' | 'material-desc' | 'labor-desc';
 type CatalogTab = 'items' | 'modifiers' | 'bundles';
@@ -501,6 +525,7 @@ export function Catalog() {
               <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 text-slate-600 backdrop-blur-sm uppercase tracking-wide">
                   <tr>
+                    <th className="text-center font-semibold py-2 px-2 w-[3.25rem]">Image</th>
                     <th className="text-left font-semibold py-2 px-3">SKU / ID</th>
                     <th className="text-left font-semibold py-2 px-2">Description</th>
                     <th className="text-left font-semibold py-2 px-2">Category</th>
@@ -832,18 +857,26 @@ export function Catalog() {
                 </div>
                 <div className="col-span-2">
                   <label className="block text-[11px] font-medium text-slate-600 mb-1">Image URL (optional)</label>
-                  <input
-                    type="url"
-                    placeholder="https://…"
-                    className="w-full h-9 px-2 border border-slate-300 rounded text-sm"
-                    value={editingItem.imageUrl ?? ''}
-                    onChange={(e) =>
-                      setEditingItem({
-                        ...editingItem,
-                        imageUrl: e.target.value.trim() ? e.target.value.trim() : undefined,
-                      })
-                    }
-                  />
+                  <div className="flex flex-wrap items-start gap-3">
+                    <input
+                      type="url"
+                      placeholder="https://…"
+                      className="min-w-[12rem] flex-1 h-9 px-2 border border-slate-300 rounded text-sm"
+                      value={editingItem.imageUrl ?? ''}
+                      onChange={(e) =>
+                        setEditingItem({
+                          ...editingItem,
+                          imageUrl: e.target.value.trim() ? e.target.value.trim() : undefined,
+                        })
+                      }
+                    />
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-medium text-slate-500">Preview</span>
+                      <div key={editingItem.imageUrl ?? ''}>
+                        <CatalogItemThumb url={editingItem.imageUrl} />
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div className="col-span-2 flex items-center gap-4 text-xs text-slate-700">
                   <label className="inline-flex items-center gap-1.5">

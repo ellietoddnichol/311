@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { archiveProject, createProject, deleteProject, getProject, listProjects, updateProject } from '../../repos/projectsRepo.ts';
+import { archiveProject, createProject, deleteProject, getProject, listProjects, suggestPeerIntakeDefaults, updateProject } from '../../repos/projectsRepo.ts';
 import { createProjectFile, deleteProjectFile, getProjectFile, listProjectFiles } from '../../repos/projectFilesRepo.ts';
 import { suggestAddresses } from '../../services/addressSuggestService.ts';
 import { calculateDistanceMiles } from '../../services/distanceService.ts';
@@ -31,6 +31,14 @@ projectsRouter.get('/distance', async (req, res) => {
 
 projectsRouter.get('/', (_req, res) => {
   res.json({ data: listProjects() });
+});
+
+projectsRouter.get('/peer-intake-defaults', (req, res) => {
+  const clientName = String(req.query.clientName || '').trim() || null;
+  const generalContractor = String(req.query.generalContractor || '').trim() || null;
+  const excludeProjectId = String(req.query.excludeProjectId || '').trim() || null;
+  const data = suggestPeerIntakeDefaults({ clientName, generalContractor, excludeProjectId });
+  return res.json({ data });
 });
 
 projectsRouter.get('/:projectId', (req, res) => {

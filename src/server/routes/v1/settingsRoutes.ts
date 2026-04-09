@@ -4,6 +4,7 @@ import {
   reactivateAllCatalogItems,
 } from '../../repos/catalogRepo.ts';
 import { getCatalogSyncStatus, getSettings, listCatalogSyncRuns, updateSettings } from '../../repos/settingsRepo.ts';
+import { intakeLineMemoryKeyFromFields, upsertIntakeCatalogMemory } from '../../repos/intakeCatalogMemoryRepo.ts';
 import { recalculateAllLinePricing } from '../../repos/modifiersRepo.ts';
 import { backfillTakeoffRegistryToGoogleSheets, syncCatalogFromGoogleSheets } from '../../services/googleSheetsCatalogSync.ts';
 import { generateProposalDraftFromGemini } from '../../services/geminiProposalDraft.ts';
@@ -22,6 +23,21 @@ settingsRouter.put('/', (req, res) => {
     recalculateAllLinePricing();
   }
   return res.json({ data: next });
+});
+
+/** Remember estimator catalog choice for future intake matching (company-wide). */
+settingsRouter.post('/intake-catalog-memory', (req, res) => {
+  const catalogItemId = String(req.body?.catalogItemId || '').trim();
+  if (!catalogItemId) {
+    return res.status(400).json({ error: 'catalogItemId is required.' });
+  }
+  const memoryKey = intakeLineMemoryKeyFromFields({
+    itemCode: req.body?.itemCode,
+    itemName: req.body?.itemName,
+    description: req.body?.description,
+  });
+  upsertIntakeCatalogMemory(memoryKey, catalogItemId);
+  return res.json({ data: { ok: true } });
 });
 
 settingsRouter.post('/proposal-draft', async (req, res) => {

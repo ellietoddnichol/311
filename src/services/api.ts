@@ -1,6 +1,6 @@
 
 import { Project, CatalogItem, UserProfile, EstimateResult } from '../types';
-import { BundleRecord, CatalogSyncStatusRecord, EstimateSummary, InstallReviewEmailDraft, ModifierRecord, ProjectFileRecord, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
+import { BundleRecord, CatalogSyncStatusRecord, EstimateSummary, InstallReviewEmailDraft, ModifierRecord, PeerIntakeDefaultsResponse, ProjectFileRecord, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
 import { IntakeParseRequest, IntakeParseResult } from '../shared/types/intake';
 
 const API_BASE = '/api';
@@ -52,6 +52,32 @@ export const api = {
     });
     const payload = await handleResponse<{ data: ProjectRecord }>(res);
     return payload.data;
+  },
+  async getV1PeerIntakeDefaults(query: {
+    clientName?: string;
+    generalContractor?: string;
+    excludeProjectId?: string;
+  }): Promise<PeerIntakeDefaultsResponse | null> {
+    const params = new URLSearchParams();
+    if (query.clientName) params.set('clientName', query.clientName);
+    if (query.generalContractor) params.set('generalContractor', query.generalContractor);
+    if (query.excludeProjectId) params.set('excludeProjectId', query.excludeProjectId);
+    const res = await apiFetch(`${API_BASE}/v1/projects/peer-intake-defaults?${params.toString()}`);
+    const payload = await handleResponse<{ data: PeerIntakeDefaultsResponse | null }>(res);
+    return payload.data;
+  },
+  async postV1IntakeCatalogMemory(body: {
+    catalogItemId: string;
+    itemCode?: string;
+    itemName?: string;
+    description?: string;
+  }): Promise<void> {
+    const res = await apiFetch(`${API_BASE}/v1/settings/intake-catalog-memory`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    await handleResponse<{ data: { ok: boolean } }>(res);
   },
   async updateV1Project(id: string, project: Partial<ProjectRecord>): Promise<ProjectRecord> {
     const res = await apiFetch(`${API_BASE}/v1/projects/${id}`, {

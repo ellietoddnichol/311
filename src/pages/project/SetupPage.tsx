@@ -10,6 +10,8 @@ interface SummaryLite {
   conditionAdjustmentAmount?: number;
   adjustedLaborSubtotal?: number;
   conditionAssumptions?: string[];
+  durationDays?: number;
+  baseBidTotal?: number;
 }
 
 interface SetupPageProps {

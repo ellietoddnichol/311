@@ -7,6 +7,8 @@ import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat';
 interface ProposalSettingsRailProps {
   proposalFormat: ProposalFormat;
   onProposalFormatChange: (value: ProposalFormat) => void;
+  proposalIncludeCatalogImages: boolean;
+  onProposalIncludeCatalogImagesChange: (value: boolean) => void;
   baseBidTotal: number | undefined;
   lineCount: number;
   durationDays: number | undefined;
@@ -16,6 +18,8 @@ interface ProposalSettingsRailProps {
 export function ProposalSettingsRail({
   proposalFormat,
   onProposalFormatChange,
+  proposalIncludeCatalogImages,
+  onProposalIncludeCatalogImagesChange,
   baseBidTotal,
   lineCount,
   durationDays,
@@ -40,6 +44,20 @@ export function ProposalSettingsRail({
         <div className="mt-3">
           <ProposalPresetSelector value={proposalFormat} onChange={onProposalFormatChange} />
         </div>
+        <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-[11px] text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={proposalIncludeCatalogImages}
+            onChange={(e) => onProposalIncludeCatalogImagesChange(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium text-slate-800">Show catalog images on scope lines</span>
+            <span className="mt-0.5 block text-[10px] leading-snug text-slate-500">
+              Uses each line’s matched catalog photo when a URL is set. Print and export include the same preview.
+            </span>
+          </span>
+        </label>
       </section>
     </aside>
   );

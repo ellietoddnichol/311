@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { getEstimatorDb } from '../db/connection.ts';
 import { TakeoffLineRecord, TakeoffPricingSource } from '../../shared/types/estimator.ts';
+import { recordIntakeCatalogMemoryFromAcceptedMatch } from './intakeCatalogMemoryRepo.ts';
 
 const DEFAULT_LABOR_RATE_PER_HOUR = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 100);
 
@@ -35,6 +36,17 @@ function normalizePricingSource(value: unknown): TakeoffPricingSource {
 
 function calculateUnitSell(materialCost: number, laborCost: number): number {
   return Number((materialCost + laborCost).toFixed(2));
+}
+
+/** Record catalog learning when the link or identifying text changed (skip pure pricing/qty edits). */
+function shouldRecordCatalogMemoryForLineChange(previous: TakeoffLineRecord | null, next: TakeoffLineRecord): boolean {
+  if (!next.catalogItemId) return false;
+  if (!previous) return true;
+  return (
+    previous.catalogItemId !== next.catalogItemId ||
+    previous.description !== next.description ||
+    previous.sku !== next.sku
+  );
 }
 
 function mapTakeoffRow(row: any): TakeoffLineRecord {
@@ -246,6 +258,14 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     line.updatedAt
   );
 
+  if (shouldRecordCatalogMemoryForLineChange(null, line)) {
+    recordIntakeCatalogMemoryFromAcceptedMatch({
+      sku: line.sku,
+      description: line.description,
+      catalogItemId: line.catalogItemId,
+    });
+  }
+
   return enrichLineWithModifierNames(line);
 }
 
@@ -324,6 +344,14 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
     next.updatedAt,
     lineId
   );
+
+  if (shouldRecordCatalogMemoryForLineChange(existing, next)) {
+    recordIntakeCatalogMemoryFromAcceptedMatch({
+      sku: next.sku,
+      description: next.description,
+      catalogItemId: next.catalogItemId,
+    });
+  }
 
   return enrichLineWithModifierNames(next);
 }

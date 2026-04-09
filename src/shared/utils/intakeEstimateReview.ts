@@ -1,4 +1,5 @@
 import type { ProjectJobConditions } from '../types/estimator';
+import { extractLeadingPercentFromText } from './jobConditions';
 import type {
   IntakeAiLineClassification,
   IntakeAiSuggestions,
@@ -258,6 +259,11 @@ export function inferJobConditionPatchesFromText(
   if (/\bdeliver(y|ies)\b|\bship(ping)?\b/.test(t)) out.deliveryRequired = true;
   if (/\brestricted access\b/.test(t)) out.restrictedAccess = true;
   if (/\bcompress(ed)? schedule\b|\bfast track\b/.test(t)) out.scheduleCompression = true;
+  if (/\b(bond|bonding|performance bond|surety|bid bond)\b/.test(t)) {
+    out.performanceBondRequired = true;
+    const pct = extractLeadingPercentFromText(`${patch.label} ${patch.reason || ''}`);
+    if (pct !== null) out.performanceBondPercent = pct;
+  }
   return out;
 }
 

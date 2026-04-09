@@ -282,6 +282,12 @@ export async function extractIntakeFromGemini(input: ExtractInput): Promise<Gemi
 
   const prompt = [
     'You are an estimator intake extraction engine.',
+    ...(input.dataBase64 &&
+    (input.sourceType === 'pdf' || String(input.mimeType || '').toLowerCase().includes('pdf'))
+      ? [
+          'You are provided with the raw PDF file natively. Prioritize your visual understanding of the tables, matrices, and schedules in the PDF file over any provided text representations.',
+        ]
+      : []),
     'Extract project metadata and takeoff lines into strict JSON.',
     'Before emitting parsedLines, classify each source row or chunk as one of: project_metadata, header_row, section_header, actual_scope_line, or ignore.',
     'Only actual_scope_line content may appear in parsedLines.',
@@ -303,12 +309,15 @@ export async function extractIntakeFromGemini(input: ExtractInput): Promise<Gemi
     'Set fieldAssembly true when the line states KD, RTA, knock-down, or that fixtures (e.g. lockers, benches) must be assembled on site — those are still scope items, not modifiers.',
     'Do not set lineKind modifier for a product line whose only special need is field assembly; use fieldAssembly true and lineKind item instead.',
     'Extract assumptions and commercial clues when present, including pricing basis, tax, delivery, freight, shipment, bond, unload, site visit, clarifications, exclusions, and alternates.',
+    'When a performance bond, bid bond, surety, or bonding percentage appears, add an assumption with kind bond and the exact text (e.g. "5% performance bond") so estimators get bond allowance prompts.',
     'Produce a short proposal assist object with intro, scope summary, clarifications, and exclusions when the source contains enough context.',
     '',
     `Source Type: ${input.sourceType}`,
     `File Name: ${input.fileName}`,
     'Return bidPackage when the document identifies a bid package or package number separately from the project number.',
-    input.extractedText ? `Extracted Text Preview:\n${input.extractedText.slice(0, 14000)}` : '',
+    input.extractedText
+      ? `Fallback Extracted Text (may contain OCR errors, rely on the raw file first):\n${input.extractedText.slice(0, 14000)}`
+      : '',
     input.normalizedRows?.length
       ? `Normalized Rows JSON (deterministic parse):\n${JSON.stringify(input.normalizedRows.slice(0, 500))}`
       : '',

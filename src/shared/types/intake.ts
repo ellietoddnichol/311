@@ -251,10 +251,17 @@ export type IntakeScopeBucket =
 /** Review / correction workflow state for matcher output (not persisted until UI writes back). */
 export type IntakeApplicationStatus = 'suggested' | 'accepted' | 'replaced' | 'ignored';
 
+/** Catalog auto-apply policy tier for intake / estimate review (company settings control server behavior). */
+export type IntakeCatalogAutoApplyTier = 'A' | 'B' | 'C';
+
 export interface IntakeReviewLine {
   lineId: string;
   /** Stable content key for reorder-safe correction logging and estimate draft rows. */
   reviewLineFingerprint: string;
+  /** Matcher tier: A = eligible for auto-link / pre-accept, B = suggest, C = needs work. */
+  catalogAutoApplyTier?: IntakeCatalogAutoApplyTier;
+  /** True when server auto-linked catalog (Tier A + auto_link_tier_a mode). */
+  catalogAutoLinked?: boolean;
   roomName: string;
   itemName: string;
   description: string;
@@ -369,6 +376,8 @@ export interface IntakeLineEstimateSuggestion {
   lineId: string;
   scopeBucket: IntakeScopeBucket;
   applicationStatus: IntakeApplicationStatus;
+  /** Mirrors intake review line tier for UI badges and bulk actions. */
+  catalogAutoApplyTier?: IntakeCatalogAutoApplyTier;
   topCatalogCandidates: IntakeCatalogMatch[];
   suggestedCatalogItemId: string | null;
   /** Line-level modifiers (field conditions, finish, etc.). */

@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { getEstimatorDb } from '../db/connection.ts';
-import { ProjectRecord } from '../../shared/types/estimator.ts';
+import { PeerIntakeDefaultsResponse, ProjectRecord, ProjectStructuredAssumption } from '../../shared/types/estimator.ts';
 import { coerceSafeProjectName } from '../../shared/utils/intakeTextGuards.ts';
 import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../../shared/utils/jobConditions.ts';
 
@@ -8,6 +8,44 @@ function coerceProposalFormat(raw: unknown): ProjectRecord['proposalFormat'] {
   const s = String(raw || '').trim();
   if (s === 'condensed' || s === 'schedule_with_amounts' || s === 'executive_summary') return s;
   return 'standard';
+}
+
+function coerceStructuredAssumptionSource(raw: unknown): ProjectStructuredAssumption['source'] {
+  const s = String(raw || '').trim();
+  if (s === 'peer' || s === 'manual') return s;
+  return 'intake';
+}
+
+export function parseStructuredAssumptionsJson(raw: string | null | undefined): ProjectStructuredAssumption[] {
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    if (!Array.isArray(parsed)) return [];
+    const out: ProjectStructuredAssumption[] = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== 'object') continue;
+      const e = entry as Record<string, unknown>;
+      const text = String(e.text || '').trim();
+      if (!text) continue;
+      const conf = Number(e.confidence);
+      out.push({
+        id: String(e.id || randomUUID()),
+        source: coerceStructuredAssumptionSource(e.source),
+        ruleId: e.ruleId != null ? String(e.ruleId) : undefined,
+        text,
+        confidence: Number.isFinite(conf) ? Math.min(1, Math.max(0, conf)) : 0.75,
+        appliedFields: Array.isArray(e.appliedFields) ? e.appliedFields.map((x) => String(x)) : undefined,
+        createdAt: String(e.createdAt || new Date().toISOString()),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function normalizeStructuredAssumptionsInput(input: ProjectStructuredAssumption[] | undefined | null): ProjectStructuredAssumption[] {
+  if (!Array.isArray(input)) return [];
+  return parseStructuredAssumptionsJson(JSON.stringify(input));
 }
 
 function mapProjectRow(row: any): ProjectRecord {
@@ -27,6 +65,8 @@ function mapProjectRow(row: any): ProjectRecord {
   } catch {
     selectedScopeCategories = [];
   }
+
+  const structuredAssumptions = parseStructuredAssumptionsJson(row.structured_assumptions_json);
 
   return {
     id: row.id,
@@ -61,9 +101,11 @@ function mapProjectRow(row: any): ProjectRecord {
     notes: row.notes,
     specialNotes: row.special_notes,
     proposalIncludeSpecialNotes: Boolean(Number(row.proposal_include_special_notes ?? 0)),
+    proposalIncludeCatalogImages: Boolean(Number(row.proposal_include_catalog_images ?? 0)),
     proposalFormat: coerceProposalFormat(row.proposal_format),
+    structuredAssumptions,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
@@ -77,8 +119,72 @@ export function getProject(projectId: string): ProjectRecord | null {
   return row ? mapProjectRow(row) : null;
 }
 
+/**
+ * Best-effort defaults from the most recently updated non-archived project with the same client (preferred) or GC.
+ */
+export function suggestPeerIntakeDefaults(input: {
+  clientName?: string | null;
+  generalContractor?: string | null;
+  excludeProjectId?: string | null;
+}): PeerIntakeDefaultsResponse | null {
+  const client = String(input.clientName || '').trim().toLowerCase();
+  const gc = String(input.generalContractor || '').trim().toLowerCase();
+  if (!client && !gc) return null;
+
+  const db = getEstimatorDb();
+  let row: any = null;
+  let matchedBy: PeerIntakeDefaultsResponse['matchedBy'] = null;
+
+  if (client) {
+    if (input.excludeProjectId) {
+      row = db
+        .prepare(
+          `SELECT * FROM projects_v1 WHERE status != 'Archived' AND id != ? AND LOWER(TRIM(COALESCE(client_name,''))) = ? ORDER BY updated_at DESC LIMIT 1`
+        )
+        .get(input.excludeProjectId, client);
+    } else {
+      row = db
+        .prepare(
+          `SELECT * FROM projects_v1 WHERE status != 'Archived' AND LOWER(TRIM(COALESCE(client_name,''))) = ? ORDER BY updated_at DESC LIMIT 1`
+        )
+        .get(client);
+    }
+    if (row) matchedBy = 'client';
+  }
+
+  if (!row && gc) {
+    if (input.excludeProjectId) {
+      row = db
+        .prepare(
+          `SELECT * FROM projects_v1 WHERE status != 'Archived' AND id != ? AND LOWER(TRIM(COALESCE(general_contractor,''))) = ? ORDER BY updated_at DESC LIMIT 1`
+        )
+        .get(input.excludeProjectId, gc);
+    } else {
+      row = db
+        .prepare(
+          `SELECT * FROM projects_v1 WHERE status != 'Archived' AND LOWER(TRIM(COALESCE(general_contractor,''))) = ? ORDER BY updated_at DESC LIMIT 1`
+        )
+        .get(gc);
+    }
+    if (row) matchedBy = 'general_contractor';
+  }
+
+  if (!row) return null;
+
+  const mapped = mapProjectRow(row);
+  return {
+    sourceProjectId: mapped.id,
+    matchedBy,
+    jobConditions: mapped.jobConditions,
+    selectedScopeCategories: mapped.selectedScopeCategories,
+    pricingMode: mapped.pricingMode,
+    taxPercent: mapped.taxPercent,
+  };
+}
+
 export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
   const now = new Date().toISOString();
+  const structuredAssumptions = normalizeStructuredAssumptionsInput(input.structuredAssumptions ?? []);
   const project: ProjectRecord = {
     id: input.id ?? randomUUID(),
     projectNumber: input.projectNumber ?? null,
@@ -114,9 +220,11 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     notes: input.notes ?? null,
     specialNotes: input.specialNotes ?? null,
     proposalIncludeSpecialNotes: Boolean(input.proposalIncludeSpecialNotes),
+    proposalIncludeCatalogImages: Boolean(input.proposalIncludeCatalogImages),
     proposalFormat: coerceProposalFormat(input.proposalFormat),
+    structuredAssumptions,
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
   };
 
   getEstimatorDb().prepare(`
@@ -125,8 +233,9 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
       project_size, floor_level, access_difficulty, install_height, material_handling, wall_substrate,
       labor_burden_percent, overhead_percent, profit_percent, labor_overhead_percent, labor_profit_percent,
       sub_labor_management_fee_enabled, sub_labor_management_fee_percent,
-      tax_percent, pricing_mode, scope_categories_json, job_conditions_json, status, notes, special_notes, proposal_include_special_notes, proposal_format, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      tax_percent, pricing_mode, scope_categories_json, job_conditions_json, status, notes, special_notes, proposal_include_special_notes, proposal_include_catalog_images, proposal_format,
+      structured_assumptions_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     project.id,
     project.projectNumber,
@@ -160,7 +269,9 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     project.notes,
     project.specialNotes,
     project.proposalIncludeSpecialNotes ? 1 : 0,
+    project.proposalIncludeCatalogImages ? 1 : 0,
     project.proposalFormat,
+    JSON.stringify(project.structuredAssumptions),
     project.createdAt,
     project.updatedAt
   );
@@ -180,8 +291,11 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
       ? input.selectedScopeCategories.map((entry) => String(entry || '').trim()).filter(Boolean)
       : existing.selectedScopeCategories,
     jobConditions: normalizeProjectJobConditions(input.jobConditions ?? existing.jobConditions),
+    structuredAssumptions: Array.isArray(input.structuredAssumptions)
+      ? normalizeStructuredAssumptionsInput(input.structuredAssumptions)
+      : existing.structuredAssumptions,
     id: projectId,
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
   };
 
   next.projectName = coerceSafeProjectName(next.projectName, 'Untitled Project');
@@ -193,7 +307,8 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
       material_handling = ?, wall_substrate = ?, labor_burden_percent = ?, overhead_percent = ?,
       profit_percent = ?, labor_overhead_percent = ?, labor_profit_percent = ?,
       sub_labor_management_fee_enabled = ?, sub_labor_management_fee_percent = ?,
-      tax_percent = ?, pricing_mode = ?, scope_categories_json = ?, job_conditions_json = ?, status = ?, notes = ?, special_notes = ?, proposal_include_special_notes = ?, proposal_format = ?, updated_at = ?
+      tax_percent = ?, pricing_mode = ?, scope_categories_json = ?, job_conditions_json = ?, status = ?, notes = ?, special_notes = ?, proposal_include_special_notes = ?, proposal_include_catalog_images = ?, proposal_format = ?,
+      structured_assumptions_json = ?, updated_at = ?
     WHERE id = ?
   `).run(
     next.projectNumber,
@@ -227,7 +342,9 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
     next.notes,
     next.specialNotes,
     next.proposalIncludeSpecialNotes ? 1 : 0,
+    next.proposalIncludeCatalogImages ? 1 : 0,
     next.proposalFormat,
+    JSON.stringify(next.structuredAssumptions),
     next.updatedAt,
     projectId
   );

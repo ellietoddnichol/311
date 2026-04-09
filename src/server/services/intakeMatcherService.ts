@@ -1,5 +1,5 @@
 import type { CatalogItem } from '../../types.ts';
-import type { ModifierRecord } from '../../shared/types/estimator.ts';
+import type { IntakeCatalogAutoApplyMode, ModifierRecord } from '../../shared/types/estimator.ts';
 import type {
   IntakeAiLineClassification,
   IntakeAiSuggestions,
@@ -187,8 +187,10 @@ export function buildIntakeEstimateDraft(params: {
   catalog: CatalogItem[];
   modifiers: ModifierRecord[];
   aiSuggestions?: IntakeAiSuggestions | null;
+  intakeAutomation?: { mode: IntakeCatalogAutoApplyMode; tierAMinScore: number };
 }): IntakeEstimateDraft | undefined {
-  const { reviewLines, catalog, modifiers, aiSuggestions } = params;
+  const { reviewLines, catalog, modifiers, aiSuggestions, intakeAutomation } = params;
+  const autoMode = intakeAutomation?.mode ?? 'off';
   if (!catalog.length) return undefined;
 
   const catalogById = new Map(catalog.map((c) => [c.id, c]));
@@ -208,7 +210,7 @@ export function buildIntakeEstimateDraft(params: {
 
     const rankedBase = listCatalogMatchScores(input, catalog, { minScore: 0.28 });
     const boosted = applyCrossLineBoost(rankedBase, room, manufacturerCounts, categoryCounts).sort((a, b) => b.score - a.score);
-    const top: IntakeCatalogMatch[] = boosted.slice(0, TOP_N).map(catalogMatchScoreToIntake);
+    let topCatalogMatches: IntakeCatalogMatch[] = boosted.slice(0, TOP_N).map(catalogMatchScoreToIntake);
 
     const cls = findLineClassification(line, lineIndex, aiSuggestions);
     const scopeBucket = mapScopeBucket(cls, line);
@@ -217,7 +219,48 @@ export function buildIntakeEstimateDraft(params: {
     const lineModIds = matchModifierIds(lineText, modifiers);
 
     const suggestedCatalogItemId =
-      line.catalogMatch?.catalogItemId ?? line.suggestedMatch?.catalogItemId ?? top[0]?.catalogItemId ?? null;
+      line.catalogMatch?.catalogItemId ?? line.suggestedMatch?.catalogItemId ?? topCatalogMatches[0]?.catalogItemId ?? null;
+
+    if (
+      suggestedCatalogItemId &&
+      !topCatalogMatches.some((c) => c.catalogItemId === suggestedCatalogItemId)
+    ) {
+      const primary =
+        line.catalogMatch?.catalogItemId === suggestedCatalogItemId
+          ? line.catalogMatch
+          : line.suggestedMatch?.catalogItemId === suggestedCatalogItemId
+            ? line.suggestedMatch
+            : null;
+      if (primary) {
+        topCatalogMatches = [primary, ...topCatalogMatches.filter((c) => c.catalogItemId !== primary.catalogItemId)].slice(
+          0,
+          TOP_N
+        );
+      } else {
+        const item = catalogById.get(suggestedCatalogItemId);
+        if (item) {
+          topCatalogMatches = [
+            {
+              catalogItemId: item.id,
+              sku: item.sku,
+              description: item.description,
+              category: item.category,
+              unit: item.uom,
+              materialCost: item.baseMaterialCost,
+              laborMinutes: item.baseLaborMinutes,
+              score: 1,
+              confidence: 'strong' as const,
+              reason: 'Primary pick from intake line match',
+            },
+            ...topCatalogMatches,
+          ].slice(0, TOP_N);
+        }
+      }
+    }
+
+    const tier = line.catalogAutoApplyTier;
+    const preAcceptedTierA =
+      (autoMode === 'preselect_only' || autoMode === 'auto_link_tier_a') && tier === 'A' && Boolean(line.catalogMatch);
 
     let pricingPreview: IntakeLineEstimateSuggestion['pricingPreview'] = null;
     if (scopeBucket === 'priced_base_scope' && suggestedCatalogItemId) {
@@ -246,8 +289,9 @@ export function buildIntakeEstimateDraft(params: {
       reviewLineFingerprint: line.reviewLineFingerprint,
       lineId: line.lineId,
       scopeBucket,
-      applicationStatus: 'suggested',
-      topCatalogCandidates: top,
+      applicationStatus: preAcceptedTierA ? 'accepted' : 'suggested',
+      catalogAutoApplyTier: tier,
+      topCatalogCandidates: topCatalogMatches,
       suggestedCatalogItemId,
       suggestedLineModifierIds: lineModIds,
       suggestedProjectModifierIds: projectModIds,
