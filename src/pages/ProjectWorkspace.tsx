@@ -16,6 +16,7 @@ import {
 import { api } from '../services/api';
 import {
   BundleRecord,
+  CrewRecommendationResult,
   InstallReviewEmailDraft,
   ModifierRecord,
   PricingMode,
@@ -41,7 +42,7 @@ import { scopeExceptionCount } from '../shared/utils/scopeReviewExceptions';
 import { TAKEOFF_ALL_ROOMS } from '../shared/constants/workspaceUi';
 import { ProjectHeader } from '../components/workflow/ProjectHeader';
 import { WorkflowTabs } from '../components/workflow/WorkflowTabs';
-import { WorkflowRightDrawer } from '../components/workflow/WorkflowRightDrawer';
+import { CrewRecommendationCard } from '../components/workflow/CrewRecommendationCard';
 import { EstimateToolbar } from '../components/workflow/EstimateToolbar';
 import { RoomList } from '../components/workflow/RoomList';
 import { ProposalSectionEditor } from '../components/workflow/ProposalSectionEditor';
@@ -49,8 +50,8 @@ import { ProposalSettingsRail } from '../components/workflow/ProposalSettingsRai
 import { ProposalPreview } from '../components/workflow/ProposalPreview';
 import { EstimateGrid } from '../components/workspace/EstimateGrid';
 import { ItemPicker } from '../components/workspace/ItemPicker';
-import { ModifierPanel } from '../components/workspace/ModifierPanel';
 import { BundlePickerModal } from '../components/workspace/BundlePickerModal';
+import { LineEditorPanel } from '../components/workspace/LineEditorPanel';
 import { OverviewPage } from './project/OverviewPage';
 import { SetupPage } from './project/SetupPage';
 import { ScopeReviewPage } from './project/ScopeReviewPage';
@@ -58,7 +59,6 @@ import { HandoffPage } from './project/HandoffPage';
 import { formatCurrencySafe, formatLaborDurationMinutes, formatNumberSafe } from '../utils/numberFormat';
 import { getDistanceInMiles } from '../utils/geo';
 import { catalogItemMatchesQuery } from '../shared/utils/catalogItemSearch';
-import { CatalogCategorySelect } from '../components/intake/CatalogCategorySelect';
 import { useTransientNumericField } from '../hooks/useTransientNumericField';
 
 interface Summary {
@@ -89,6 +89,7 @@ interface Summary {
   materialWasteAllowanceAmount?: number;
   installerFieldSuppliesAmount?: number;
   laborLearningCurveAllowanceAmount?: number;
+  crewRecommendation?: CrewRecommendationResult;
 }
 
 interface RoomCreationDraft {
@@ -1058,7 +1059,7 @@ export function ProjectWorkspace() {
 
   function openLineEditor(lineId: string) {
     setSelectedLineId(lineId);
-    setModifiersModalOpen(true);
+    if (!isXlViewport) setModifiersModalOpen(true);
   }
 
   async function applyModifier(modifierId: string) {
@@ -1308,6 +1309,7 @@ export function ProjectWorkspace() {
             fileUploading={fileUploading}
             onUploadFile={(f) => void uploadProjectFile(f)}
             onRemoveFile={(id) => void removeProjectFile(id)}
+            lineCount={lines.length}
           />
         )}
 
@@ -1353,13 +1355,13 @@ export function ProjectWorkspace() {
               setSelectedLineId(lineId);
               setEstimateView('quantities');
               setActiveTab('estimate');
-              setModifiersModalOpen(true);
+              if (!isXlViewport) setModifiersModalOpen(true);
             }}
           />
         )}
 
         {activeTab === 'estimate' && (
-          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,300px)_1fr]">
+          <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)_minmax(300px,400px)]">
             <RoomList
               rooms={rooms}
               activeRoomId={activeRoomId}
@@ -1369,7 +1371,7 @@ export function ProjectWorkspace() {
               onDuplicateRoom={(room) => void duplicateRoom(room)}
               onDeleteRoom={(room) => void deleteRoom(room)}
             />
-            <div className="flex min-w-0 flex-col gap-1">
+            <div className="flex min-w-0 flex-col gap-1 xl:min-w-0">
               <EstimateToolbar
                 view={estimateView}
                 onViewChange={setEstimateView}
@@ -1525,7 +1527,17 @@ export function ProjectWorkspace() {
                       <Sparkles className="h-3 w-3" /> Bulk add
                     </button>
                     <button onClick={() => setBundleModalOpen(true)} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium">Bundle</button>
-                    <button onClick={() => setModifiersModalOpen(true)} disabled={!selectedLine} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium disabled:opacity-50">Edit line</button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedLine) return;
+                        if (!isXlViewport) setModifiersModalOpen(true);
+                      }}
+                      disabled={!selectedLine}
+                      className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium disabled:opacity-50"
+                    >
+                      Edit line
+                    </button>
                     <button onClick={() => setActiveTab('proposal')} className="ui-btn-secondary h-8 rounded-md px-2.5 text-[11px] font-medium inline-flex items-center gap-0.5">Proposal <ArrowRight className="h-3 w-3" /></button>
                 </div>
 
@@ -1658,6 +1670,12 @@ export function ProjectWorkspace() {
                 </div>
               </div>
 
+              <CrewRecommendationCard
+                crew={summary?.crewRecommendation}
+                manualInstallerCount={jobConditions.installerCount}
+                className="mt-2"
+              />
+
               <EstimateGrid
                 lines={activeRoomLines}
                 rooms={rooms}
@@ -1675,6 +1693,41 @@ export function ProjectWorkspace() {
               </>
               )}
             </div>
+
+            <aside className="hidden min-h-0 xl:flex xl:flex-col xl:gap-0">
+              {selectedLine ? (
+                <LineEditorPanel
+                  variant="inline"
+                  selectedLine={selectedLine}
+                  rooms={rooms}
+                  roomNamesById={roomNamesById}
+                  scopeCategoryOptions={scopeCategoryOptions}
+                  patchLineLocal={patchLineLocal}
+                  persistLine={(id) => void persistLine(id)}
+                  lineQtyInputProps={lineQtyField.inputProps}
+                  lineMaterialInputProps={lineMaterialField.inputProps}
+                  lineLaborInputProps={lineLaborField.inputProps}
+                  lineUnitSellInputProps={lineUnitSellField.inputProps}
+                  showMaterial={showMaterial}
+                  showLabor={showLabor}
+                  conditionLaborMultiplier={summary?.conditionLaborMultiplier || 1}
+                  resetLineToCalculatedPrice={(id) => void resetLineToCalculatedPrice(id)}
+                  modifiers={modifiers}
+                  lineModifiers={lineModifiers}
+                  onApplyModifier={(modifierId) => void applyModifier(modifierId)}
+                  onRemoveModifier={(lineModifierId) => void removeModifier(lineModifierId)}
+                  onDone={() => setSelectedLineId(null)}
+                />
+              ) : (
+                <div className="flex max-h-[min(70vh,820px)] min-h-[280px] flex-col rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/60 p-5 xl:max-h-[calc(100vh-170px)]">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Line detail drawer</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-800">Select a line</p>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                    Click a row in Quantities or Pricing to edit details, modifiers, and pricing without leaving the estimate.
+                  </p>
+                </div>
+              )}
+            </aside>
           </div>
         )}
 
@@ -1825,6 +1878,8 @@ export function ProjectWorkspace() {
             installReviewGenerating={installReviewGenerating}
             onGenerateInstallReview={() => void generateInstallReviewEmail()}
             onCopyInstallReview={() => void copyInstallReviewEmailBody()}
+            crewRecommendation={summary?.crewRecommendation}
+            manualInstallerCount={jobConditions.installerCount}
           />
         )}
       </div>
@@ -1855,148 +1910,34 @@ export function ProjectWorkspace() {
         presentation="drawer"
       />
 
-      {modifiersModalOpen && selectedLine && (
+      {!isXlViewport && modifiersModalOpen && selectedLine ? (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-[2px]" onClick={() => setModifiersModalOpen(false)}>
-          <div
-            className="flex h-full w-full max-w-[min(100vw-0.5rem,56rem)] flex-col overflow-hidden border-l border-slate-200/90 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-[-12px_0_40px_rgba(15,23,42,0.14)]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="border-b border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(246,248,251,0.96)_100%)] px-3 py-2.5 sm:px-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 max-w-[min(100%,42rem)]">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="ui-chip-soft">Line editor</span>
-                    <span className="ui-chip-soft">{selectedLine.category || 'Uncategorized'}</span>
-                    <span className="ui-chip-soft">{roomNamesById[selectedLine.roomId] || 'Unassigned room'}</span>
-                  </div>
-                  <h3 className="mt-1 text-base font-semibold tracking-tight text-slate-950">Edit line</h3>
-                </div>
-                <button onClick={() => setModifiersModalOpen(false)} className="h-9 shrink-0 rounded-full border border-slate-200 bg-white px-3 text-[11px] font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">Done</button>
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <div className="rounded-lg bg-white p-2 shadow-sm ring-1 ring-slate-200/80"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-500">Qty</p><p className="mt-0.5 text-base font-semibold tabular-nums text-slate-950">{formatNumberSafe(selectedLine.qty, 0)}</p></div>
-                <div className="rounded-lg bg-white p-2 shadow-sm ring-1 ring-slate-200/80"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-500">Material</p><p className="mt-0.5 text-base font-semibold tabular-nums text-slate-950">{formatCurrencySafe(selectedLine.materialCost)}</p></div>
-                <div className="rounded-lg bg-white p-2 shadow-sm ring-1 ring-slate-200/80"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-500">Labor</p><p className="mt-0.5 text-base font-semibold tabular-nums text-slate-950">{formatCurrencySafe(selectedLine.laborCost)}</p></div>
-                <div className="rounded-lg bg-[linear-gradient(180deg,#10284f_0%,#0a224d_100%)] p-2 text-white shadow-sm sm:col-span-1 col-span-2"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-300">Unit Sell</p><p className="mt-0.5 text-base font-semibold tabular-nums">{formatCurrencySafe(selectedLine.unitSell)}</p></div>
-              </div>
-            </div>
-
-            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_280px]">
-              <div className="min-h-0 overflow-y-auto p-3 sm:p-4">
-                <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-                  <div className="space-y-3">
-                    <div className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200/80">
-                      <p className="text-[11px] font-semibold text-slate-900">Line details</p>
-                      <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-                        <label className="text-[11px] font-medium text-slate-700 md:col-span-2">Description
-                          <input className="ui-input mt-1 h-9 rounded-lg" value={selectedLine.description} onChange={(e) => patchLineLocal(selectedLine.id, { description: e.target.value })} onBlur={() => void persistLine(selectedLine.id)} />
-                        </label>
-                        <label className="text-[11px] font-medium text-slate-700">Room
-                          <select className="ui-input mt-1 h-9 rounded-lg" value={selectedLine.roomId} onChange={(e) => patchLineLocal(selectedLine.id, { roomId: e.target.value })} onBlur={() => void persistLine(selectedLine.id)}>
-                      {rooms.map((room) => <option key={room.id} value={room.id}>{room.roomName}</option>)}
-                          </select>
-                        </label>
-                        <label className="text-[11px] font-medium text-slate-700">Category
-                          <CatalogCategorySelect
-                            className="ui-input mt-1 h-9 rounded-lg"
-                            value={selectedLine.category}
-                            options={scopeCategoryOptions}
-                            onChange={(v) => patchLineLocal(selectedLine.id, { category: v })}
-                            onBlur={() => void persistLine(selectedLine.id)}
-                          />
-                        </label>
-                        <label className="text-[11px] font-medium text-slate-700">Qty
-                          <input className="ui-input mt-1 h-9 rounded-lg" {...lineQtyField.inputProps} />
-                        </label>
-                        <label className="text-[11px] font-medium text-slate-700">Unit
-                          <input className="ui-input mt-1 h-9 rounded-lg" value={selectedLine.unit} onChange={(e) => patchLineLocal(selectedLine.id, { unit: e.target.value })} onBlur={() => void persistLine(selectedLine.id)} />
-                        </label>
-                        <label className="text-[11px] font-medium text-slate-700 md:col-span-2">Notes
-                          <textarea rows={3} className="ui-textarea mt-1 rounded-xl min-h-[72px]" value={selectedLine.notes || ''} onChange={(e) => patchLineLocal(selectedLine.id, { notes: e.target.value || null })} onBlur={() => void persistLine(selectedLine.id)} />
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-3 shadow-sm ring-1 ring-slate-200/80">
-                      <p className="text-[11px] font-semibold text-slate-900">Pricing</p>
-                      <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-                        {showMaterial ? (
-                          <label className="text-[11px] font-medium text-slate-700">Material
-                            <input className="ui-input mt-1 h-9 rounded-lg" {...lineMaterialField.inputProps} />
-                          </label>
-                        ) : null}
-                        {showLabor ? (
-                          <label className="text-[11px] font-medium text-slate-700">Labor
-                            <input className="ui-input mt-1 h-9 rounded-lg" {...lineLaborField.inputProps} />
-                            {(summary?.conditionLaborMultiplier || 1) !== 1 ? <p className="mt-1 text-[10px] text-slate-500">Effective labor with project multiplier: {formatCurrencySafe((selectedLine.laborCost || 0) * (summary?.conditionLaborMultiplier || 1))}</p> : null}
-                          </label>
-                        ) : null}
-                        <label className="text-[11px] font-medium text-slate-700">Unit Sell
-                          <div className="mt-1 space-y-1.5">
-                            <input className="ui-input h-9 rounded-lg" {...lineUnitSellField.inputProps} />
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
-                              <span>
-                                {selectedLine.pricingSource === 'manual'
-                                  ? 'Manual override preserved during repricing.'
-                                  : `Calculated from material + labor: ${formatCurrencySafe(selectedLine.materialCost + selectedLine.laborCost)}`}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => void resetLineToCalculatedPrice(selectedLine.id)}
-                                disabled={selectedLine.pricingSource !== 'manual'}
-                                className="rounded-full border border-slate-200 px-2.5 py-1 text-[10px] font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Reset To Calculated
-                              </button>
-                            </div>
-                          </div>
-                        </label>
-                        <div className="rounded-lg bg-white px-2.5 py-2 shadow-sm ring-1 ring-slate-200/80 md:col-span-2">
-                          <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-500">Install time (per unit)</p>
-                          <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-950">{formatNumberSafe(selectedLine.laborMinutes, 1)} min/unit</p>
-                          <p className="mt-1 text-[10px] leading-snug text-slate-600">
-                            Extended for this line:{' '}
-                            <span className="font-semibold tabular-nums text-slate-900">
-                              {formatLaborDurationMinutes(Number(selectedLine.laborMinutes || 0) * Number(selectedLine.qty || 0))}
-                            </span>
-                            {Number(selectedLine.qty || 0) !== 1 ? (
-                              <span className="text-slate-500">
-                                {' '}
-                                ({formatNumberSafe(selectedLine.qty, 0)} × {formatNumberSafe(selectedLine.laborMinutes, 1)} min)
-                              </span>
-                            ) : null}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="rounded-xl bg-[linear-gradient(180deg,#ffffff_0%,#f4f8ff_100%)] p-3 shadow-sm ring-1 ring-slate-200/80">
-                      <p className="text-[11px] font-semibold text-slate-900">Line snapshot</p>
-                      <div className="mt-2 space-y-1.5 text-[10px] text-slate-600">
-                        <div className="flex items-center justify-between rounded-lg bg-white px-2.5 py-1.5 shadow-sm ring-1 ring-slate-200/80"><span>Room</span><span className="font-semibold text-slate-900">{roomNamesById[selectedLine.roomId] || 'Unassigned'}</span></div>
-                        <div className="flex items-center justify-between rounded-lg bg-white px-2.5 py-1.5 shadow-sm ring-1 ring-slate-200/80"><span>Category</span><span className="font-semibold text-slate-900">{selectedLine.category || 'Uncategorized'}</span></div>
-                        <div className="flex items-center justify-between rounded-lg bg-white px-2.5 py-1.5 shadow-sm ring-1 ring-slate-200/80"><span>Line total</span><span className="font-semibold text-slate-900">{formatCurrencySafe(selectedLine.lineTotal)}</span></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t border-slate-200/80 bg-[linear-gradient(180deg,rgba(248,250,252,0.96)_0%,rgba(241,245,249,0.98)_100%)] p-3 lg:border-l lg:border-t-0">
-                <ModifierPanel
-                  modifiers={modifiers}
-                  activeModifiers={lineModifiers}
-                  selectedLinePresent={!!selectedLine}
-                  onApplyModifier={(modifierId) => void applyModifier(modifierId)}
-                  onRemoveModifier={(lineModifierId) => void removeModifier(lineModifierId)}
-                />
-              </div>
-            </div>
+          <div className="h-full" onClick={(event) => event.stopPropagation()}>
+            <LineEditorPanel
+              variant="overlay"
+              selectedLine={selectedLine}
+              rooms={rooms}
+              roomNamesById={roomNamesById}
+              scopeCategoryOptions={scopeCategoryOptions}
+              patchLineLocal={patchLineLocal}
+              persistLine={(id) => void persistLine(id)}
+              lineQtyInputProps={lineQtyField.inputProps}
+              lineMaterialInputProps={lineMaterialField.inputProps}
+              lineLaborInputProps={lineLaborField.inputProps}
+              lineUnitSellInputProps={lineUnitSellField.inputProps}
+              showMaterial={showMaterial}
+              showLabor={showLabor}
+              conditionLaborMultiplier={summary?.conditionLaborMultiplier || 1}
+              resetLineToCalculatedPrice={(id) => void resetLineToCalculatedPrice(id)}
+              modifiers={modifiers}
+              lineModifiers={lineModifiers}
+              onApplyModifier={(modifierId) => void applyModifier(modifierId)}
+              onRemoveModifier={(lineModifierId) => void removeModifier(lineModifierId)}
+              onDone={() => setModifiersModalOpen(false)}
+            />
           </div>
         </div>
-      )}
+      ) : null}
 
       {roomCreateModalOpen && (
         <div className="fixed inset-0 z-[60] bg-slate-900/45 p-3 sm:p-6" onClick={closeCreateRoomModal}>

@@ -1,7 +1,8 @@
 import React from 'react';
-import type { InstallReviewEmailDraft } from '../../shared/types/estimator';
+import type { CrewRecommendationResult, InstallReviewEmailDraft } from '../../shared/types/estimator';
 import type { WorkspaceTab } from '../../shared/types/projectWorkflow';
 import { HandoffSummary } from '../../components/workflow/HandoffSummary';
+import { CrewRecommendationCard } from '../../components/workflow/CrewRecommendationCard';
 
 interface HandoffPageProps {
   setActiveTab: (tab: WorkspaceTab) => void;
@@ -9,6 +10,8 @@ interface HandoffPageProps {
   installReviewGenerating: boolean;
   onGenerateInstallReview: () => void;
   onCopyInstallReview: () => void;
+  crewRecommendation?: CrewRecommendationResult;
+  manualInstallerCount: number;
 }
 
 export function HandoffPage({
@@ -30,6 +33,7 @@ export function HandoffPage({
           Client proposal
         </button>
       </header>
+      <CrewRecommendationCard crew={crewRecommendation} manualInstallerCount={manualInstallerCount} />
       <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
         <HandoffSummary
           draft={installReviewDraft}

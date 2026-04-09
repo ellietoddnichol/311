@@ -228,6 +228,22 @@ export interface SettingsRecord {
   updatedAt: string;
 }
 
+/** Schedule-oriented crew suggestion; labor $ math is unchanged — this explains staffing vs field duration. */
+export interface CrewRecommendationResult {
+  minimumCrew: number;
+  recommendedCrew: number;
+  maxEfficientCrew: number;
+  confidence: 'low' | 'medium' | 'high';
+  reasoning: string[];
+  daysAtMinCrew: number;
+  daysAtRecommendedCrew: number;
+  /** Field days at current Setup `installerCount`. */
+  daysAtManualCrew: number;
+  durationWarning: string | null;
+  targetMaxFieldDays: number;
+  complexityTier: 'small' | 'medium' | 'large';
+}
+
 export interface EstimateSummary {
   materialSubtotal: number;
   laborSubtotal: number;
@@ -270,6 +286,8 @@ export interface EstimateSummary {
   installerFieldSuppliesAmount: number;
   /** Always zero; legacy field. */
   laborLearningCurveAllowanceAmount: number;
+  /** Derived crew / duration guidance; does not affect pricing totals. */
+  crewRecommendation?: CrewRecommendationResult;
 }
 
 export interface InstallReviewEmailDraft {

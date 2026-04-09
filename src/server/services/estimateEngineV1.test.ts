@@ -221,3 +221,28 @@ test('zero travel distance does not appear in condition assumptions or proposal 
   const conditionLines = buildProjectConditionSummaryLines(project.jobConditions);
   assert.equal(conditionLines.some((line) => /travel distance|distance from office/i.test(line)), false);
 });
+
+test('crew recommendation bumps above one installer for large distributed scope', () => {
+  const project = buildProject({
+    jobConditions: {
+      ...createDefaultProjectJobConditions(),
+      installerCount: 1,
+    },
+  });
+  const lines: TakeoffLineRecord[] = [];
+  for (let i = 0; i < 22; i += 1) {
+    lines.push(
+      buildLine({
+        id: `line-${i}`,
+        roomId: `room-${i}`,
+        description: `Accessory ${i}`,
+        laborMinutes: 30,
+        qty: 10,
+      })
+    );
+  }
+  const summary = calculateEstimateSummary(project, lines);
+  assert.ok(summary.crewRecommendation);
+  assert.ok(summary.crewRecommendation!.recommendedCrew >= 2);
+  assert.ok(summary.crewRecommendation!.daysAtManualCrew >= summary.crewRecommendation!.daysAtRecommendedCrew);
+});

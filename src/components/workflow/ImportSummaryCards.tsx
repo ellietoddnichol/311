@@ -9,7 +9,7 @@ interface ImportSummaryCardsProps {
 
 export function ImportSummaryCards({ totalLines, exceptionCount, roomCount }: ImportSummaryCardsProps) {
   return (
-    <div className="grid gap-2.5 sm:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-3">
       <StatCard label="Takeoff lines" value={totalLines} hint="In this project" />
       <StatCard label="Rooms / areas" value={roomCount} hint="Organize scope" />
       <StatCard

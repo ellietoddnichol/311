@@ -1,4 +1,5 @@
 import { EstimateSummary, ProjectRecord, TakeoffLineRecord } from '../../shared/types/estimator.ts';
+import { computeCrewRecommendation } from '../../shared/utils/crewRecommendation.ts';
 import { extendedLaborDollarsForLine } from '../../shared/utils/lineLaborExtension.ts';
 import { computeProjectConditionEffects, normalizeProjectJobConditions } from '../../shared/utils/jobConditions.ts';
 import { getConfiguredLaborRatePerHour } from '../repos/takeoffRepo.ts';
@@ -75,6 +76,8 @@ export function calculateEstimateSummary(project: ProjectRecord, lines: TakeoffL
   const durationDays =
     totalLaborHours > 0 ? Math.max(1, Math.ceil(totalLaborHours / productiveCrewHoursPerDay)) : 0;
 
+  const crewRecommendation = computeCrewRecommendation(totalLaborHours, lines, jobConditions, hoursPerInstallerDay);
+
   return {
     materialSubtotal: materialForBid,
     laborSubtotal: laborCompanionRawBase,
@@ -103,5 +106,6 @@ export function calculateEstimateSummary(project: ProjectRecord, lines: TakeoffL
     materialWasteAllowanceAmount: 0,
     installerFieldSuppliesAmount: 0,
     laborLearningCurveAllowanceAmount,
+    crewRecommendation,
   };
 }

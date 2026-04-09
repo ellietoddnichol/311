@@ -1,10 +1,17 @@
 import React from 'react';
 import { Download, FileUp, Paperclip, Trash2 } from 'lucide-react';
-import type { ProjectFileRecord, ProjectJobConditions, ProjectRecord, RoomRecord } from '../../shared/types/estimator';
+import type {
+  CrewRecommendationResult,
+  ProjectFileRecord,
+  ProjectJobConditions,
+  ProjectRecord,
+  RoomRecord,
+} from '../../shared/types/estimator';
 import type { WorkspaceTab } from '../../shared/types/projectWorkflow';
 import { isMeaningfulTravelDistanceMiles } from '../../shared/utils/jobConditions';
 import { formatCurrencySafe, formatKilobytesSafe, formatNumberSafe } from '../../utils/numberFormat';
 import { StatCard } from '../../components/workflow/StatCard';
+import { CrewRecommendationCard } from '../../components/workflow/CrewRecommendationCard';
 import { api } from '../../services/api';
 
 interface SummaryLite {
@@ -28,6 +35,7 @@ interface OverviewPageProps {
   fileUploading: boolean;
   onUploadFile: (file: File | undefined) => void;
   onRemoveFile: (fileId: string) => void;
+  lineCount: number;
 }
 
 export function OverviewPage({
@@ -43,6 +51,7 @@ export function OverviewPage({
   fileUploading,
   onUploadFile,
   onRemoveFile,
+  lineCount,
 }: OverviewPageProps) {
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-8">
@@ -50,8 +59,8 @@ export function OverviewPage({
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Project overview</p>
-            <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Dashboard</h2>
-            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+            <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Dashboard</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-600">
               Read-only snapshot of identity, scope, and pricing posture. Edit on Setup; build the bid on Estimate.
             </p>
           </div>
@@ -59,6 +68,13 @@ export function OverviewPage({
             Open estimate
           </button>
         </div>
+
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <StatCard label="Bid total" value={formatCurrencySafe(summary?.baseBidTotal)} hint="Current working estimate" />
+          <StatCard label="Rooms" value={rooms.length} hint="Across imported scope" />
+          <StatCard label="Lines" value={lineCount} hint="Priced estimate lines" />
+        </div>
+
         <div className="mt-5 flex flex-wrap gap-x-8 gap-y-4 border-t border-slate-100 pt-5 text-sm">
           <div className="min-w-[140px]">
             <p className="text-xs text-slate-500">Project</p>
@@ -184,6 +200,7 @@ export function OverviewPage({
         </section>
 
         <aside className="space-y-4 xl:sticky xl:top-[88px]">
+          <CrewRecommendationCard crew={summary?.crewRecommendation} manualInstallerCount={jobConditions.installerCount} />
           <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active assumptions</p>
             {(summary?.conditionAssumptions || []).length > 0 ? (

@@ -30,9 +30,9 @@ export function ExceptionList({
       {exceptions.map((ex) => {
         const line = linesById.get(ex.lineId);
         return (
-          <li key={ex.lineId} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <li key={ex.lineId} className="flex flex-col gap-2 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-900">{line?.description || 'Line'}</p>
+              <p className="truncate text-sm font-bold text-slate-900">{line?.description || 'Line'}</p>
               <p className="mt-1 text-[11px] text-slate-500">{ex.summary}</p>
               <div className="mt-2 flex flex-wrap gap-1">
                 {ex.kinds.includes('no_catalog_match') ? <StatusChip tone="warn">Catalog</StatusChip> : null}

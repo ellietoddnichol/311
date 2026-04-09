@@ -68,7 +68,7 @@
 
 @layer utilities {
   .ui-page {
-    @apply mx-auto w-full max-w-[1600px] px-3 py-2 md:px-4 md:py-3;
+    @apply mx-auto w-full max-w-[1600px] px-3 py-2 md:px-4 md:py-4;
   }
 
   .ui-page-narrow {
@@ -223,16 +223,16 @@
   }
 
   .ui-wtab {
-    @apply h-8 shrink-0 rounded-md px-2.5 text-[11px] font-semibold outline-none transition-colors duration-150;
+    @apply h-8 shrink-0 rounded-full border border-transparent px-3 text-[11px] font-semibold outline-none transition-colors duration-150;
     @apply focus-visible:ring-2 focus-visible:ring-blue-500/35 focus-visible:ring-offset-2;
   }
 
   .ui-wtab-idle {
-    @apply text-slate-600 hover:bg-slate-100/90;
+    @apply border-slate-200/90 bg-white text-slate-600 shadow-sm hover:bg-slate-50;
   }
 
   .ui-wtab-blue {
-    @apply bg-blue-700 text-white shadow-sm hover:bg-blue-800;
+    @apply border-transparent bg-blue-700 text-white shadow-sm hover:bg-blue-800;
   }
 
   /** Semantic status chips (saved, sync, import) — same tokens app-wide */
@@ -307,19 +307,19 @@
    * Primary = semibold title; body = medium/normal slate-800; meta = normal slate-500; totals = semibold.
    */
   .ui-table-th {
-    @apply px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-700;
+    @apply px-3 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.06em] text-slate-500;
   }
 
   .ui-table-th-end {
-    @apply px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-700;
+    @apply px-3 py-2.5 text-right text-[11px] font-medium uppercase tracking-[0.06em] text-slate-500;
   }
 
   .ui-table-cell {
-    @apply px-3 py-2 align-top text-xs text-slate-800;
+    @apply px-3 py-3.5 align-top text-xs text-slate-800;
   }
 
   .ui-table-title {
-    @apply text-xs font-semibold leading-snug text-slate-900;
+    @apply text-xs font-bold leading-snug text-slate-900;
   }
 
   .ui-table-meta {
