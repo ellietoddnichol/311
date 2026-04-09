@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ProjectRecord, TakeoffLineRecord } from '../../shared/types/estimator.ts';
-import { buildProjectConditionSummaryLines, createDefaultProjectJobConditions } from '../../shared/utils/jobConditions.ts';
+import { buildProjectConditionSummaryLines, createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../../shared/utils/jobConditions.ts';
 import { calculateEstimateSummary } from './estimateEngineV1.ts';
 
 function buildProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
@@ -126,4 +126,29 @@ test('labor burden is not added a second time on top of the base labor rate', ()
   assert.equal(summary.overheadAmount, 15);
   assert.equal(summary.profitAmount, 16.5);
   assert.equal(summary.baseBidTotal, 181.5);
+});
+
+test('crew recommendation bumps above one installer for large distributed scope', () => {
+  const project = buildProject({
+    jobConditions: normalizeProjectJobConditions({
+      ...createDefaultProjectJobConditions(),
+      installerCount: 1,
+    }),
+  });
+  const lines: TakeoffLineRecord[] = [];
+  for (let i = 0; i < 22; i += 1) {
+    lines.push(
+      buildLine({
+        id: `line-${i}`,
+        roomId: `room-${i}`,
+        description: `Accessory ${i}`,
+        laborMinutes: 30,
+        qty: 10,
+      })
+    );
+  }
+  const summary = calculateEstimateSummary(project, lines);
+  assert.ok(summary.crewRecommendation);
+  assert.ok(summary.crewRecommendation!.recommendedCrew >= 2);
+  assert.ok(summary.crewRecommendation!.daysAtManualCrew >= summary.crewRecommendation!.daysAtRecommendedCrew);
 });

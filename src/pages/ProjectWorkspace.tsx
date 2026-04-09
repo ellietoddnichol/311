@@ -34,6 +34,7 @@ import { EstimateSelectedLineEditor } from '../components/workspace/EstimateSele
 import { EstimateRunningTotalBar } from '../components/workspace/EstimateRunningTotalBar';
 import { EstimateSidebar, WorkspaceSidebarTab } from '../components/workspace/EstimateSidebar';
 import { WorkspaceToolbar } from '../components/workspace/WorkspaceToolbar';
+import { CrewRecommendationCard } from '../components/workflow/CrewRecommendationCard';
 import { calculateEstimateSummary } from '../shared/utils/estimateSummary';
 import { calculateWorkDuration, formatWorkWeeksLabel } from '../shared/utils/workDuration';
 import { formatCurrencySafe, formatKilobytesSafe, formatNumberSafe } from '../utils/numberFormat';
@@ -1710,6 +1711,8 @@ export function ProjectWorkspace() {
                 )}
               </section>
 
+              <CrewRecommendationCard crew={summary?.crewRecommendation} manualInstallerCount={jobConditions.installerCount} />
+
               <section className="rounded-2xl border border-slate-200/80 bg-white/92 shadow-sm p-3.5 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Scope + Navigation</p>
@@ -2240,6 +2243,7 @@ export function ProjectWorkspace() {
 
             <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)] items-start">
               <section className="space-y-4">
+                <CrewRecommendationCard crew={summary?.crewRecommendation} manualInstallerCount={jobConditions.installerCount} />
                 <div className="rounded-[24px] border border-slate-200/80 bg-white/90 p-3.5 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>

@@ -196,6 +196,21 @@ export interface SettingsRecord {
   updatedAt: string;
 }
 
+/** Schedule-oriented crew suggestion; labor $ math is unchanged. */
+export interface CrewRecommendationResult {
+  minimumCrew: number;
+  recommendedCrew: number;
+  maxEfficientCrew: number;
+  confidence: 'low' | 'medium' | 'high';
+  reasoning: string[];
+  daysAtMinCrew: number;
+  daysAtRecommendedCrew: number;
+  daysAtManualCrew: number;
+  durationWarning: string | null;
+  targetMaxFieldDays: number;
+  complexityTier: 'small' | 'medium' | 'large';
+}
+
 export interface EstimateSummary {
   materialSubtotal: number;
   laborSubtotal: number;
@@ -214,6 +229,7 @@ export interface EstimateSummary {
   baseBidTotal: number;
   conditionAssumptions: string[];
   projectConditions: ProjectConditions;
+  crewRecommendation?: CrewRecommendationResult;
 }
 
 export interface InstallReviewEmailDraft {

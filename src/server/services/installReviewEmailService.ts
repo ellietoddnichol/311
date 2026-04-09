@@ -200,10 +200,15 @@ export async function generateInstallReviewEmailDraft(input: InstallReviewEmailI
 		`Labor Cost: ${formatCurrencySafe(input.summary.adjustedLaborSubtotal || input.summary.laborSubtotal || 0)}`,
 		`Total Estimated Price: ${formatCurrencySafe(input.summary.baseBidTotal || 0)}`,
 	];
+	const cr = input.summary.crewRecommendation;
+	const crewGuidanceLine = cr
+		? `Crew guidance (schedule): minimum ${cr.minimumCrew}, recommended ${cr.recommendedCrew} (~${formatNumberSafe(cr.daysAtRecommendedCrew, 0)} field days at recommended); installers in Setup: ${crewSize ?? 1}`
+		: null;
 	const laborScheduleLines = [
 		`Estimated install duration: ${formatWorkWeeksLabel(input.summary.durationWeeks || 0)}`,
-		`Estimated days on site: ${formatNumberSafe(input.summary.durationDays || 0, 1)}`,
+		`Estimated days on site: ${formatNumberSafe(input.summary.durationDays || 0, 1)} (from work-week model; labor $ unchanged)`,
 		`Suggested crew size: ${crewSize ?? 'TBD'}`,
+		...(crewGuidanceLine ? [crewGuidanceLine] : []),
 		`Timing assumptions: ${input.project.bidDate || input.project.proposalDate || input.project.dueDate || 'Verify schedule window with field conditions.'}`,
 	];
 	const projectOverviewLines = [
@@ -212,6 +217,7 @@ export async function generateInstallReviewEmailDraft(input: InstallReviewEmailI
 		`Expected Project Timing / Start Date: ${input.project.bidDate || input.project.proposalDate || input.project.dueDate || 'Not provided'}`,
 		`Estimated Install Duration: ${formatWorkWeeksLabel(input.summary.durationWeeks || 0)}`,
 		`Suggested Crew Size: ${crewSize ?? 'TBD'}`,
+		...(cr ? [`App crew recommendation: ${cr.recommendedCrew} installers (~${formatNumberSafe(cr.daysAtRecommendedCrew, 0)} field days)`] : []),
 	];
 	const projectModifierLines = [
 		...conditionLines,

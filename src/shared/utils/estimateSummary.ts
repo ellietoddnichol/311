@@ -1,4 +1,5 @@
 import { EstimateSummary, ProjectRecord, TakeoffLineRecord } from '../types/estimator';
+import { computeCrewRecommendation } from './crewRecommendation';
 import { computeProjectConditionEffects, normalizeProjectJobConditions } from './jobConditions';
 import { calculateWorkDuration } from './workDuration';
 
@@ -49,5 +50,6 @@ export function calculateEstimateSummary(project: ProjectRecord, lines: TakeoffL
     baseBidTotal,
     conditionAssumptions: effects.assumptions,
     projectConditions: effects.projectConditions,
+    crewRecommendation,
   };
 }
