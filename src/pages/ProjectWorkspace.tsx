@@ -2099,7 +2099,7 @@ export function ProjectWorkspace() {
                   <h3 className="mt-0.5 text-base font-semibold tracking-tight text-slate-950">Keep source files attached to the estimate</h3>
                   <p className="mt-1 text-[11px] text-slate-600">Use this as the single reference set for imports, proposal support, and future revisions.</p>
                 </div>
-                <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-4 text-[10px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03]">
+                <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-full bg-[linear-gradient(135deg,var(--primary)_0%,#164fa8_100%)] px-4 text-[10px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03]">
                   <FileUp className="h-4 w-4" />
                   {fileUploading ? 'Uploading...' : 'Upload File'}
                   <input type="file" className="hidden" onChange={(e) => void uploadProjectFile(e.target.files?.[0])} disabled={fileUploading} />
@@ -2111,7 +2111,7 @@ export function ProjectWorkspace() {
                   <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Files Stored</p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">{projectFiles.length}</p>
                 </div>
-                <div className="rounded-[16px] border border-blue-200 bg-[var(--brand-soft)] px-3 py-2">
+                <div className="rounded-[16px] border border-blue-200 bg-[var(--primary-soft)] px-3 py-2">
                   <p className="text-[10px] uppercase tracking-[0.12em] text-blue-800">Latest Upload</p>
                   <p className="mt-1 truncate text-sm font-semibold text-slate-950">{projectFiles[0]?.fileName || 'No uploads yet'}</p>
                 </div>
@@ -2191,7 +2191,7 @@ export function ProjectWorkspace() {
                     <button
                       onClick={() => void generateProposalDraft('default_short')}
                       disabled={proposalDrafting !== null}
-                      className="inline-flex h-8 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-3 text-[10px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03] disabled:opacity-50"
+                      className="inline-flex h-8 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--primary)_0%,#164fa8_100%)] px-3 text-[10px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03] disabled:opacity-50"
                     >
                       {proposalDrafting === 'default_short' ? 'Drafting Short Proposal...' : 'Use Short Proposal Default'}
                     </button>
@@ -2224,7 +2224,7 @@ export function ProjectWorkspace() {
                       Reset To Defaults
                     </button>
                     <button onClick={() => void printProposalDocument()} className="inline-flex h-8 items-center justify-center rounded-full border border-slate-200 bg-white px-3 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Print</button>
-                    <button onClick={exportProposal} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-3 text-[10px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03]"><Download className="h-3.5 w-3.5" />Export PDF</button>
+                    <button onClick={exportProposal} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[linear-gradient(135deg,var(--primary)_0%,#164fa8_100%)] px-3 text-[10px] font-semibold text-white shadow-[0_12px_28px_rgba(11,61,145,0.22)] hover:brightness-[1.03]"><Download className="h-3.5 w-3.5" />Export PDF</button>
                   </div>
                 </div>
               </div>
@@ -2235,7 +2235,7 @@ export function ProjectWorkspace() {
                   <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{formatCurrencySafe(currentProposalSummary?.baseBidTotal)}</p>
                   <p className="mt-1 text-[11px] text-slate-500">Live estimate total</p>
                 </div>
-                <div className="rounded-[18px] bg-[var(--brand-soft)] p-3 shadow-sm ring-1 ring-blue-200/80">
+                <div className="rounded-[18px] bg-[var(--primary-soft)] p-3 shadow-sm ring-1 ring-blue-200/80">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-800">Grouped Products</p>
                   <p className="mt-1 text-[22px] font-semibold tracking-[-0.04em] text-slate-950">{proposalGroupedItemCount}</p>
                   <p className="mt-1 text-[11px] text-slate-600">Grouped from current estimate lines.</p>

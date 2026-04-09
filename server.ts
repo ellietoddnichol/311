@@ -148,12 +148,13 @@ async function startServer() {
     const items = db.prepare('SELECT * FROM catalog_items WHERE active = 1').all();
     res.json(items.map((i: any) => ({
       ...i,
+      imageUrl: i.image_url || undefined,
       baseMaterialCost: i.base_material_cost,
       baseLaborMinutes: i.base_labor_minutes,
       laborUnitType: i.labor_unit_type,
       taxable: !!i.taxable,
       adaFlag: !!i.ada_flag,
-      tags: i.tags ? JSON.parse(i.tags) : []
+      tags: i.tags ? JSON.parse(i.tags) : [],
     })));
   });
 
@@ -170,14 +171,15 @@ async function startServer() {
         baseMaterialCost: i.baseMaterialCost,
         baseLaborMinutes: i.baseLaborMinutes,
         active: i.active,
+        imageUrl: i.imageUrl || null,
       });
 
       db.prepare(`
-        INSERT INTO catalog_items (id, sku, category, subcategory, family, description, manufacturer, model, uom, base_material_cost, base_labor_minutes, labor_unit_type, taxable, ada_flag, tags, notes, active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO catalog_items (id, sku, category, subcategory, family, description, manufacturer, model, uom, base_material_cost, base_labor_minutes, labor_unit_type, taxable, ada_flag, tags, notes, image_url, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         i.id, i.sku, i.category, i.subcategory || null, i.family || null, i.description, i.manufacturer || null, i.model || null, i.uom,
-        i.baseMaterialCost, i.baseLaborMinutes, i.laborUnitType || null, i.taxable ? 1 : 0, i.adaFlag ? 1 : 0, JSON.stringify(i.tags || []), i.notes || null, i.active ? 1 : 0
+        i.baseMaterialCost, i.baseLaborMinutes, i.laborUnitType || null, i.taxable ? 1 : 0, i.adaFlag ? 1 : 0, JSON.stringify(i.tags || []), i.notes || null, i.imageUrl || null, i.active ? 1 : 0
       );
       res.status(201).json(i);
     } catch (error: any) {
@@ -233,6 +235,7 @@ async function startServer() {
         baseMaterialCost: Number(existing.base_material_cost || 0),
         baseLaborMinutes: Number(existing.base_labor_minutes || 0),
         active: false,
+        imageUrl: existing.image_url || null,
       });
 
       db.prepare('UPDATE catalog_items SET active = 0 WHERE id = ?').run(req.params.id);

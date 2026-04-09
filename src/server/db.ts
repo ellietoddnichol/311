@@ -85,6 +85,15 @@ export function initDb() {
     );
   `);
 
+  try {
+    const catalogCols = db.prepare('PRAGMA table_info(catalog_items)').all() as { name: string }[];
+    if (!catalogCols.some((col) => col.name === 'image_url')) {
+      db.exec('ALTER TABLE catalog_items ADD COLUMN image_url TEXT');
+    }
+  } catch (e) {
+    console.error('catalog_items image_url migration failed:', e);
+  }
+
   // Seed default settings if not exists
   const hasSettings = db.prepare('SELECT count(*) as count FROM settings').get() as { count: number };
   if (hasSettings.count === 0) {

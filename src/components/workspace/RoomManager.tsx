@@ -63,7 +63,7 @@ export function RoomManager({
                     ? 'border-transparent shadow-md'
                     : 'border-slate-200/80 bg-white hover:border-slate-300'
                 }`}
-                style={active ? { background: 'var(--brand)', borderColor: 'transparent' } : undefined}
+                style={active ? { background: 'var(--primary)', borderColor: 'transparent' } : undefined}
               >
                 <div className="flex h-8 items-center justify-between gap-1 px-2">
                   <button

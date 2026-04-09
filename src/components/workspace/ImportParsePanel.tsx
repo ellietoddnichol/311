@@ -196,7 +196,7 @@ export function ImportParsePanel({ catalog, projectId, roomId, onFinalize, varia
               </div>
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
                 <span className="rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80">Room target required</span>
-                <span className="rounded-full bg-[var(--brand-soft)] px-3 py-1.5 text-blue-800 shadow-sm ring-1 ring-blue-200/80">Accepted {acceptedLines.length} lines / {acceptedQuantityTotal} units</span>
+                <span className="rounded-full bg-[var(--primary-soft)] px-3 py-1.5 text-blue-800 shadow-sm ring-1 ring-blue-200/80">Accepted {acceptedLines.length} lines / {acceptedQuantityTotal} units</span>
               </div>
             </div>
           ) : null}
@@ -214,7 +214,7 @@ export function ImportParsePanel({ catalog, projectId, roomId, onFinalize, varia
               className="min-h-[140px] w-full rounded-[18px] border border-slate-200 bg-slate-50/70 px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
             <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={handleParseText} className="inline-flex h-9 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,#164fa8_100%)] px-4 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(11,61,145,0.22)] hover:brightness-[1.03]">Parse Text</button>
+              <button onClick={handleParseText} className="inline-flex h-9 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--primary)_0%,#164fa8_100%)] px-4 text-[11px] font-semibold text-white shadow-[0_10px_24px_rgba(11,61,145,0.22)] hover:brightness-[1.03]">Parse Text</button>
               <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50">
                 Upload File
                 <input type="file" accept=".txt,.csv" className="hidden" onChange={(e) => handleFileUpload(e.target.files?.[0])} />
@@ -229,7 +229,7 @@ export function ImportParsePanel({ catalog, projectId, roomId, onFinalize, varia
           <div className="rounded-[22px] border border-slate-200/80 bg-white/90 p-3 shadow-sm">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Review Queue</p>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-2xl bg-[var(--brand-soft)] px-2 py-3">
+              <div className="rounded-2xl bg-[var(--primary-soft)] px-2 py-3">
                 <p className="text-[18px] font-semibold tracking-[-0.04em] text-slate-950">{acceptedLines.length}</p>
                 <p className="text-[10px] font-medium uppercase tracking-wide text-blue-800">Include</p>
               </div>

@@ -24,6 +24,8 @@ export interface CatalogItem {
   description: string;
   manufacturer?: string;
   model?: string;
+  /** Product / cut sheet image (https URL). */
+  imageUrl?: string;
   uom: UOM;
   baseMaterialCost: number;
   baseLaborMinutes: number;

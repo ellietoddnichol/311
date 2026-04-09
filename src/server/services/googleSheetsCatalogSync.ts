@@ -306,6 +306,7 @@ export async function upsertItemInGoogleSheet(input: {
   baseMaterialCost: number;
   baseLaborMinutes: number;
   active: boolean;
+  imageUrl?: string | null;
 }): Promise<void> {
   const cfg = getSpreadsheetConfig();
   const key = input.sku || input.description;
@@ -322,6 +323,7 @@ export async function upsertItemInGoogleSheet(input: {
       { aliases: ['Unit', 'UOM', 'Base Unit'], value: input.unit || 'EA' },
       { aliases: ['BaseMaterialCost', 'Base Material Cost', 'Material Cost'], value: String(input.baseMaterialCost || 0) },
       { aliases: ['BaseLaborMinutes', 'Base Labor Minutes', 'Labor Minutes'], value: String(input.baseLaborMinutes || 0) },
+      { aliases: ['Image', 'Image URL', 'ImageURL', 'Photo', 'Picture', 'Product Image'], value: input.imageUrl || '' },
       { aliases: ['Active', 'Is Active', 'Enabled'], value: input.active ? 'TRUE' : 'FALSE' },
       { aliases: ['UpdatedAt', 'Updated At'], value: new Date().toISOString() },
     ],
@@ -478,7 +480,7 @@ function upsertItems(rows: string[][], warnings: string[]): number {
   const skuCol = columnIndex(headers, ['sku', 'item sku']);
   const itemKeyCol = columnIndex(headers, ['item id', 'itemid', 'item key', 'search key', 'search key', 'search_key', 'key']);
   const categoryCol = columnIndex(headers, ['scope category', 'category']);
-  const manufacturerCol = columnIndex(headers, ['manufacturer', 'mfr', 'mfg', 'brand']);
+  const manufacturerCol = columnIndex(headers, ['manufacturer', 'mfr', 'mfg']);
   const modelCol = columnIndex(headers, ['model', 'model number', 'modelnumber']);
   const descriptionCol = columnIndex(headers, ['description', 'item description']);
   const itemCol = columnIndex(headers, ['item', 'item name', 'itemname']);
@@ -490,6 +492,7 @@ function upsertItems(rows: string[][], warnings: string[]): number {
   const notesCol = columnIndex(headers, ['notes', 'remarks']);
   const familyCol = columnIndex(headers, ['family']);
   const subcategoryCol = columnIndex(headers, ['subcategory', 'sub category']);
+  const imageUrlCol = columnIndex(headers, ['image', 'image url', 'imageurl', 'photo', 'picture', 'product image', 'cut sheet', 'cutsheet']);
 
   if (descriptionCol === null && itemCol === null) {
     throw new Error('ITEMS tab is missing required headers. Expected Item or Description columns.');
@@ -522,11 +525,13 @@ function upsertItems(rows: string[][], warnings: string[]): number {
     const id = existing?.id || `sheet-item-${stableKey}`;
     const tags = splitList(getCell(row, tagsCol));
 
+    const imageUrl = getCell(row, imageUrlCol) || null;
+
     if (existing) {
       estimatorDb.prepare(`
         UPDATE catalog_items
         SET sku = ?, category = ?, subcategory = ?, family = ?, description = ?, uom = ?,
-            manufacturer = ?, model = ?, base_material_cost = ?, base_labor_minutes = ?, tags = ?, notes = ?, active = ?
+            manufacturer = ?, model = ?, base_material_cost = ?, base_labor_minutes = ?, tags = ?, notes = ?, image_url = ?, active = ?
         WHERE id = ?
       `).run(
         sku || null,
@@ -541,6 +546,7 @@ function upsertItems(rows: string[][], warnings: string[]): number {
         parseNumber(getCell(row, laborCol), 0),
         JSON.stringify(tags),
         getCell(row, notesCol) || null,
+        imageUrl,
         active ? 1 : 0,
         id
       );
@@ -548,8 +554,8 @@ function upsertItems(rows: string[][], warnings: string[]): number {
       estimatorDb.prepare(`
         INSERT INTO catalog_items (
           id, sku, category, subcategory, family, description, manufacturer, model, uom,
-          base_material_cost, base_labor_minutes, labor_unit_type, taxable, ada_flag, tags, notes, active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          base_material_cost, base_labor_minutes, labor_unit_type, taxable, ada_flag, tags, notes, image_url, active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         sku || null,
@@ -567,6 +573,7 @@ function upsertItems(rows: string[][], warnings: string[]): number {
         0,
         JSON.stringify(tags),
         getCell(row, notesCol) || null,
+        imageUrl,
         active ? 1 : 0
       );
     }

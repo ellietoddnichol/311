@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowUpDown, Database, Edit2, Package, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { ArrowUpDown, Database, Edit2, ExternalLink, Package, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { ResumeProjectBanner } from '../components/ResumeProjectBanner';
 import { api } from '../services/api';
 import { CatalogSyncStatusRecord, BundleRecord, ModifierRecord } from '../shared/types/estimator';
@@ -8,6 +8,13 @@ import { formatCurrencySafe, formatNumberSafe, formatPercentSafe } from '../util
 
 type SortKey = 'sku-asc' | 'sku-desc' | 'name-asc' | 'name-desc' | 'category-asc' | 'material-desc' | 'labor-desc';
 type CatalogTab = 'items' | 'modifiers' | 'bundles';
+
+function catalogImageHref(url: string | undefined | null): string | null {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return null;
+}
 
 function statusClass(status: CatalogSyncStatusRecord['status']): string {
   if (status === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
@@ -88,7 +95,8 @@ export function Catalog() {
           (item.family || '').toLowerCase().includes(query) ||
           (item.subcategory || '').toLowerCase().includes(query) ||
           (item.manufacturer || '').toLowerCase().includes(query) ||
-          (item.model || '').toLowerCase().includes(query);
+          (item.model || '').toLowerCase().includes(query) ||
+          (item.imageUrl || '').toLowerCase().includes(query);
 
         const categoryMatch = categoryFilter === 'all' || item.category === categoryFilter;
         const activeMatch =
@@ -436,21 +444,35 @@ export function Catalog() {
                 <p className="text-sm text-slate-600">No items match the current filters.</p>
               </div>
             ) : (
-              <table className="w-full text-xs">
+              <table className="w-full min-w-[900px] text-xs">
+                <colgroup>
+                  <col className="w-[12%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[7%]" />
+                  <col />
+                </colgroup>
                 <thead className="sticky top-0 z-10 bg-slate-100 border-b border-slate-300 text-slate-600 uppercase tracking-wide">
                   <tr>
                     <th className="text-left font-semibold py-2 px-3">SKU / ID</th>
                     <th className="text-left font-semibold py-2 px-2">Description</th>
                     <th className="text-left font-semibold py-2 px-2">Category</th>
+                    <th className="text-left font-semibold py-2 px-2">Manufacturer</th>
                     <th className="text-left font-semibold py-2 px-2">Unit</th>
                     <th className="text-right font-semibold py-2 px-2">Labor</th>
                     <th className="text-right font-semibold py-2 px-2">Material</th>
                     <th className="text-center font-semibold py-2 px-2">Active</th>
-                    <th className="text-right font-semibold py-2 px-3">Actions</th>
+                    <th className="text-right font-semibold py-2 px-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredItems.map((item) => (
+                  {filteredItems.map((item) => {
+                    const imageHref = catalogImageHref(item.imageUrl ?? (item as { image_url?: string }).image_url);
+                    return (
                     <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
                       <td className="py-2 px-3 align-top">
                         <div className="font-medium text-slate-800">{item.sku || 'No SKU'}</div>
@@ -476,9 +498,10 @@ export function Catalog() {
                           {item.active ? 'Yes' : 'No'}
                         </span>
                       </td>
-                      <td className="py-2 px-3">
-                        <div className="flex items-center justify-end gap-1">
+                      <td className="py-2 px-2">
+                        <div className="flex flex-wrap items-center justify-end gap-1">
                           <button
+                            type="button"
                             onClick={() => setEditingItem(item)}
                             className="h-7 px-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1"
                           >
@@ -486,16 +509,30 @@ export function Catalog() {
                             Edit
                           </button>
                           <button
+                            type="button"
                             onClick={() => void handleDeleteItem(item.id)}
                             className="h-7 px-2 rounded border border-red-200 text-red-700 hover:bg-red-50 inline-flex items-center gap-1"
                           >
                             <Trash2 className="w-3 h-3" />
                             Deactivate
                           </button>
+                          {imageHref ? (
+                            <a
+                              href={imageHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex h-7 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 font-medium text-blue-800 hover:bg-blue-100"
+                              title={imageHref}
+                            >
+                              <ExternalLink className="w-3 h-3 shrink-0" />
+                              Image
+                            </a>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             )
@@ -709,6 +746,16 @@ export function Catalog() {
                     className="w-full h-9 px-2 border border-slate-300 rounded text-sm"
                     value={editingItem.baseLaborMinutes}
                     onChange={(e) => setEditingItem({ ...editingItem, baseLaborMinutes: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[11px] font-medium text-slate-600 mb-1">Image URL (https)</label>
+                  <input
+                    type="url"
+                    placeholder="https://…"
+                    className="w-full h-9 px-2 border border-slate-300 rounded text-sm"
+                    value={editingItem.imageUrl || ''}
+                    onChange={(e) => setEditingItem({ ...editingItem, imageUrl: e.target.value.trim() || undefined })}
                   />
                 </div>
                 <div className="col-span-2 flex items-center gap-4 text-xs text-slate-700">

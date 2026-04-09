@@ -35,7 +35,7 @@ export function TopProjectHeader({
     <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(246,248,251,0.94)_100%)] px-4 py-1.5 backdrop-blur">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0 flex items-start gap-3">
-          <div className="hidden h-7 w-1 rounded-full bg-[linear-gradient(180deg,var(--brand)_0%,var(--accent-teal)_100%)] md:block" />
+          <div className="hidden h-7 w-1 rounded-full bg-[linear-gradient(180deg,var(--primary)_0%,var(--accent-teal)_100%)] md:block" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="truncate text-[17px] font-semibold tracking-[-0.03em] text-slate-950 md:text-[19px]">{project.projectName}</p>
@@ -75,7 +75,7 @@ export function TopProjectHeader({
             <button onClick={() => onSave()} className="flex h-7 items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 text-[10px] font-medium text-slate-700 hover:bg-slate-50 md:hidden">
               <Save className="w-3.5 h-3.5" /> Save
             </button>
-            <button onClick={() => onSubmitBid()} className="flex h-8 items-center gap-1.5 rounded-full bg-[linear-gradient(135deg,var(--brand)_0%,var(--brand-strong)_72%)] px-3.5 text-[10px] font-semibold text-white shadow-[0_10px_24px_rgba(11,61,145,0.24)] hover:brightness-[1.03]">
+            <button onClick={() => onSubmitBid()} className="flex h-8 items-center gap-1.5 rounded-full bg-[linear-gradient(135deg,var(--primary)_0%,var(--primary-strong)_72%)] px-3.5 text-[10px] font-semibold text-white shadow-[0_10px_24px_rgba(11,61,145,0.24)] hover:brightness-[1.03]">
               <Send className="w-3.5 h-3.5" /> {statusActionLabel}
               <ArrowUpRight className="w-3.5 h-3.5 opacity-80" />
             </button>
