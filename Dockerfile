@@ -10,8 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
-RUN npm ci
+# .npmrc must be present before `npm ci` (legacy-peer-deps for OpenAI/zod peer mismatch).
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --legacy-peer-deps
 
 COPY . .
 
