@@ -1794,9 +1794,14 @@ export function ProjectWorkspace() {
                       <p className="mt-1 text-sm font-semibold tabular-nums text-slate-950">{formatNumberSafe(summary?.durationDays || 0, 0)}</p>
                       <p className="mt-0.5 text-[10px] text-slate-500">Setup crew · calendar math</p>
                       {fieldScheduleHint ? (
-                        <p className="mt-1 text-[9px] font-medium leading-snug text-blue-950/90">
-                          Field-style: {fieldScheduleHint.fieldCrew} crew · ~{formatNumberSafe(fieldScheduleHint.fieldDays, 1)} d
-                        </p>
+                        <div className="mt-1 space-y-0.5 text-[9px] font-medium leading-snug text-blue-950/90">
+                          <p>
+                            Field suggestion only: {fieldScheduleHint.fieldCrew} crew · ~{formatNumberSafe(fieldScheduleHint.fieldDays, 1)} d
+                          </p>
+                          <p className="font-normal text-slate-600">
+                            Totals unchanged — pricing still uses Setup crew and the estimate engine.
+                          </p>
+                        </div>
                       ) : null}
                     </div>
                     <div className="min-w-[9.5rem] shrink-0 rounded-lg border-2 border-blue-200/80 bg-[var(--brand-soft)] p-2 shadow-sm ring-1 ring-blue-200/60">

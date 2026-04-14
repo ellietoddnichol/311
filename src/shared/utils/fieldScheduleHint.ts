@@ -49,7 +49,10 @@ export function computeFieldScheduleHint(input: {
   const fieldDays =
     hours > 0 ? Math.max(1, Math.ceil(hours / (fieldCrew * HR_PER_INSTALLER_DAY))) : mathDays > 0 ? mathDays : 0;
 
-  if (fieldCrew === mathCrew && Math.round(fieldDays) === Math.round(mathDays)) return null;
+  /** Suppress noise unless crew differs by ≥1 or calendar days differ by ≥1 full day. */
+  const crewDelta = fieldCrew - mathCrew;
+  const dayDelta = Math.abs(Math.round(fieldDays) - Math.round(mathDays));
+  if (crewDelta < 1 && dayDelta < 1) return null;
 
   let reason: string | null = null;
   if (fieldCrew > mathCrew) {

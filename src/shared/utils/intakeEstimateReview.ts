@@ -18,10 +18,36 @@ export const ESTIMATE_REVIEW_HIGH_CONFIDENCE: IntakeCatalogMatch['confidence'] =
 /** Below this score (when confidence is `none` or `possible`), bulk-ignore targets weak rows. */
 export const ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD = 0.45;
 
+/** How a priced line reached `accepted` in intake review (audit + UI labels). */
+export type EstimateReviewAcceptSource = 'server' | 'auto_strong_match' | 'manual';
+
 export type EstimateReviewLineState = {
   applicationStatus: IntakeApplicationStatus;
   selectedCatalogItemId: string | null;
+  acceptSource?: EstimateReviewAcceptSource;
 };
+
+export function estimateReviewAcceptSourceLabel(source: EstimateReviewAcceptSource | undefined): string | null {
+  if (!source) return null;
+  if (source === 'auto_strong_match') return 'Auto-accepted: strong catalog match';
+  if (source === 'server') return 'Accepted on import';
+  if (source === 'manual') return 'Confirmed by you';
+  return null;
+}
+
+/** Optional catalog list: when provided, auto-accept only if the resolved item exists and is active. */
+export type IntakeCatalogEligibilityEntry = Readonly<{ id: string; active?: boolean }>;
+
+export function isCatalogIdEligibleForIntakeAutoAccept(
+  catalogItemId: string | null | undefined,
+  catalog?: ReadonlyArray<IntakeCatalogEligibilityEntry>
+): boolean {
+  if (!catalogItemId) return false;
+  if (!catalog?.length) return true;
+  const item = catalog.find((c) => c.id === catalogItemId);
+  if (!item) return false;
+  return item.active !== false;
+}
 
 export type EstimateReviewInitial = {
   lineByFingerprint: Record<string, EstimateReviewLineState>;
@@ -29,27 +55,39 @@ export type EstimateReviewInitial = {
   projectModifierById: Record<string, IntakeApplicationStatus>;
 };
 
-export function buildInitialEstimateReviewState(draft: IntakeEstimateDraft | null | undefined): EstimateReviewInitial {
+export function buildInitialEstimateReviewState(
+  draft: IntakeEstimateDraft | null | undefined,
+  catalog?: ReadonlyArray<IntakeCatalogEligibilityEntry>
+): EstimateReviewInitial {
   if (!draft) {
     return { lineByFingerprint: {}, jobConditionById: {}, projectModifierById: {} };
   }
   const lineByFingerprint: Record<string, EstimateReviewLineState> = {};
   for (const row of draft.lineSuggestions) {
-    lineByFingerprint[row.reviewLineFingerprint] = {
+    const base: EstimateReviewLineState = {
       applicationStatus: row.applicationStatus,
       selectedCatalogItemId: row.suggestedCatalogItemId,
     };
+    if (row.applicationStatus === 'accepted') {
+      base.acceptSource = 'server';
+    }
+    lineByFingerprint[row.reviewLineFingerprint] = base;
   }
-  /** Default UX: trust strong catalog matches so review starts closer to “exceptions only”. Server Tier-A / explicit accepts are unchanged. */
+  /**
+   * Default UX: trust strong catalog matches so review starts closer to “exceptions only”.
+   * Only when still `suggested`, match is the selected candidate in `topCatalogCandidates`, confidence is strong,
+   * and (when catalog is passed) the catalog item exists and is active — does not override server accept/replace/ignore.
+   */
   for (const row of draft.lineSuggestions) {
     if (row.scopeBucket !== 'priced_base_scope') continue;
     const fp = row.reviewLineFingerprint;
     const st = lineByFingerprint[fp];
-    if (st.applicationStatus !== 'suggested') continue;
+    if (!st || st.applicationStatus !== 'suggested') continue;
     const m = getActiveCatalogMatchForRow(row, st);
-    if (m?.confidence === 'strong') {
-      lineByFingerprint[fp] = { ...st, applicationStatus: 'accepted' };
-    }
+    if (m?.confidence !== 'strong') continue;
+    const catId = st.selectedCatalogItemId ?? row.suggestedCatalogItemId;
+    if (!isCatalogIdEligibleForIntakeAutoAccept(catId, catalog)) continue;
+    lineByFingerprint[fp] = { ...st, applicationStatus: 'accepted', acceptSource: 'auto_strong_match' };
   }
   const jobConditionById: Record<string, IntakeApplicationStatus> = {};
   for (const jc of draft.projectSuggestion.suggestedJobConditionsPatch ?? []) {
@@ -199,6 +237,11 @@ export function findAiClassificationForFingerprint(
   return best;
 }
 
+/**
+ * Match row for the **currently selected** catalog id, but only if that id appears in `topCatalogCandidates`
+ * (the shortlist produced for this line). Manual picks not yet reflected in the shortlist return null so callers
+ * do not treat stale matcher rows as “active” for automation.
+ */
 export function getActiveCatalogMatchForRow(
   row: IntakeLineEstimateSuggestion,
   lineState: EstimateReviewLineState | undefined

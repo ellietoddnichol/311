@@ -68,13 +68,16 @@ export function HandoffSummary({ draft, generating, onGenerate, onCopy, fieldSch
           </div>
           {fieldScheduleHint ? (
             <div className="rounded-[14px] border border-blue-200/70 bg-blue-50/50 px-3 py-2.5 text-[11px] leading-snug text-slate-800">
-              <p className="font-semibold text-blue-950">Field-style staffing (hint)</p>
+              <p className="font-semibold text-blue-950">Field suggestion only — totals unchanged</p>
               <p className="mt-1 text-slate-700">
-                Schedule math: {fieldScheduleHint.mathCrew} installer{fieldScheduleHint.mathCrew === 1 ? '' : 's'} ·{' '}
-                {formatNumberSafe(fieldScheduleHint.mathDays, 1)} d · parallel suggestion: {fieldScheduleHint.fieldCrew} · ~{formatNumberSafe(fieldScheduleHint.fieldDays, 1)} d.
+                Schedule math (Setup crew): {fieldScheduleHint.mathCrew} installer{fieldScheduleHint.mathCrew === 1 ? '' : 's'} ·{' '}
+                {formatNumberSafe(fieldScheduleHint.mathDays, 1)} d. Parallel staffing idea: {fieldScheduleHint.fieldCrew} · ~{formatNumberSafe(fieldScheduleHint.fieldDays, 1)} d.
               </p>
               {fieldScheduleHint.reason ? <p className="mt-1 text-slate-600">{fieldScheduleHint.reason}</p> : null}
-              <p className="mt-1 text-[10px] text-slate-500">Does not change bid totals — adjust crew on Setup if you want the estimate engine to match.</p>
+              <p className="mt-1 text-[10px] font-medium text-slate-600">
+                Pricing and the bid total still follow your current Setup values and the estimate engine — this is guidance only.
+              </p>
+              <p className="mt-0.5 text-[10px] text-slate-500">Change crew on Setup if you want calendar math to match the field-style line.</p>
             </div>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-3">

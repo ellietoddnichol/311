@@ -1524,7 +1524,7 @@ export function ProjectIntake() {
     setParserReviewSummary(buildParserReviewSummary(result));
     setLastIntakeParse(result);
     if (result.estimateDraft) {
-      const init = buildInitialEstimateReviewState(result.estimateDraft);
+      const init = buildInitialEstimateReviewState(result.estimateDraft, catalog);
       setEstimateReviewLines(init.lineByFingerprint);
       setEstimateReviewJobConditions(init.jobConditionById);
       setEstimateReviewProjectMods(init.projectModifierById);
@@ -2103,7 +2103,17 @@ export function ProjectIntake() {
   function patchEstimateReviewLine(fingerprint: string, patch: Partial<EstimateReviewLineState>) {
     setEstimateReviewLines((prev) => {
       const cur = prev[fingerprint] ?? { applicationStatus: 'suggested' as const, selectedCatalogItemId: null };
-      return { ...prev, [fingerprint]: { ...cur, ...patch } };
+      const merged: EstimateReviewLineState = { ...cur, ...patch };
+      if (merged.applicationStatus !== 'accepted') {
+        return {
+          ...prev,
+          [fingerprint]: {
+            applicationStatus: merged.applicationStatus,
+            selectedCatalogItemId: merged.selectedCatalogItemId,
+          },
+        };
+      }
+      return { ...prev, [fingerprint]: merged };
     });
   }
 
@@ -2117,7 +2127,7 @@ export function ProjectIntake() {
     };
     const catId = st.selectedCatalogItemId ?? row.suggestedCatalogItemId;
     const item = catId ? catalog.find((c) => c.id === catId) : undefined;
-    patchEstimateReviewLine(fingerprint, { applicationStatus: 'accepted', selectedCatalogItemId: catId });
+    patchEstimateReviewLine(fingerprint, { applicationStatus: 'accepted', selectedCatalogItemId: catId, acceptSource: 'manual' });
     const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === fingerprint)?.id;
     if (item && lineId) {
       applyCatalogToLineId(lineId, item, 'Accepted estimate suggestion');
@@ -2149,11 +2159,13 @@ export function ProjectIntake() {
         applicationStatus: row.applicationStatus,
         selectedCatalogItemId: row.suggestedCatalogItemId,
       };
+      if (!st || st.applicationStatus !== 'suggested') continue;
       const m = getActiveCatalogMatchForRow(row, st);
       if (m?.confidence === ESTIMATE_REVIEW_HIGH_CONFIDENCE) {
         nextReview[row.reviewLineFingerprint] = {
           applicationStatus: 'accepted',
           selectedCatalogItemId: st.selectedCatalogItemId ?? row.suggestedCatalogItemId,
+          acceptSource: 'manual',
         };
       }
     }
@@ -2195,7 +2207,7 @@ export function ProjectIntake() {
         applicationStatus: row.applicationStatus,
         selectedCatalogItemId: row.suggestedCatalogItemId,
       };
-      if (st.applicationStatus !== 'suggested') continue;
+      if (!st || st.applicationStatus !== 'suggested') continue;
       const m = getActiveCatalogMatchForRow(row, st);
       const low =
         !m ||
@@ -2225,6 +2237,7 @@ export function ProjectIntake() {
         applicationStatus: row.applicationStatus,
         selectedCatalogItemId: row.suggestedCatalogItemId,
       };
+      if (!st || st.applicationStatus !== 'suggested') continue;
       const m = getActiveCatalogMatchForRow(row, st);
       const tier = row.catalogAutoApplyTier || 'C';
       const eligible =
@@ -2233,6 +2246,7 @@ export function ProjectIntake() {
       nextReview[row.reviewLineFingerprint] = {
         applicationStatus: 'accepted',
         selectedCatalogItemId: st.selectedCatalogItemId ?? row.suggestedCatalogItemId,
+        acceptSource: 'manual',
       };
     }
     setEstimateReviewLines(nextReview);

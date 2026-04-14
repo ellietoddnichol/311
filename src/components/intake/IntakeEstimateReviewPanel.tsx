@@ -15,6 +15,7 @@ import type { CatalogItem } from '../../types';
 import {
   applicationStatusLabel,
   computeDraftBasisSummary,
+  estimateReviewAcceptSourceLabel,
   ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD,
   findAiClassificationForFingerprint,
   findReviewLineForFingerprint,
@@ -85,6 +86,7 @@ function lineStateForRow(
     lineByFingerprint[row.reviewLineFingerprint] ?? {
       applicationStatus: row.applicationStatus,
       selectedCatalogItemId: row.suggestedCatalogItemId,
+      ...(row.applicationStatus === 'accepted' ? { acceptSource: 'server' as const } : {}),
     }
   );
 }
@@ -291,6 +293,22 @@ export function IntakeEstimateReviewPanel({
                 <span className="text-[12px] text-slate-500">Not confirmed</span>
               )}
             </div>
+            {st.applicationStatus === 'accepted' && estimateReviewAcceptSourceLabel(st.acceptSource) ? (
+              <p
+                className={`mt-1 max-w-xl text-[10px] font-medium leading-snug ${
+                  st.acceptSource === 'auto_strong_match' ? 'text-sky-800' : st.acceptSource === 'server' ? 'text-slate-600' : 'text-emerald-800'
+                }`}
+                title={
+                  st.acceptSource === 'auto_strong_match'
+                    ? 'This line started accepted because the catalog match was strong. You can still Replace or Ignore.'
+                    : st.acceptSource === 'server'
+                      ? 'Marked accepted when the import was built (e.g. Tier A or parser).'
+                      : 'You confirmed this line in review.'
+                }
+              >
+                {estimateReviewAcceptSourceLabel(st.acceptSource)}
+              </p>
+            ) : null}
             {match && selectedId ? (
               <>
                 <div className="mt-1 font-mono text-sm font-semibold text-slate-900">{catItem?.sku ?? match.sku}</div>
@@ -348,20 +366,20 @@ export function IntakeEstimateReviewPanel({
             {st.applicationStatus === 'suggested' ? (
               <button
                 type="button"
-                className="h-8 min-w-0 flex-1 rounded-md bg-slate-900 px-2 text-center text-[12px] font-semibold text-white shadow-sm hover:bg-slate-800 lg:flex-none"
+                className="min-h-10 min-w-0 flex-1 rounded-md bg-slate-900 px-3 py-2 text-center text-[12px] font-semibold text-white shadow-sm hover:bg-slate-800 lg:flex-none lg:min-h-0 lg:h-10"
                 onClick={() => onAcceptLine(fp)}
               >
                 Accept
               </button>
             ) : (
-              <div className="flex min-h-8 flex-1 items-center rounded-md border border-slate-200/80 bg-slate-50/90 px-2 text-[11px] font-medium text-slate-700 lg:flex-none">
+              <div className="flex min-h-10 flex-1 items-center rounded-md border border-slate-200/80 bg-slate-50/90 px-2 text-[11px] font-medium text-slate-700 lg:flex-none lg:min-h-8">
                 {applicationStatusLabel(st.applicationStatus)}
               </div>
             )}
             <div className="relative shrink-0">
               <button
                 type="button"
-                className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-900"
+                className="flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-900 lg:h-8 lg:w-8"
                 aria-haspopup="menu"
                 aria-expanded={openRowActionsFp === fp}
                 aria-label="Line actions"
@@ -385,7 +403,7 @@ export function IntakeEstimateReviewPanel({
                       <button
                         type="button"
                         role="menuitem"
-                        className="block w-full px-3 py-2 text-left text-[12px] text-slate-800 hover:bg-slate-50 lg:hidden"
+                        className="block w-full px-3 py-3 text-left text-[12px] text-slate-800 hover:bg-slate-50 sm:py-2 lg:hidden"
                         onClick={() => {
                           onAcceptLine(fp);
                           setOpenRowActionsFp(null);
@@ -397,7 +415,7 @@ export function IntakeEstimateReviewPanel({
                     <button
                       type="button"
                       role="menuitem"
-                      className="block w-full px-3 py-2 text-left text-[12px] text-slate-800 hover:bg-slate-50"
+                      className="block w-full px-3 py-3 text-left text-[12px] text-slate-800 hover:bg-slate-50 sm:py-2"
                       onClick={() => {
                         onOpenCatalogPicker(fp);
                         setOpenRowActionsFp(null);
@@ -408,7 +426,7 @@ export function IntakeEstimateReviewPanel({
                     <button
                       type="button"
                       role="menuitem"
-                      className="block w-full px-3 py-2 text-left text-[12px] text-red-700 hover:bg-red-50/80"
+                      className="block w-full px-3 py-3 text-left text-[12px] text-red-700 hover:bg-red-50/80 sm:py-2"
                       onClick={() => {
                         onIgnoreLine(fp);
                         setOpenRowActionsFp(null);
