@@ -11,8 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # .npmrc must be present before `npm ci` (legacy-peer-deps for OpenAI/zod peer mismatch).
+# --include=dev: CI / Cloud Build often sets NODE_ENV=production; without this, npm ci skips
+# devDependencies and `npm run lint` (tsc) fails because typescript is not installed.
 COPY package.json package-lock.json .npmrc ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci --legacy-peer-deps --include=dev
 
 COPY . .
 
