@@ -1,8 +1,0 @@
-Soften typography: Inter + JetBrains Mono, tighter tracking
-
-- Swap Public Sans -> Inter for the sans stack (neutral, normalized app feel a la Linear/Figma/Vercel)
-- Swap IBM Plex Mono -> JetBrains Mono for the mono stack (warmer, less technical-drawing than IBM Plex while still readable as mono for IDs and tabular numerics)
-- Enable Inter OpenType features (cv02/03/04/11, ss01) on body for cleaner letterforms
-- Dial back extreme uppercase tracking across the app (0.18em -> 0.08em, 0.16em -> 0.08em, 0.14em -> 0.06em, 0.12em -> 0.05em) so kickers, tabs, chips, and table headers read as normal app chrome rather than blueprint annotations
-
-Pure presentation change; logic unchanged. Lint and build remain green.

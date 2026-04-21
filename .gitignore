@@ -20,3 +20,6 @@ estimator.db-wal
 # Local starter pack (re-extract ZIP when needed; keep image/repo small)
 div10_starter_pack.zip
 div10_starter_pack_extracted/
+
+.commit-msg.tmp
+
