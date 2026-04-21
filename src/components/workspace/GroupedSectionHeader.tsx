@@ -18,7 +18,9 @@ export function GroupedSectionHeader({
   unresolvedCount = 0,
   tone = 'estimate',
 }: Props) {
-  const palette = 'border-slate-200 bg-slate-50';
+  const palette = tone === 'takeoff'
+    ? 'border-amber-200 bg-amber-50/70'
+    : 'border-slate-200 bg-slate-50';
 
   return (
     <div className={`sticky top-0 z-10 rounded border px-3 py-1 ${palette}`}>

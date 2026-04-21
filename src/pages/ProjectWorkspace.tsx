@@ -55,6 +55,15 @@ type WorkspaceScopeMode = 'active' | 'all';
 type TakeoffMatchStatus = 'all' | 'matched' | 'unmatched';
 
 const WORKSPACE_TABS: WorkspaceTab[] = ['overview', 'setup', 'rooms', 'takeoff', 'estimate', 'files', 'proposal'];
+const WORKSPACE_TAB_LABELS: Record<WorkspaceTab, string> = {
+  overview: 'Overview',
+  setup: 'Project Setup',
+  rooms: 'Rooms',
+  takeoff: 'Takeoff',
+  estimate: 'Estimate',
+  files: 'Files',
+  proposal: 'Proposal',
+};
 
 function isWorkspaceTab(value: string | null): value is WorkspaceTab {
   return !!value && WORKSPACE_TABS.includes(value as WorkspaceTab);
@@ -178,12 +187,15 @@ export function ProjectWorkspace() {
   }, [project?.id, project?.projectName]);
 
   useEffect(() => {
-    const next = new URLSearchParams(searchParams);
-    if (activeTab === 'estimate') {
-      next.delete('tab');
-    } else {
-      next.set('tab', activeTab);
+    const requestedTab = searchParams.get('tab');
+    if (isWorkspaceTab(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
     }
+  }, [searchParams, activeTab]);
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', activeTab);
 
     if (next.toString() !== searchParams.toString()) {
       setSearchParams(next, { replace: true });
@@ -1330,9 +1342,11 @@ export function ProjectWorkspace() {
     <div className="min-h-full bg-[linear-gradient(180deg,#f8fafc_0%,#f1f5f9_100%)]">
       <TopProjectHeader
         project={project}
+        sectionLabel={WORKSPACE_TAB_LABELS[activeTab]}
         baseBidTotal={estimateViewSummary?.baseBidTotal || summary?.baseBidTotal || 0}
         syncState={syncState}
         lastSavedAt={lastSavedAt}
+        onBackToProjects={() => navigate('/projects')}
         onSave={saveProject}
         onPreviewProposal={previewProposal}
         onExport={exportProposal}
@@ -1344,13 +1358,15 @@ export function ProjectWorkspace() {
       <div className="ui-page space-y-2 w-full max-w-full px-0">
         <p className="ui-label px-1">Project Workflow</p>
         <div className="ui-surface flex items-center gap-1 overflow-x-auto whitespace-nowrap p-1.5 shadow-sm">
-          <button onClick={() => setActiveTab('overview')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'overview' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Overview</button>
-          <button onClick={() => setActiveTab('setup')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'setup' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Project Setup</button>
-          <button onClick={() => setActiveTab('rooms')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'rooms' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Rooms</button>
-          <button onClick={() => setActiveTab('takeoff')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'takeoff' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Takeoff</button>
-          <button onClick={() => setActiveTab('estimate')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'estimate' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Estimate</button>
-          <button onClick={() => setActiveTab('files')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'files' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Files</button>
-          <button onClick={() => setActiveTab('proposal')} className={`h-8 px-2.5 rounded-md text-[11px] font-semibold transition-colors ${activeTab === 'proposal' ? 'bg-blue-700 text-white shadow-sm' : 'hover:bg-slate-100 text-slate-600'}`}>Proposal</button>
+          {WORKSPACE_TABS.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`ui-tab ${activeTab === tab ? 'ui-tab-active' : 'ui-tab-inactive'}`}
+            >
+              {WORKSPACE_TAB_LABELS[tab]}
+            </button>
+          ))}
           <div className="flex items-center gap-1.5 pl-2 sm:ml-auto">
             <button onClick={() => void syncSheets()} className="ui-btn-secondary h-8 px-2.5 text-[11px] font-semibold">Sync</button>
           </div>

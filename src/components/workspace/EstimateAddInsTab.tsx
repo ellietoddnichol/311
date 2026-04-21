@@ -161,11 +161,11 @@ export function EstimateAddInsTab({
   return (
     <div className="space-y-2.5">
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{heading}</p>
+        <p className="ui-eyebrow">{heading}</p>
         <p className="mt-1 text-[11px] text-slate-500">{subheading}</p>
       </div>
 
-      <div className="rounded-[18px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.98)_0%,rgba(26,40,68,0.98)_100%)] p-2.5 text-white shadow-[0_16px_30px_rgba(15,23,42,0.18)]">
+      <div className="rounded-xl border border-slate-200/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.98)_0%,rgba(26,40,68,0.98)_100%)] p-2.5 text-white shadow-[0_16px_30px_rgba(15,23,42,0.18)]">
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-300">Project Labor Rate</p>
@@ -207,7 +207,7 @@ export function EstimateAddInsTab({
         </div>
       </div>
 
-      <div className="rounded-[16px] border border-slate-200/80 bg-white/92 p-2 shadow-sm">
+      <div className="ui-card bg-white/92 p-2">
         <p className="text-[11px] font-semibold text-slate-900">Apply Scope</p>
         <div className="mt-2 grid grid-cols-2 gap-2">
           <button onClick={() => setScope('line')} disabled={!canApplyToLine} className={`rounded-lg px-2.5 py-2 text-left text-[11px] font-semibold transition ${scope === 'line' ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-50 text-slate-600 ring-1 ring-slate-200'} disabled:cursor-not-allowed disabled:opacity-45`}>
@@ -221,7 +221,7 @@ export function EstimateAddInsTab({
         </div>
       </div>
 
-      <div className="rounded-[16px] border border-slate-200/80 bg-white/92 p-2 shadow-sm">
+      <div className="ui-card bg-white/92 p-2">
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold text-slate-900">Modifiers</p>

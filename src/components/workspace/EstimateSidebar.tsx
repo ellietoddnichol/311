@@ -83,9 +83,9 @@ export function EstimateSidebar(props: Props) {
 
   if (props.collapsed) {
     return (
-      <aside className="sticky top-2 flex min-h-0 flex-col items-center gap-1 rounded-[14px] border border-slate-200/80 bg-white/96 p-1 shadow-sm">
+      <aside className="ui-card sticky top-2 flex min-h-0 flex-col items-center gap-1 p-1">
         {props.onToggleCollapse ? (
-          <button onClick={props.onToggleCollapse} className="flex h-8 w-full items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-700 transition hover:bg-white">
+          <button onClick={props.onToggleCollapse} className="flex h-8 w-full items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-[10px] font-semibold text-slate-700 transition hover:bg-white">
             Open
           </button>
         ) : null}
@@ -94,7 +94,7 @@ export function EstimateSidebar(props: Props) {
             key={tab.id}
             onClick={() => props.onTabChange(tab.id)}
             title={tab.label}
-            className={`flex min-h-10 w-full items-center justify-center rounded-[10px] px-1 text-center text-[9px] font-semibold transition ${props.activeTab === tab.id ? 'bg-slate-950 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+            className={`flex min-h-10 w-full items-center justify-center rounded-lg px-1 text-center text-[9px] font-semibold transition ${props.activeTab === tab.id ? 'bg-slate-950 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
           >
             {shortLabel(tab.id)}
           </button>
@@ -104,9 +104,9 @@ export function EstimateSidebar(props: Props) {
   }
 
   return (
-    <aside className="sticky top-2 min-h-0 rounded-[14px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(244,247,250,0.98)_0%,rgba(249,250,251,0.98)_100%)] p-1 shadow-sm">
+    <aside className="ui-card sticky top-2 min-h-0 bg-[linear-gradient(180deg,rgba(244,247,250,0.98)_0%,rgba(249,250,251,0.98)_100%)] p-1">
       <div className="mb-1 flex items-center justify-between gap-2 px-1">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Utility Panel</p>
+        <p className="ui-eyebrow">Utility Panel</p>
         {props.onToggleCollapse ? (
           <button onClick={props.onToggleCollapse} className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700 transition hover:bg-slate-50">
             Collapse
@@ -154,7 +154,7 @@ export function EstimateSidebar(props: Props) {
             </div>
             <div className="space-y-1.5">
               {props.bundles.slice(0, 8).map((bundle) => (
-                <button key={bundle.id} onClick={() => void props.onAddBundle(bundle.id, props.activeRoomId)} className="flex w-full items-center justify-between rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-blue-200 hover:bg-slate-50">
+                <button key={bundle.id} onClick={() => void props.onAddBundle(bundle.id, props.activeRoomId)} className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-blue-200 hover:bg-slate-50">
                   <div>
                     <p className="text-[12px] font-semibold text-slate-900">{bundle.bundleName}</p>
                     <p className="mt-1 text-[10px] text-slate-500">{bundle.category || 'Bundle'} · applies to {props.activeRoomName}</p>

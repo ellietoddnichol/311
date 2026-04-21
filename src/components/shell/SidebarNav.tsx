@@ -14,6 +14,7 @@ const NAV_ITEMS = [
 export function SidebarNav() {
   const location = useLocation();
   const { signOut, userEmail } = useAuth();
+  const inProjectWorkspace = location.pathname.startsWith('/project/');
 
   return (
     <aside className="w-[220px] shrink-0 rounded-2xl border border-[#1d2a3d] bg-[#101a2b] text-slate-200 flex flex-col overflow-hidden shadow-[0_18px_35px_rgba(15,23,42,0.24)]">
@@ -28,12 +29,14 @@ export function SidebarNav() {
       </div>
 
       <div className="px-4 pt-3">
-        <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Workspace</p>
+        <p className="ui-eyebrow text-slate-500">Workspace</p>
       </div>
 
       <nav className="p-2.5 space-y-1 overflow-y-auto">
         {NAV_ITEMS.map((item) => {
-          const active = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
+          const active = item.path === '/projects'
+            ? location.pathname === '/projects' || inProjectWorkspace
+            : location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
           return (
             <Link
               key={`${item.label}-${item.path}`}

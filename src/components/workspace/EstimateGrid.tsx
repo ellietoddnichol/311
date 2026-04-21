@@ -234,7 +234,7 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
   }
 
   return (
-    <div className="overflow-hidden rounded-none border-0 bg-white w-full min-w-0 m-0 p-0" style={{ fontFamily: 'var(--font-sans)', fontSize: 14 }}>
+    <div className="overflow-hidden border-0 bg-white text-sm w-full min-w-0 m-0 p-0">
       <div
         ref={gridRef}
         tabIndex={isTakeoffView ? -1 : 0}
@@ -344,8 +344,8 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                                 <ConditionsSummaryChip count={rowModifiers.length} amount={0} tone="takeoff" />
                               </div>
                               <div className="flex items-start justify-end gap-1" onClick={stopRowEvent}>
-                                <button onClick={() => setExpandedLineId((current) => current === row.lineId ? null : row.lineId)} className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50">{expanded ? 'Hide' : 'Open'}</button>
-                                {row.canDelete ? <button onClick={(event) => { event.stopPropagation(); onDeleteLine(row.lineId); }} className="rounded border border-transparent px-2 py-0.5 text-xs font-medium text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700">Delete</button> : null}
+                                <button onClick={() => setExpandedLineId((current) => current === row.lineId ? null : row.lineId)} className="ui-btn-secondary h-6 px-2 text-xs">{expanded ? 'Hide' : 'Open'}</button>
+                                {row.canDelete ? <button onClick={(event) => { event.stopPropagation(); onDeleteLine(row.lineId); }} className="ui-btn-danger h-6 px-2 text-xs">Delete</button> : null}
                               </div>
                             </div>
                           ) : (
@@ -389,19 +389,19 @@ export function EstimateGrid({ lines, rooms, categories, roomNamesById, pricingM
                                     </div>
                                   </div>
                                   <div className="grid gap-2 sm:grid-cols-2">
-                                    <div className="rounded-[14px] bg-white px-3 py-2 ring-1 ring-slate-200/80">
+                                    <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200/80">
                                       <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Source</p>
                                       <p className="mt-1 text-[11px] font-medium text-slate-900">{row.sourceType}</p>
                                       <p className="mt-1 text-[10px] text-slate-500">{row.sourceRef || 'No extraction source attached'}</p>
                                     </div>
-                                    <div className="rounded-[14px] bg-white px-3 py-2 ring-1 ring-slate-200/80">
+                                    <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200/80">
                                       <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Conditions</p>
                                       <p className="mt-1 text-[11px] font-medium text-slate-900">{rowModifiers.length} applied</p>
                                       <p className="mt-1 text-[10px] text-slate-500">{addInDelta > 0 ? `Adds ${formatCurrencySafe(addInDelta)} to this line` : 'No cost delta from conditions or modifiers'}</p>
                                     </div>
                                   </div>
                                 </div>
-                                <div className="rounded-[14px] bg-white px-3 py-2 ring-1 ring-slate-200/80">
+                                <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200/80">
                                   <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Notes & Pricing</p>
                                   <p className="mt-2 text-[11px] leading-5 text-slate-600">{row.notes || 'No notes or extraction comments on this line.'}</p>
                                   {!isTakeoffView ? (

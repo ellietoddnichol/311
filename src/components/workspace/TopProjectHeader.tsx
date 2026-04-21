@@ -5,9 +5,11 @@ import { formatCurrencySafe } from '../../utils/numberFormat';
 
 interface Props {
   project: ProjectRecord;
+  sectionLabel: string;
   baseBidTotal: number;
   syncState: 'idle' | 'syncing' | 'ok' | 'error';
   lastSavedAt: string | null;
+  onBackToProjects: () => void;
   onSave: () => Promise<void> | void;
   onPreviewProposal: () => void;
   onExport: () => void;
@@ -18,9 +20,11 @@ interface Props {
 
 export function TopProjectHeader({
   project,
+  sectionLabel,
   baseBidTotal,
   syncState,
   lastSavedAt,
+  onBackToProjects,
   onSave,
   onPreviewProposal,
   onExport,
@@ -37,6 +41,13 @@ export function TopProjectHeader({
         <div className="min-w-0 flex items-start gap-3">
           <div className="hidden h-7 w-1 rounded-full bg-[linear-gradient(180deg,var(--primary)_0%,var(--accent-teal)_100%)] md:block" />
           <div className="min-w-0">
+            <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <button type="button" onClick={onBackToProjects} className="hover:text-slate-700">Projects</button>
+              <span>/</span>
+              <span className="truncate">{project.projectName}</span>
+              <span>/</span>
+              <span className="text-slate-700">{sectionLabel}</span>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <p className="truncate text-[17px] font-semibold tracking-[-0.03em] text-slate-950 md:text-[19px]">{project.projectName}</p>
               <span className="ui-chip-soft">{project.status}</span>
@@ -69,7 +80,7 @@ export function TopProjectHeader({
             <FileDown className="w-3.5 h-3.5" /> Export PDF
           </button>
             </div>
-            <button onClick={() => onDeleteProject()} className="hidden md:inline-flex ui-ghost-btn items-center gap-1.5 text-[10px] text-red-700 hover:bg-red-50 hover:text-red-700">
+            <button onClick={() => onDeleteProject()} className="hidden md:inline-flex ui-btn-danger items-center gap-1.5 text-[10px]">
             <Trash2 className="w-3.5 h-3.5" /> Delete
           </button>
             <button onClick={() => onSave()} className="flex h-7 items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 text-[10px] font-medium text-slate-700 hover:bg-slate-50 md:hidden">

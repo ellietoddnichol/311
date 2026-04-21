@@ -41,7 +41,7 @@ export function EstimateAddItemsTab({
     <div className="space-y-2.5">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Add Items</p>
+          <p className="ui-eyebrow">Add Items</p>
           <p className="mt-1 text-[11px] text-slate-500">Target room: {rooms.find((room) => room.id === roomId)?.roomName || 'No active room selected'}</p>
         </div>
         <button onClick={() => void onAddManualLine()} className="inline-flex h-7 items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 text-[10px] font-semibold text-slate-700 transition hover:bg-slate-50">
@@ -49,7 +49,7 @@ export function EstimateAddItemsTab({
         </button>
       </div>
 
-      <div className="rounded-[16px] bg-white p-2 shadow-sm ring-1 ring-slate-200/80">
+      <div className="ui-card p-2">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input value={search} onChange={(event) => onSearch(event.target.value)} className="h-9 w-full rounded-lg border border-slate-300 bg-slate-50 pl-9 pr-3 text-[13px] outline-none transition focus:border-blue-300 focus:bg-white" placeholder="Search items or SKU" />
@@ -66,13 +66,13 @@ export function EstimateAddItemsTab({
         </div>
       </div>
 
-      <div className="rounded-[16px] border border-slate-200/80 bg-white/92 shadow-sm">
+      <div className="ui-card bg-white/92">
         <div className="max-h-[56vh] overflow-y-auto p-1.5">
           <div className="space-y-1.5">
             {items.map((item) => {
               const qty = Math.max(1, Number(qtyById[item.id] || 1));
               return (
-                <div key={item.id} className="rounded-[12px] border border-slate-200 bg-slate-50/70 p-2 transition hover:border-blue-200 hover:bg-white">
+                <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 transition hover:border-blue-200 hover:bg-white">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="text-[12px] font-semibold leading-5 text-slate-900">{item.description}</p>
@@ -89,13 +89,13 @@ export function EstimateAddItemsTab({
                 </div>
               );
             })}
-            {items.length === 0 ? <div className="rounded-[18px] border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-[12px] text-slate-500">No catalog items match the current search and category filter.</div> : null}
+            {items.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-[12px] text-slate-500">No catalog items match the current search and category filter.</div> : null}
           </div>
         </div>
       </div>
 
       {featuredBundles.length > 0 ? (
-        <div className="rounded-[16px] border border-slate-200/80 bg-white/92 p-2 shadow-sm">
+        <div className="ui-card bg-white/92 p-2">
           <div className="flex items-center gap-2">
             <Layers3 className="h-4 w-4 text-slate-500" />
             <p className="text-[11px] font-semibold text-slate-900">Bundles</p>
