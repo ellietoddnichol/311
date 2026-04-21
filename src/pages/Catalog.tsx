@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowUpDown, Database, Edit2, ExternalLink, Package, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { ResumeProjectBanner } from '../components/ResumeProjectBanner';
+import { ActionFeedbackBanner } from '../components/feedback/ActionFeedbackBanner';
 import { api } from '../services/api';
 import { CatalogSyncStatusRecord, BundleRecord, ModifierRecord } from '../shared/types/estimator';
 import { CatalogItem } from '../types';
@@ -39,6 +40,7 @@ export function Catalog() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sortBy, setSortBy] = useState<SortKey>('sku-asc');
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ tone: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
 
   useEffect(() => {
     void loadCatalogWorkspace();
@@ -65,13 +67,15 @@ export function Catalog() {
 
   async function handleSyncCatalog() {
     setSyncing(true);
+    setActionFeedback({ tone: 'info', message: 'Sync started. Pulling latest items, modifiers, and bundles.' });
     try {
       await api.syncV1Catalog();
       await loadCatalogWorkspace();
+      setActionFeedback({ tone: 'success', message: 'Catalog sync finished successfully.' });
     } catch (error) {
       console.error('Catalog sync failed', error);
       await loadCatalogWorkspace();
-      alert(error instanceof Error ? error.message : 'Catalog sync failed.');
+      setActionFeedback({ tone: 'error', message: error instanceof Error ? error.message : 'Catalog sync failed.' });
     } finally {
       setSyncing(false);
     }
@@ -285,10 +289,17 @@ export function Catalog() {
   return (
     <div className="ui-page space-y-3 w-full max-w-full px-0">
       <ResumeProjectBanner />
+      {actionFeedback ? (
+        <ActionFeedbackBanner
+          tone={actionFeedback.tone}
+          message={actionFeedback.message}
+          onDismiss={() => setActionFeedback(null)}
+        />
+      ) : null}
       <section className="ui-surface p-3 space-y-3">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="ui-label">Catalog Database</p>
+            <p className="ui-eyebrow">Catalog Database</p>
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900 mt-1">Catalog</h1>
             <p className="text-xs text-slate-500">Source of truth: Google Sheets sync into local estimate database.</p>
           </div>
@@ -331,19 +342,19 @@ export function Catalog() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setActiveTab('items')}
-            className={`h-8 px-3 rounded border text-xs font-medium ${activeTab === 'items' ? 'border-blue-700 bg-blue-700 text-white' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+            className={`ui-tab ${activeTab === 'items' ? 'ui-tab-active border border-blue-700' : 'ui-tab-inactive border border-slate-300'}`}
           >
             Items ({items.length})
           </button>
           <button
             onClick={() => setActiveTab('modifiers')}
-            className={`h-8 px-3 rounded border text-xs font-medium ${activeTab === 'modifiers' ? 'border-blue-700 bg-blue-700 text-white' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+            className={`ui-tab ${activeTab === 'modifiers' ? 'ui-tab-active border border-blue-700' : 'ui-tab-inactive border border-slate-300'}`}
           >
             Modifiers ({modifiers.length})
           </button>
           <button
             onClick={() => setActiveTab('bundles')}
-            className={`h-8 px-3 rounded border text-xs font-medium ${activeTab === 'bundles' ? 'border-blue-700 bg-blue-700 text-white' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+            className={`ui-tab ${activeTab === 'bundles' ? 'ui-tab-active border border-blue-700' : 'ui-tab-inactive border border-slate-300'}`}
           >
             Bundles ({bundles.length})
           </button>
@@ -351,7 +362,7 @@ export function Catalog() {
             {activeTab === 'items' ? (
               <button
                 onClick={handleCreateItem}
-                className="h-8 px-3 rounded-md bg-blue-700 hover:bg-blue-800 text-white text-xs font-medium inline-flex items-center gap-1.5"
+                className="ui-btn-primary h-8 px-3 text-xs inline-flex items-center gap-1.5"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add Item

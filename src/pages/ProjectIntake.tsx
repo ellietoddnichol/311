@@ -22,9 +22,11 @@ import { ImportTemplateCallout } from '../components/intake/ImportTemplateCallou
 import { BeautifiedLineHeader } from '../components/intake/BeautifiedLineHeader';
 import { CollapsibleSectionCard } from '../components/intake/CollapsibleSectionCard';
 import { ValidationSummaryBanner } from '../components/intake/ValidationSummaryBanner';
+import { ActionFeedbackBanner } from '../components/feedback/ActionFeedbackBanner';
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
 type IntakeStep = 1 | 2 | 3 | 4 | 5;
+type ValidationMessage = { text: string; targetId?: string };
 
 interface ParserReviewSummary {
   status: string | null;
@@ -1123,7 +1125,8 @@ export function ProjectIntake() {
   const [catalogSearch, setCatalogSearch] = useState('');
   const [newCatalogLineId, setNewCatalogLineId] = useState<string | null>(null);
   const [newCatalogDraft, setNewCatalogDraft] = useState<NewCatalogDraft | null>(null);
-  const [validationMessages, setValidationMessages] = useState<string[]>([]);
+  const [validationMessages, setValidationMessages] = useState<ValidationMessage[]>([]);
+  const [actionFeedback, setActionFeedback] = useState<{ tone: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
 
   const [projectDraft, setProjectDraft] = useState<Partial<ProjectRecord>>(() => createInitialProjectDraft());
   const [distanceCalculating, setDistanceCalculating] = useState(false);
@@ -1138,6 +1141,8 @@ export function ProjectIntake() {
   const [blankRoomNames, setBlankRoomNames] = useState('');
   const [reviewFilter, setReviewFilter] = useState<'all' | 'needs-match' | 'matched' | 'ignored'>('all');
   const [reviewSearch, setReviewSearch] = useState('');
+  const [reviewDensity, setReviewDensity] = useState<'comfortable' | 'compact'>('comfortable');
+  const [selectedReviewLineId, setSelectedReviewLineId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userEmail) return;
@@ -1204,10 +1209,33 @@ export function ProjectIntake() {
     [intakeWarnings, parserReviewSummary]
   );
 
-  function reportValidation(messages: string[]) {
+  function targetIdForChecklistEntry(entry: string): string | undefined {
+    const normalized = entry.toLowerCase();
+    if (normalized.includes('project name')) return 'intake-project-name';
+    if (normalized.includes('client')) return 'intake-client';
+    if (normalized.includes('site address')) return 'intake-site-address';
+    if (normalized.includes('project type')) return 'intake-project-type';
+    if (normalized.includes('bid due date')) return 'intake-bid-date';
+    if (normalized.includes('pricing mode')) return 'intake-pricing-mode';
+    if (normalized.includes('scope category')) return 'intake-scope-categories';
+    if (normalized.includes('crew size')) return 'intake-crew-size';
+    return undefined;
+  }
+
+  function reportValidation(messages: ValidationMessage[]) {
     setValidationMessages(messages);
     if (messages.length) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
+  function handleValidationSelect(targetId?: string) {
+    if (!targetId) return;
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement) {
+      target.focus();
     }
   }
 
@@ -1227,6 +1255,11 @@ export function ProjectIntake() {
       return haystack.includes(query);
     });
   }, [lineSuggestions, reviewFilter, reviewSearch]);
+
+  const selectedReviewIndex = useMemo(
+    () => filteredReviewSuggestions.findIndex((line) => line.id === selectedReviewLineId),
+    [filteredReviewSuggestions, selectedReviewLineId]
+  );
 
   const filteredCatalog = useMemo(() => {
     const q = catalogSearch.toLowerCase();
@@ -1433,7 +1466,7 @@ export function ProjectIntake() {
     const hasProjectSource = !!sourceProjectId;
 
     if (!hasStructuredSource && !hasServerParsedSource && !hasTextSource && !hasProjectSource) {
-      reportValidation([takeoffFileName ? 'The uploaded takeoff file has not produced usable scope lines yet. Wait for parsing to finish, try the file again, or paste/import text.' : 'Upload a takeoff file or paste takeoff text before continuing.']);
+      reportValidation([{ text: takeoffFileName ? 'The uploaded takeoff file has not produced usable scope lines yet. Wait for parsing to finish, try the file again, or paste/import text.' : 'Upload a takeoff file or paste takeoff text before continuing.' }]);
       return;
     }
 
@@ -1701,6 +1734,7 @@ export function ProjectIntake() {
     setTakeoffParsedFromServer(false);
     setTakeoffUploadState('processing');
     setTakeoffUploadMessage('Reading uploaded takeoff file...');
+    setActionFeedback({ tone: 'info', message: `Parsing ${file.name}...` });
     const fileName = file.name.toLowerCase();
 
     try {
@@ -1736,6 +1770,12 @@ export function ProjectIntake() {
           ? `Parsed ${result.reviewLines.length} takeoff lines totaling ${formatNumberSafe(sumReviewLineQuantity(result.reviewLines))} units from ${file.name} using the server intake pipeline.`
           : `No usable takeoff lines were found in ${file.name}.`
       );
+      setActionFeedback({
+        tone: result.reviewLines.length > 0 ? 'success' : 'warning',
+        message: result.reviewLines.length > 0
+          ? `Parse complete: ${result.reviewLines.length} lines loaded from ${file.name}.`
+          : `Parse complete, but no usable lines were found in ${file.name}.`,
+      });
       return result.reviewLines.length > 0;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Takeoff upload failed.';
@@ -1743,6 +1783,7 @@ export function ProjectIntake() {
       setTakeoffUploadState('error');
       setTakeoffUploadMessage(message);
       setIntakeWarnings((prev) => Array.from(new Set([...prev, message])));
+      setActionFeedback({ tone: 'error', message });
       return false;
     }
   }
@@ -1955,6 +1996,56 @@ function applyRoomToVisible(roomName: string) {
     setLineSuggestions((prev) => prev.map((line) => (line.id === lineId ? { ...line, ...updates } : line)));
   }
 
+  useEffect(() => {
+    if (step !== 5) return;
+    if (filteredReviewSuggestions.length === 0) {
+      setSelectedReviewLineId(null);
+      return;
+    }
+    if (!selectedReviewLineId || !filteredReviewSuggestions.some((line) => line.id === selectedReviewLineId)) {
+      setSelectedReviewLineId(filteredReviewSuggestions[0].id);
+    }
+  }, [step, filteredReviewSuggestions, selectedReviewLineId]);
+
+  useEffect(() => {
+    if (step !== 5 || catalogPickerLineId || newCatalogLineId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
+      if (!filteredReviewSuggestions.length) return;
+      if (event.key === 'j' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        const next = selectedReviewIndex < 0 ? 0 : Math.min(filteredReviewSuggestions.length - 1, selectedReviewIndex + 1);
+        setSelectedReviewLineId(filteredReviewSuggestions[next].id);
+        return;
+      }
+      if (event.key === 'k' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const next = selectedReviewIndex < 0 ? 0 : Math.max(0, selectedReviewIndex - 1);
+        setSelectedReviewLineId(filteredReviewSuggestions[next].id);
+        return;
+      }
+      const selected = filteredReviewSuggestions.find((line) => line.id === selectedReviewLineId) || null;
+      if (!selected) return;
+      if (event.key.toLowerCase() === 'i') {
+        event.preventDefault();
+        patchLineSuggestion(selected.id, { include: true });
+        return;
+      }
+      if (event.key.toLowerCase() === 'x') {
+        event.preventDefault();
+        ignoreLine(selected.id);
+        return;
+      }
+      if (event.key.toLowerCase() === 'm' && !selected.matched) {
+        event.preventDefault();
+        setCatalogPickerLineId(selected.id);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [step, catalogPickerLineId, newCatalogLineId, filteredReviewSuggestions, selectedReviewLineId]);
+
   function loadBlankDefaults() {
     const parsedRooms = parseRoomNamesInput(blankRoomNames);
     const nextRooms = blankUsesRooms
@@ -2033,7 +2124,7 @@ function applyRoomToVisible(roomName: string) {
 
     if (mode === 'takeoff') {
       if (takeoffUploadState === 'processing') {
-        reportValidation(['Your takeoff file is still being processed. Wait for parsing to finish, then continue to review.']);
+        reportValidation([{ text: 'Your takeoff file is still being processed. Wait for parsing to finish, then continue to review.' }]);
         return false;
       }
 
@@ -2043,7 +2134,7 @@ function applyRoomToVisible(roomName: string) {
       }
 
       if (!hasSource) {
-        reportValidation([takeoffFileName ? `The uploaded file "${takeoffFileName}" is not ready yet or did not produce readable takeoff content. ${takeoffUploadMessage || 'Try the file again, wait for parsing to finish, or paste/import text.'}` : 'Upload a takeoff file, paste takeoff text, or select an optional project takeoff.']);
+        reportValidation([{ text: takeoffFileName ? `The uploaded file "${takeoffFileName}" is not ready yet or did not produce readable takeoff content. ${takeoffUploadMessage || 'Try the file again, wait for parsing to finish, or paste/import text.'}` : 'Upload a takeoff file, paste takeoff text, or select an optional project takeoff.' }]);
         return false;
       }
       if (takeoffParsedFromServer && !sourceProjectId && !takeoffImportText.trim()) {
@@ -2055,7 +2146,7 @@ function applyRoomToVisible(roomName: string) {
 
     if (mode === 'document') {
       if (!uploadedText.trim() && lineSuggestions.length === 0) {
-        reportValidation(['Upload a source file first.']);
+        reportValidation([{ text: 'Upload a source file first.' }]);
         return false;
       }
       return true;
@@ -2071,7 +2162,7 @@ function applyRoomToVisible(roomName: string) {
       if (ready) setStep(3);
     } catch (error) {
       setIntakeWarnings([buildGeminiFallbackWarning(error, 'document')]);
-      reportValidation(['Unable to review source items. Check the file/text and try again.']);
+      reportValidation([{ text: 'Unable to review source items. Check the file/text and try again.' }]);
     }
   }
 
@@ -2083,13 +2174,13 @@ function applyRoomToVisible(roomName: string) {
     });
     if (dateErrors.length > 0) {
       setProjectDateErrors(mapProjectDateErrors(dateErrors));
-      reportValidation([dateErrors[0].message]);
+      reportValidation([{ text: dateErrors[0].message, targetId: 'intake-bid-date' }]);
       return;
     }
     if (basicsChecklist.length > 0) {
       reportValidation([
-        'Complete the required project basics before continuing.',
-        ...basicsChecklist.map((entry) => `Missing: ${entry}`),
+        { text: 'Complete the required project basics before continuing.' },
+        ...basicsChecklist.map((entry) => ({ text: `Missing: ${entry}`, targetId: targetIdForChecklistEntry(entry) })),
       ]);
       return;
     }
@@ -2100,8 +2191,8 @@ function applyRoomToVisible(roomName: string) {
   function proceedToReviewItems() {
     if (pricingChecklist.length > 0) {
       reportValidation([
-        'Complete the pricing and scope setup before reviewing items.',
-        ...pricingChecklist.map((entry) => `Missing: ${entry}`),
+        { text: 'Complete the pricing and scope setup before reviewing items.' },
+        ...pricingChecklist.map((entry) => ({ text: `Missing: ${entry}`, targetId: targetIdForChecklistEntry(entry) })),
       ]);
       return;
     }
@@ -2118,20 +2209,20 @@ function applyRoomToVisible(roomName: string) {
     });
     if (dateErrors.length > 0) {
       setProjectDateErrors(mapProjectDateErrors(dateErrors));
-      reportValidation([dateErrors[0].message]);
+      reportValidation([{ text: dateErrors[0].message, targetId: 'intake-bid-date' }]);
       return;
     }
     if (basicsChecklist.length > 0) {
       reportValidation([
-        'Complete the required project basics before creating the project.',
-        ...basicsChecklist.map((entry) => `Missing: ${entry}`),
+        { text: 'Complete the required project basics before creating the project.' },
+        ...basicsChecklist.map((entry) => ({ text: `Missing: ${entry}`, targetId: targetIdForChecklistEntry(entry) })),
       ]);
       return;
     }
     if (pricingChecklist.length > 0) {
       reportValidation([
-        'Complete the pricing and scope setup before creating the project.',
-        ...pricingChecklist.map((entry) => `Missing: ${entry}`),
+        { text: 'Complete the pricing and scope setup before creating the project.' },
+        ...pricingChecklist.map((entry) => ({ text: `Missing: ${entry}`, targetId: targetIdForChecklistEntry(entry) })),
       ]);
       return;
     }
@@ -2231,14 +2322,14 @@ function applyRoomToVisible(roomName: string) {
           });
         } catch (fileError) {
           console.error(fileError);
-          alert('Project created, but the original uploaded source file could not be attached.');
+          setActionFeedback({ tone: 'warning', message: 'Project created, but the original uploaded source file could not be attached.' });
         }
       }
 
       navigate(`/project/${createdProject.id}?tab=takeoff`);
     } catch (error) {
       console.error(error);
-      alert('Failed to create project from reviewed items.');
+      setActionFeedback({ tone: 'error', message: 'Failed to create project from reviewed items.' });
     } finally {
       setCreating(false);
     }
@@ -2285,7 +2376,15 @@ function applyRoomToVisible(roomName: string) {
       <ValidationSummaryBanner
         title="Before continuing"
         items={validationMessages}
+        onSelect={handleValidationSelect}
       />
+      {actionFeedback ? (
+        <ActionFeedbackBanner
+          tone={actionFeedback.tone}
+          message={actionFeedback.message}
+          onDismiss={() => setActionFeedback(null)}
+        />
+      ) : null}
 
       {step === 1 && (
         <section className="ui-surface p-5 space-y-4">
@@ -2495,13 +2594,13 @@ function applyRoomToVisible(roomName: string) {
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Job Basics</p>
                   <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <label className="text-xs text-slate-600">Project Name<input className="ui-input mt-1" value={projectDraft.projectName || ''} onChange={(e) => patchProjectDraft({ projectName: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">Project Name<input id="intake-project-name" className="ui-input mt-1" value={projectDraft.projectName || ''} onChange={(e) => patchProjectDraft({ projectName: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">Bid Package / Job #<input className="ui-input mt-1" value={projectDraft.projectNumber || ''} onChange={(e) => patchProjectDraft({ projectNumber: e.target.value })} /></label>
-                    <label className="text-xs text-slate-600">Client<input className="ui-input mt-1" value={projectDraft.clientName || ''} onChange={(e) => patchProjectDraft({ clientName: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">Client<input id="intake-client" className="ui-input mt-1" value={projectDraft.clientName || ''} onChange={(e) => patchProjectDraft({ clientName: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">GC<input className="ui-input mt-1" value={projectDraft.generalContractor || ''} onChange={(e) => patchProjectDraft({ generalContractor: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">Estimator<input className="ui-input mt-1" value={projectDraft.estimator || ''} onChange={(e) => patchProjectDraft({ estimator: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">Project Type
-                      <select className="ui-input mt-1" value={projectDraft.projectType || 'Commercial'} onChange={(e) => patchProjectDraft({ projectType: e.target.value })}>
+                      <select id="intake-project-type" className="ui-input mt-1" value={projectDraft.projectType || 'Commercial'} onChange={(e) => patchProjectDraft({ projectType: e.target.value })}>
                         <option value="Commercial">Commercial</option>
                         <option value="Residential">Residential</option>
                         <option value="Industrial">Industrial</option>
@@ -2509,10 +2608,11 @@ function applyRoomToVisible(roomName: string) {
                         <option value="Multi-Family">Multi-Family</option>
                       </select>
                     </label>
-                    <label className="text-xs text-slate-600 md:col-span-2">Bid Due Date<input type="date" className={`ui-input mt-1 ${projectDateErrors.bidDate ? 'border-red-300 ring-1 ring-red-200' : ''}`} value={unifiedProjectDate} onChange={(e) => patchProjectDate(e.target.value)} />{projectDateErrors.bidDate ? <span className="mt-1 block text-[11px] text-red-600">{projectDateErrors.bidDate}</span> : null}</label>
+                    <label className="text-xs text-slate-600 md:col-span-2">Bid Due Date<input id="intake-bid-date" type="date" className={`ui-input mt-1 ${projectDateErrors.bidDate ? 'border-red-300 ring-1 ring-red-200' : ''}`} value={unifiedProjectDate} onChange={(e) => patchProjectDate(e.target.value)} />{projectDateErrors.bidDate ? <span className="mt-1 block text-[11px] text-red-600">{projectDateErrors.bidDate}</span> : null}</label>
                     <label className="text-xs text-slate-600 md:col-span-2">Site Address
                       <textarea
                         rows={2}
+                        id="intake-site-address"
                         className="ui-input mt-1 min-h-[84px] py-2"
                         value={projectDraft.address || ''}
                         onChange={(e) => {
@@ -2539,7 +2639,7 @@ function applyRoomToVisible(roomName: string) {
                   </div>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                     <label className="text-xs text-slate-600">Price Mode
-                      <select className="ui-input mt-1" value={(projectDraft.pricingMode as PricingMode) || 'labor_and_material'} onChange={(e) => patchProjectDraft({ pricingMode: e.target.value as PricingMode })}>
+                      <select id="intake-pricing-mode" className="ui-input mt-1" value={(projectDraft.pricingMode as PricingMode) || 'labor_and_material'} onChange={(e) => patchProjectDraft({ pricingMode: e.target.value as PricingMode })}>
                         <option value="material_only">Material Only</option>
                         <option value="labor_only">Install Only</option>
                         <option value="labor_and_material">Material + Install</option>
@@ -2552,7 +2652,7 @@ function applyRoomToVisible(roomName: string) {
                     <label className="text-xs text-slate-600">Labor Factor<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).laborRateMultiplier} onChange={(e) => patchDraftJobConditions({ laborRateMultiplier: Number(e.target.value) || 1 })} /></label>
                     <label className="text-xs text-slate-600">Adder %<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderPercent} onChange={(e) => patchDraftJobConditions({ estimateAdderPercent: Number(e.target.value) || 0 })} /></label>
                     <label className="text-xs text-slate-600">Adder $<input type="number" step="0.01" className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).estimateAdderAmount} onChange={(e) => patchDraftJobConditions({ estimateAdderAmount: Number(e.target.value) || 0 })} /></label>
-                    <label className="text-xs text-slate-600">Crew Size<input type="number" min={1} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerCount} onChange={(e) => patchDraftJobConditions({ installerCount: Number(e.target.value) || 1 })} /></label>
+                    <label className="text-xs text-slate-600">Crew Size<input id="intake-crew-size" type="number" min={1} className="ui-input mt-1" value={normalizeProjectJobConditions(projectDraft.jobConditions).installerCount} onChange={(e) => patchDraftJobConditions({ installerCount: Number(e.target.value) || 1 })} /></label>
                   </div>
                 </CollapsibleSectionCard>
 
@@ -2561,7 +2661,7 @@ function applyRoomToVisible(roomName: string) {
                   description="Choose active scope categories and manufacturer preferences for matching."
                   defaultOpen
                 >
-                  <div className="flex flex-wrap gap-2">
+                  <div id="intake-scope-categories" className="flex flex-wrap gap-2">
                     {scopeCategoryOptions.map((category) => {
                       const active = (projectDraft.selectedScopeCategories || []).includes(category);
                       return (
@@ -2858,72 +2958,60 @@ function applyRoomToVisible(roomName: string) {
                 </div>
               </div>
 
-              {(parserReviewSummary.validationErrors.length > 0 || parserReviewSummary.validationWarnings.length > 0 || parserReviewSummary.parseWarnings.length > 0) ? (
-                <div className="mt-4 grid gap-4 xl:grid-cols-3">
-                  <div className="rounded-2xl border border-white/70 bg-white/70 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Validation Errors</p>
-                    {parserReviewSummary.validationErrors.length > 0 ? (
-                      <ul className="mt-3 space-y-1 text-xs text-red-700">
-                        {parserReviewSummary.validationErrors.map((entry) => <li key={entry}>- {entry}</li>)}
-                      </ul>
-                    ) : <p className="mt-3 text-xs text-slate-500">No blocking validation errors.</p>}
-                  </div>
-                  <div className="rounded-2xl border border-white/70 bg-white/70 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Validation Warnings</p>
-                    {parserReviewSummary.validationWarnings.length > 0 ? (
-                      <ul className="mt-3 space-y-1 text-xs text-amber-700">
-                        {parserReviewSummary.validationWarnings.map((entry) => <li key={entry}>- {entry}</li>)}
-                      </ul>
-                    ) : <p className="mt-3 text-xs text-slate-500">No validation warnings.</p>}
-                  </div>
-                  <div className="rounded-2xl border border-white/70 bg-white/70 p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Parser Warnings</p>
-                    {parserReviewSummary.parseWarnings.length > 0 ? (
-                      <ul className="mt-3 space-y-1 text-xs text-slate-700">
-                        {parserReviewSummary.parseWarnings.map((entry) => <li key={entry}>- {entry}</li>)}
-                      </ul>
-                    ) : <p className="mt-3 text-xs text-slate-500">No parser warnings.</p>}
-                  </div>
-                </div>
-              ) : null}
-
-              {groupedWarningSummaries.length > 0 ? (
+              {(parserReviewSummary.validationErrors.length > 0 || parserReviewSummary.validationWarnings.length > 0 || parserReviewSummary.parseWarnings.length > 0 || groupedWarningSummaries.length > 0) ? (
                 <div className="mt-4 rounded-2xl border border-white/70 bg-white/70 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Grouped Warnings</p>
-                      <p className="mt-1 text-xs text-slate-600">Repeated warning variants are collapsed into issue groups so review focuses on root causes.</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Import Health</p>
+                      <p className="mt-1 text-xs text-slate-600">One place for blocking issues, warnings, and grouped root-cause diagnostics.</p>
                     </div>
                     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                      {groupedWarningSummaries.length} groups
+                      {parserReviewSummary.validationErrors.length} errors · {parserReviewSummary.validationWarnings.length + parserReviewSummary.parseWarnings.length} warnings
                     </span>
                   </div>
                   <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                    {groupedWarningSummaries.map((group) => {
-                      const toneClass = group.tone === 'danger'
-                        ? 'border-red-200 bg-red-50/70 text-red-900'
-                        : group.tone === 'warning'
-                          ? 'border-amber-200 bg-amber-50/70 text-amber-900'
-                          : 'border-slate-200 bg-slate-50/80 text-slate-900';
-
-                      return (
-                        <div key={group.key} className={`rounded-2xl border p-3 ${toneClass}`}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-xs font-semibold">{group.label}</p>
-                              <p className="mt-1 text-[11px] opacity-80">{group.count} occurrence{group.count === 1 ? '' : 's'}</p>
-                            </div>
-                            <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                              {group.tone}
-                            </span>
-                          </div>
-                          <ul className="mt-3 space-y-1 text-[11px] opacity-90">
-                            {group.examples.map((example) => <li key={example}>- {example}</li>)}
-                          </ul>
-                        </div>
-                      );
-                    })}
+                    <div className="rounded-xl border border-red-200 bg-red-50/60 p-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-red-800">Blocking Validation Errors</p>
+                      {parserReviewSummary.validationErrors.length > 0 ? (
+                        <ul className="mt-2 space-y-1 text-xs text-red-800">
+                          {parserReviewSummary.validationErrors.map((entry) => <li key={entry}>- {entry}</li>)}
+                        </ul>
+                      ) : <p className="mt-2 text-xs text-slate-500">No blocking validation errors.</p>}
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800">Warnings</p>
+                      {[...parserReviewSummary.validationWarnings, ...parserReviewSummary.parseWarnings].length > 0 ? (
+                        <ul className="mt-2 space-y-1 text-xs text-amber-900">
+                          {[...parserReviewSummary.validationWarnings, ...parserReviewSummary.parseWarnings].map((entry) => <li key={entry}>- {entry}</li>)}
+                        </ul>
+                      ) : <p className="mt-2 text-xs text-slate-500">No warnings detected.</p>}
+                    </div>
                   </div>
+                  {groupedWarningSummaries.length > 0 ? (
+                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                      {groupedWarningSummaries.map((group) => {
+                        const toneClass = group.tone === 'danger'
+                          ? 'border-red-200 bg-red-50/70 text-red-900'
+                          : group.tone === 'warning'
+                            ? 'border-amber-200 bg-amber-50/70 text-amber-900'
+                            : 'border-slate-200 bg-slate-50/80 text-slate-900';
+                        return (
+                          <div key={group.key} className={`rounded-xl border p-3 ${toneClass}`}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-semibold">{group.label}</p>
+                                <p className="mt-1 text-[11px] opacity-80">{group.count} occurrence{group.count === 1 ? '' : 's'}</p>
+                              </div>
+                              <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]">{group.tone}</span>
+                            </div>
+                            <ul className="mt-2 space-y-1 text-[11px] opacity-90">
+                              {group.examples.map((example) => <li key={example}>- {example}</li>)}
+                            </ul>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -2937,6 +3025,9 @@ function applyRoomToVisible(roomName: string) {
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={includeStrongMatches} className="ui-btn-secondary h-8 px-3 text-[11px]">Include Strong Matches</button>
                 <button type="button" onClick={ignoreVisibleUnmatched} className="ui-btn-secondary h-8 px-3 text-[11px]">Ignore Visible Unmatched</button>
+                <button type="button" onClick={() => setReviewDensity((current) => current === 'comfortable' ? 'compact' : 'comfortable')} className="ui-btn-secondary h-8 px-3 text-[11px]">
+                  Density: {reviewDensity === 'comfortable' ? 'Comfortable' : 'Compact'}
+                </button>
                 <select className="ui-input h-8 w-[180px]" onChange={(event) => applyRoomToVisible(event.target.value)} value="">
                   <option value="" disabled>Assign visible to room...</option>
                   {roomSuggestions.map((room) => (
@@ -2945,6 +3036,7 @@ function applyRoomToVisible(roomName: string) {
                 </select>
               </div>
             </div>
+            <p className="mt-2 text-[11px] text-slate-500">Shortcuts: `J/K` move, `I` include, `X` ignore, `M` open match on unmatched selected line.</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {[
                 { id: 'all', label: 'All' },
@@ -2984,31 +3076,35 @@ function applyRoomToVisible(roomName: string) {
                 </thead>
                 <tbody>
                   {filteredReviewSuggestions.map((line) => (
-                    <tr key={line.id} className={line.include ? 'bg-white' : 'bg-amber-50/60'}>
-                      <td className="border-b border-slate-100 px-2 py-2 align-top">
+                    <tr
+                      key={line.id}
+                      onClick={() => setSelectedReviewLineId(line.id)}
+                      className={`${line.include ? 'bg-white' : 'bg-amber-50/60'} ${selectedReviewLineId === line.id ? 'ring-2 ring-blue-200/90' : ''}`}
+                    >
+                      <td className={`border-b border-slate-100 px-2 ${reviewDensity === 'compact' ? 'py-1.5' : 'py-2'} align-top`}>
                         <input type="checkbox" checked={line.include} onChange={(e) => patchLineSuggestion(line.id, { include: e.target.checked })} />
                       </td>
-                      <td className="border-b border-slate-100 px-2 py-2 align-top">
+                      <td className={`border-b border-slate-100 px-2 ${reviewDensity === 'compact' ? 'py-1.5' : 'py-2'} align-top`}>
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${line.matched ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
                           {line.matched ? 'Matched' : 'Needs Match'}
                         </span>
                       </td>
-                      <td className="border-b border-slate-100 px-2 py-2 align-top">
-                        <input className="ui-input h-7 min-w-[140px]" value={line.roomName || ''} onChange={(e) => patchLineSuggestion(line.id, { roomName: e.target.value })} />
+                      <td className={`border-b border-slate-100 px-2 ${reviewDensity === 'compact' ? 'py-1.5' : 'py-2'} align-top`}>
+                        <input className={`ui-input ${reviewDensity === 'compact' ? 'h-6' : 'h-7'} min-w-[140px]`} value={line.roomName || ''} onChange={(e) => patchLineSuggestion(line.id, { roomName: e.target.value })} />
                       </td>
-                      <td className="border-b border-slate-100 px-2 py-2 align-top">
-                        <input className="ui-input h-7 min-w-[220px]" value={line.itemName || line.description} onChange={(e) => patchLineSuggestion(line.id, { itemName: e.target.value })} />
+                      <td className={`border-b border-slate-100 px-2 ${reviewDensity === 'compact' ? 'py-1.5' : 'py-2'} align-top`}>
+                        <input className={`ui-input ${reviewDensity === 'compact' ? 'h-6' : 'h-7'} min-w-[220px]`} value={line.itemName || line.description} onChange={(e) => patchLineSuggestion(line.id, { itemName: e.target.value })} />
                       </td>
-                      <td className="border-b border-slate-100 px-2 py-2 align-top">
-                        <input className="ui-input h-7 min-w-[120px]" value={line.category || ''} onChange={(e) => patchLineSuggestion(line.id, { category: e.target.value || null })} />
+                      <td className={`border-b border-slate-100 px-2 ${reviewDensity === 'compact' ? 'py-1.5' : 'py-2'} align-top`}>
+                        <input className={`ui-input ${reviewDensity === 'compact' ? 'h-6' : 'h-7'} min-w-[120px]`} value={line.category || ''} onChange={(e) => patchLineSuggestion(line.id, { category: e.target.value || null })} />
                       </td>
-                      <td className="border-b border-slate-100 px-2 py-2 align-top">
-                        <input type="number" className="ui-input h-7 w-20" value={line.qty} onChange={(e) => patchLineSuggestion(line.id, { qty: Number(e.target.value) || 0 })} />
+                      <td className={`border-b border-slate-100 px-2 ${reviewDensity === 'compact' ? 'py-1.5' : 'py-2'} align-top`}>
+                        <input type="number" className={`ui-input ${reviewDensity === 'compact' ? 'h-6' : 'h-7'} w-20`} value={line.qty} onChange={(e) => patchLineSuggestion(line.id, { qty: Number(e.target.value) || 0 })} />
                       </td>
-                      <td className="border-b border-slate-100 px-2 py-2 align-top">
-                        <input className="ui-input h-7 w-20" value={line.unit} onChange={(e) => patchLineSuggestion(line.id, { unit: e.target.value })} />
+                      <td className={`border-b border-slate-100 px-2 ${reviewDensity === 'compact' ? 'py-1.5' : 'py-2'} align-top`}>
+                        <input className={`ui-input ${reviewDensity === 'compact' ? 'h-6' : 'h-7'} w-20`} value={line.unit} onChange={(e) => patchLineSuggestion(line.id, { unit: e.target.value })} />
                       </td>
-                      <td className="border-b border-slate-100 px-2 py-2 align-top">
+                      <td className={`border-b border-slate-100 px-2 ${reviewDensity === 'compact' ? 'py-1.5' : 'py-2'} align-top`}>
                         <div className="flex gap-1">
                           {!line.matched ? <button className="ui-btn-secondary h-7 px-2 text-[11px]" onClick={() => setCatalogPickerLineId(line.id)}>Match</button> : null}
                           {!line.matched ? <button className="ui-btn-secondary h-7 px-2 text-[11px]" onClick={() => openNewCatalogFromLine(line.id)}>Add</button> : null}

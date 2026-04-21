@@ -159,7 +159,7 @@ export function Dashboard() {
       <ResumeProjectBanner />
       <div className="ui-surface px-5 py-4 md:px-6 md:py-5 flex flex-wrap justify-between items-end gap-4">
         <div>
-          <p className="ui-label">Operations Snapshot</p>
+          <p className="ui-eyebrow">Operations Snapshot</p>
           <h1 className="ui-title mt-1">Dashboard</h1>
           <p className="ui-subtitle mt-1">What needs attention right now across bid due dates, active work, and proposal progress.</p>
         </div>
@@ -189,7 +189,7 @@ export function Dashboard() {
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="ui-label">{stat.label}</p>
+                <p className="ui-eyebrow">{stat.label}</p>
                 <p className="text-2xl font-semibold text-slate-900 mt-1 tabular-nums">{stat.value}</p>
                 <p className="text-[11px] text-slate-500 mt-1">{stat.helper}</p>
               </div>

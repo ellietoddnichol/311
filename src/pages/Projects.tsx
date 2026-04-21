@@ -105,7 +105,7 @@ export function Projects() {
       <ResumeProjectBanner />
       <div className="ui-surface px-5 py-4 md:px-6 md:py-5 flex items-end justify-between gap-4">
         <div>
-          <p className="ui-label">Project Library</p>
+          <p className="ui-eyebrow">Project Library</p>
           <h1 className="ui-title mt-1">Projects</h1>
           <p className="ui-subtitle mt-1">Search, filter, sort, and manage every estimate from one operational index.</p>
         </div>
@@ -223,7 +223,7 @@ export function Projects() {
                       </button>
                       <button
                         onClick={() => void deleteProject(project.id, project.projectName)}
-                        className="h-8 px-3 rounded-md border border-red-200 text-red-700 text-xs font-medium hover:bg-red-50"
+                        className="ui-btn-danger h-8 px-3 text-xs"
                       >
                         Delete
                       </button>

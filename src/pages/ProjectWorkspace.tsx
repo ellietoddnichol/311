@@ -34,6 +34,7 @@ import { EstimateSelectedLineEditor } from '../components/workspace/EstimateSele
 import { EstimateRunningTotalBar } from '../components/workspace/EstimateRunningTotalBar';
 import { EstimateSidebar, WorkspaceSidebarTab } from '../components/workspace/EstimateSidebar';
 import { WorkspaceToolbar } from '../components/workspace/WorkspaceToolbar';
+import { ActionFeedbackBanner } from '../components/feedback/ActionFeedbackBanner';
 import { CrewRecommendationCard } from '../components/workflow/CrewRecommendationCard';
 import { calculateEstimateSummary } from '../shared/utils/estimateSummary';
 import { calculateWorkDuration, formatWorkWeeksLabel } from '../shared/utils/workDuration';
@@ -114,6 +115,7 @@ export function ProjectWorkspace() {
 
   const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ tone: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
 
   const [activeRoomId, setActiveRoomId] = useState('');
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
@@ -612,7 +614,7 @@ export function ProjectWorkspace() {
     const dateErrors = collectPastProjectDateErrors({ bidDate: project.bidDate, proposalDate: project.proposalDate, dueDate: project.dueDate });
     if (dateErrors.length > 0) {
       setProjectDateErrors(mapProjectDateErrors(dateErrors));
-      window.alert(dateErrors[0].message);
+      setActionFeedback({ tone: 'warning', message: dateErrors[0].message });
       return;
     }
     const normalizedJobConditions = normalizeProjectJobConditions(project.jobConditions);
@@ -626,10 +628,16 @@ export function ProjectWorkspace() {
         }
       }
     }
-    const saved = await api.updateV1Project(project.id, { ...project, jobConditions: normalizedJobConditions });
-    setProject(saved);
-    setLastSavedAt(new Date().toISOString());
-    await refreshTakeoff(saved.id);
+    try {
+      const saved = await api.updateV1Project(project.id, { ...project, jobConditions: normalizedJobConditions });
+      setProject(saved);
+      setLastSavedAt(new Date().toISOString());
+      setActionFeedback({ tone: 'success', message: 'Project changes saved.' });
+      await refreshTakeoff(saved.id);
+    } catch (error) {
+      console.error('Failed to save project', error);
+      setActionFeedback({ tone: 'error', message: 'Unable to save project right now.' });
+    }
   }
 
   async function deleteProjectPermanently() {
@@ -982,12 +990,15 @@ export function ProjectWorkspace() {
 
   async function syncSheets() {
     setSyncState('syncing');
+    setActionFeedback({ tone: 'info', message: 'Catalog sync in progress...' });
     try {
       await api.syncSheets();
       setSyncState('ok');
+      setActionFeedback({ tone: 'success', message: 'Catalog sync complete.' });
     } catch (error) {
       console.error(error);
       setSyncState('error');
+      setActionFeedback({ tone: 'error', message: 'Catalog sync failed. Check settings and try again.' });
     }
   }
 
@@ -1354,6 +1365,15 @@ export function ProjectWorkspace() {
         onDeleteProject={deleteProjectPermanently}
         statusActionLabel={statusActionLabel}
       />
+      {actionFeedback ? (
+        <div className="px-1 pb-2">
+          <ActionFeedbackBanner
+            tone={actionFeedback.tone}
+            message={actionFeedback.message}
+            onDismiss={() => setActionFeedback(null)}
+          />
+        </div>
+      ) : null}
 
       <div className="ui-page space-y-2 w-full max-w-full px-0">
         <p className="ui-label px-1">Project Workflow</p>
@@ -1988,6 +2008,13 @@ export function ProjectWorkspace() {
                   placeholder="Search item, SKU, room"
                   aria-label="Search items"
                 />
+                <button
+                  type="button"
+                  onClick={() => setEstimateCompactMode((value) => !value)}
+                  className="ui-btn-secondary h-9 px-3 text-[12px] font-semibold"
+                >
+                  Density: {estimateCompactMode ? 'Compact' : 'Comfortable'}
+                </button>
               </div>
               {selectedLine && (
                 <button onClick={() => setEstimateEditorOpen((value) => !value)} className="ml-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-white">
