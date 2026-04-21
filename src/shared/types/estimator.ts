@@ -201,6 +201,22 @@ export interface TakeoffLineRecord {
   intakeScopeBucket?: IntakeScopeBucket | null;
   /** Intake catalog shortlist confidence for the linked catalog id when known. */
   intakeMatchConfidence?: IntakeMatchConfidence | null;
+  /** Manufacturer carried from the nearest `Brand - Category - Bucket` section header at intake. */
+  sourceManufacturer?: string | null;
+  /** Bid bucket carried from the intake section header (e.g. `Base Bid`, `Alt 1`). */
+  sourceBidBucket?: string | null;
+  /** Raw section header text (e.g. `Scranton - Toilet Partitions - Base Bid`). */
+  sourceSectionHeader?: string | null;
+  /** True when the line describes physically-installable scope (partition, grab bar, mirror, etc.). */
+  isInstallableScope?: boolean | null;
+  /** Normalized install scope type key (e.g. `partition_hdpe_compartment`, `grab_bar_18`). */
+  installScopeType?: string | null;
+  /** Raw material cost from the source document when distinct from the catalog/generated material cost. */
+  sourceMaterialCost?: number | null;
+  /** App-generated install minutes (from catalog or install-family fallback). */
+  generatedLaborMinutes?: number | null;
+  /** How labor minutes were resolved: `source` = from vendor quote, `catalog` = catalog default, `install_family` = install-family fallback. */
+  laborOrigin?: 'source' | 'catalog' | 'install_family' | null;
   /** Applied line modifiers (e.g. Recessed); server-computed from line_modifiers_v1, not a DB column on takeoff_lines_v1. */
   modifierNames?: string[];
   /** Count + additive impacts from line_modifiers_v1 (percents flagged separately). */

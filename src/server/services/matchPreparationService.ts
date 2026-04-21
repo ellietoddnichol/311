@@ -10,6 +10,8 @@ import { prepareCatalogMatch } from './catalogMatchService.ts';
 import { intakeAsText } from './metadataExtractorService.ts';
 import { computeReviewLineFingerprint } from '../utils/reviewLineFingerprint.ts';
 import type { NormalizedIntakeLine } from './spreadsheetInterpreterService.ts';
+import { expandBundleLines } from './intake/bundleRowExpander.ts';
+import { getInstallLaborFamily } from './intake/installLaborFamilies.ts';
 
 function normalizeRoomName(value: unknown): string {
   return intakeAsText(value) || 'General';
@@ -54,7 +56,8 @@ export function finalizeIntakeReviewLines(
 
 export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogItem[], matchCatalog: boolean, bundles: BundleRecord[] = []): IntakeReviewLine[] {
   const useMemory = matchCatalog && catalog.length > 0;
-  return lines.map((line) => {
+  const expandedLines = expandBundleLines(lines as unknown as Array<NormalizedIntakeLine & { description: string; quantity: number }>) as NormalizedIntakeLine[];
+  return expandedLines.map((line) => {
     const description = line.description || line.itemName;
     const seededMatch = line.catalogMatch || null;
     const seededSuggestion = line.suggestedMatch || null;
@@ -155,6 +158,27 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
       warnings: Array.from(new Set(warnings)),
       semanticTags: line.semanticTags,
       reasoning: line.reasoning,
+      sourceManufacturer: line.sourceManufacturer || undefined,
+      sourceBidBucket: line.sourceBidBucket || undefined,
+      sourceSectionHeader: line.sourceSectionHeader || undefined,
+      isInstallableScope: line.isInstallableScope ?? false,
+      installScopeType: line.installScopeType ?? null,
+      installFamilyFallback: buildInstallFamilyFallback(line, catalogMatch),
     };
   });
+}
+
+function buildInstallFamilyFallback(
+  line: NormalizedIntakeLine,
+  catalogMatch: { catalogItemId?: string | null } | null
+): { key: string; minutes: number; basis: string } | null {
+  if (!line.isInstallableScope) return null;
+  if (catalogMatch && catalogMatch.catalogItemId) return null;
+  const family = getInstallLaborFamily(line.installScopeType || null);
+  if (!family) return null;
+  return {
+    key: family.key,
+    minutes: family.defaultInstallMinutes,
+    basis: family.unitBasis,
+  };
 }

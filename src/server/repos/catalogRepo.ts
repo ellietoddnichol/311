@@ -25,6 +25,7 @@ function mapCatalogRow(row: any): CatalogItem {
     tags: row.tags ? JSON.parse(row.tags) : [],
     notes: row.notes || undefined,
     active: !!row.active,
+    installLaborFamily: row.install_labor_family || null,
   };
 }
 

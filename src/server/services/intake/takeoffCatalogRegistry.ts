@@ -39,6 +39,21 @@ export const TAKEOFF_FAMILY_HINT_MAP: Record<string, string> = {
   w51919: 'soap dispenser',
   b6806: 'grab bar',
   xlsb: 'hand dryer',
+  tp: 'toilet partition',
+  tpa: 'toilet partition',
+  partition: 'toilet partition',
+  partitions: 'toilet partition',
+  compartment: 'toilet partition',
+  compartments: 'toilet partition',
+  us: 'urinal screen',
+  us18: 'urinal screen',
+  usb: 'urinal screen',
+  pilaster: 'pilaster',
+  pilasters: 'pilaster',
+  hardware: 'partition hardware',
+  hdpe: 'hdpe',
+  phenolic: 'phenolic',
+  stainless: 'stainless',
 };
 
 export const TAKEOFF_CATALOG_SEED_ITEMS: CatalogItem[] = [

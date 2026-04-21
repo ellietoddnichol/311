@@ -2274,12 +2274,21 @@ export function ProjectIntake() {
       if (!st || st.applicationStatus !== 'suggested') continue;
       const m = getActiveCatalogMatchForRow(row, st);
       const tier = row.catalogAutoApplyTier || 'C';
-      const eligible =
-        !!m && (tier === 'A' || (tier === 'B' && m.confidence === ESTIMATE_REVIEW_HIGH_CONFIDENCE));
+      // Accept:
+      // - Tier A rows still suggested (unit-compatible strong matches that were not server-auto-accepted).
+      // - Tier B rows that have any real catalog match (strong/possible). Tier B by construction has a
+      //   catalog or suggested match; this is the "near-safe" fallback for cases where unit compatibility
+      //   or score floor kept them out of Tier A.
+      const isTierB = tier === 'B';
+      const hasUsableMatch = !!m && m.confidence !== 'none';
+      const hasAnyCandidate = !!m || row.topCatalogCandidates.length > 0;
+      const eligible = tier === 'A' || (isTierB && (hasUsableMatch || hasAnyCandidate));
       if (!eligible) continue;
+      const selectedId = st.selectedCatalogItemId ?? row.suggestedCatalogItemId ?? row.topCatalogCandidates[0]?.catalogItemId ?? null;
+      if (!selectedId) continue;
       nextReview[row.reviewLineFingerprint] = {
         applicationStatus: 'accepted',
-        selectedCatalogItemId: st.selectedCatalogItemId ?? row.suggestedCatalogItemId,
+        selectedCatalogItemId: selectedId,
         acceptSource: 'manual',
       };
     }
@@ -2294,6 +2303,7 @@ export function ProjectIntake() {
         const catId = nextReview[fp].selectedCatalogItemId ?? row.suggestedCatalogItemId;
         const item = catId ? catalog.find((c) => c.id === catId) : undefined;
         if (!item) return line;
+        const tier = row.catalogAutoApplyTier || 'C';
         return {
           ...line,
           include: true,
@@ -2305,8 +2315,8 @@ export function ProjectIntake() {
           catalogItemId: item.id,
           materialCost: item.baseMaterialCost,
           laborMinutes: item.baseLaborMinutes,
-          matchConfidence: 'strong',
-          matchReason: 'Bulk accept Tier A + strong Tier B (estimate review)',
+          matchConfidence: tier === 'A' ? 'strong' : 'possible',
+          matchReason: `Bulk accept Tier ${tier} (estimate review)`,
         };
       })
     );
@@ -2697,6 +2707,13 @@ export function ProjectIntake() {
             notes: line.notes,
             intakeScopeBucket: intakeFields.intakeScopeBucket,
             intakeMatchConfidence: intakeFields.intakeMatchConfidence,
+            isInstallableScope: intakeFields.isInstallableScope,
+            installScopeType: intakeFields.installScopeType,
+            sourceManufacturer: intakeFields.sourceManufacturer,
+            sourceBidBucket: intakeFields.sourceBidBucket,
+            sourceSectionHeader: intakeFields.sourceSectionHeader,
+            generatedLaborMinutes: intakeFields.generatedLaborMinutes,
+            laborOrigin: intakeFields.laborOrigin,
           };
         });
         await api.finalizeV1ParserLines(payload);

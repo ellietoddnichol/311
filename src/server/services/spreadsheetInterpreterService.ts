@@ -17,8 +17,24 @@ import {
   normalizeComparableText,
   normalizeDateValue,
 } from './metadataExtractorService.ts';
-import { classifyParsedChunk, inferCategoryFromText, looksLikeHeaderChunk, normalizeExtractedCategory } from './rowClassifierService.ts';
+import { classifyParsedChunk, EMPTY_SECTION_CONTEXT, inferCategoryFromText, looksLikeHeaderChunk, normalizeExtractedCategory, parseSectionHeaderText, type SectionContext } from './rowClassifierService.ts';
 import { extractAssumptionsFromText, inferPricingBasis } from './proposalAssistService.ts';
+import { evaluateInstallability } from './intake/installabilityRules.ts';
+
+function annotateInstallability(line: NormalizedIntakeLine): NormalizedIntakeLine {
+  if (line.isInstallableScope !== undefined || line.installScopeType !== undefined) return line;
+  const result = evaluateInstallability({
+    itemName: line.itemName,
+    description: line.description,
+    category: line.category,
+    sourceManufacturer: line.sourceManufacturer,
+    sourceSectionHeader: line.sourceSectionHeader,
+    unit: line.unit,
+  });
+  line.isInstallableScope = result.isInstallableScope;
+  line.installScopeType = result.installScopeType;
+  return line;
+}
 
 export interface NormalizedIntakeLine {
   roomName: string;
@@ -42,6 +58,16 @@ export interface NormalizedIntakeLine {
   semanticTags?: string[];
   bundleCandidates?: string[];
   reasoning?: IntakeReasoningEnvelope;
+  /** Manufacturer carried from the nearest `Brand - Category - Bucket` section header. */
+  sourceManufacturer?: string;
+  /** Bid bucket carried from the nearest section header (e.g. `Base Bid`, `Alt 1`). */
+  sourceBidBucket?: string;
+  /** Raw section header text (e.g. `Scranton - Toilet Partitions - Base Bid`). */
+  sourceSectionHeader?: string;
+  /** Physically-installable scope flag set by installabilityRules.ts (not a catalog match). */
+  isInstallableScope?: boolean;
+  /** Normalized install scope type key (e.g. `partition_hdpe_compartment`, `grab_bar_18`). */
+  installScopeType?: string | null;
 }
 
 export interface StructuredSpreadsheetResult {
@@ -282,6 +308,7 @@ function buildLooseSpreadsheetRows(
 ): NormalizedIntakeLine[] {
   const outputRows: NormalizedIntakeLine[] = [];
   let currentCategory = '';
+  let currentSection: SectionContext = EMPTY_SECTION_CONTEXT;
 
   rows.forEach((row, rowIndex) => {
     const compactCells = row.map((cell) => intakeAsText(cell)).filter(Boolean);
@@ -291,10 +318,32 @@ function buildLooseSpreadsheetRows(
     const line = compactCells.join(' ').trim();
     if (!line) return;
 
-    if (classification.kind === 'project_metadata' || classification.kind === 'header_row' || classification.kind === 'ignore') return;
+    if (
+      classification.kind === 'project_metadata' ||
+      classification.kind === 'header_row' ||
+      classification.kind === 'ignore' ||
+      classification.kind === 'pricing_notice' ||
+      classification.kind === 'adder_option' ||
+      classification.kind === 'logistics_note'
+    ) return;
     if (classification.kind === 'section_header') {
       const sectionCategory = normalizeExtractedCategory('', line) || inferCategoryFromText(line);
       if (sectionCategory) currentCategory = sectionCategory;
+      const parsedSection = parseSectionHeaderText(line);
+      if (parsedSection) {
+        currentSection = {
+          manufacturer: parsedSection.manufacturer || currentSection.manufacturer,
+          category: parsedSection.category || currentSection.category || sectionCategory,
+          bidBucket: parsedSection.bidBucket || currentSection.bidBucket,
+          sectionHeader: parsedSection.sectionHeader,
+        };
+      } else if (sectionCategory) {
+        currentSection = {
+          ...currentSection,
+          category: sectionCategory,
+          sectionHeader: line,
+        };
+      }
       return;
     }
 
@@ -335,10 +384,13 @@ function buildLooseSpreadsheetRows(
       warnings: ['Parsed from weak spreadsheet structure using loose row inference.'],
       quantityWasDefaulted: firstNumericIndex < 0,
       unitWasDefaulted: unit === 'EA',
+      sourceManufacturer: currentSection.manufacturer || undefined,
+      sourceBidBucket: currentSection.bidBucket || undefined,
+      sourceSectionHeader: currentSection.sectionHeader || undefined,
     });
   });
 
-  return outputRows;
+  return outputRows.map(annotateInstallability);
 }
 
 export function parseSpreadsheetRows(rows: Array<Array<string | number | boolean | null | undefined>>, sourceReference: string, catalog: CatalogItem[]): StructuredSpreadsheetResult | null {
@@ -415,13 +467,35 @@ export function parseSpreadsheetRows(rows: Array<Array<string | number | boolean
     }
   } else if (sourceKind === 'spreadsheet-mixed') {
     let currentCategory = '';
+    let currentSection: SectionContext = EMPTY_SECTION_CONTEXT;
     tableRows.slice(1).forEach((row, relativeIndex) => {
       const classification = classifyParsedChunk(row, headerRowIndex + relativeIndex + 1, preludeMetadata);
       const line = row.filter(Boolean).join(' ').trim();
       if (!line) return;
-      if (classification.kind === 'project_metadata' || classification.kind === 'header_row' || classification.kind === 'ignore') return;
+      if (
+        classification.kind === 'project_metadata' ||
+        classification.kind === 'header_row' ||
+        classification.kind === 'ignore' ||
+        classification.kind === 'pricing_notice' ||
+        classification.kind === 'adder_option' ||
+        classification.kind === 'logistics_note'
+      ) return;
       if (classification.kind === 'section_header' || (row.filter(Boolean).length === 1 && line.length < 48)) {
         currentCategory = line;
+        const parsedSection = parseSectionHeaderText(line);
+        if (parsedSection) {
+          currentSection = {
+            manufacturer: parsedSection.manufacturer || currentSection.manufacturer,
+            category: parsedSection.category || currentSection.category,
+            bidBucket: parsedSection.bidBucket || currentSection.bidBucket,
+            sectionHeader: parsedSection.sectionHeader,
+          };
+        } else {
+          currentSection = {
+            ...currentSection,
+            sectionHeader: line,
+          };
+        }
         return;
       }
       const { qty, text } = parseQtyAndText(line);
@@ -442,12 +516,26 @@ export function parseSpreadsheetRows(rows: Array<Array<string | number | boolean
         warnings: [],
         quantityWasDefaulted: qty === 1,
         unitWasDefaulted: true,
+        sourceManufacturer: currentSection.manufacturer || undefined,
+        sourceBidBucket: currentSection.bidBucket || undefined,
+        sourceSectionHeader: currentSection.sectionHeader || undefined,
       });
     });
   } else {
     const dataRows = tableRows.slice(1);
+    let structuredSection: SectionContext = EMPTY_SECTION_CONTEXT;
     for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
       const row = dataRows[rowIndex];
+      const rowTextCells = row.map((cell) => intakeAsText(cell)).filter(Boolean);
+      const flattenedRowText = rowTextCells.join(' ').trim();
+      // Section header rows typically collapse to a single non-empty cell with the `Brand - Category - Bucket` pattern.
+      if (rowTextCells.length === 1 || (flattenedRowText && rowTextCells.length <= 2)) {
+        const parsed = parseSectionHeaderText(flattenedRowText);
+        if (parsed) {
+          structuredSection = parsed;
+          continue;
+        }
+      }
       const rawItem = mapping.item !== null ? intakeAsText(row[mapping.item]) : '';
       const rawDescription = mapping.description !== null ? intakeAsText(row[mapping.description]) : '';
       const rawCategory = mapping.category !== null ? intakeAsText(row[mapping.category]) : '';
@@ -486,6 +574,9 @@ export function parseSpreadsheetRows(rows: Array<Array<string | number | boolean
         warnings: [],
         quantityWasDefaulted: parsedQuantity.defaulted,
         unitWasDefaulted: !explicitUnit,
+        sourceManufacturer: structuredSection.manufacturer || undefined,
+        sourceBidBucket: structuredSection.bidBucket || undefined,
+        sourceSectionHeader: structuredSection.sectionHeader || undefined,
       });
     }
   }
@@ -527,7 +618,7 @@ export function parseSpreadsheetRows(rows: Array<Array<string | number | boolean
   };
 
   return {
-    rows: outputRows,
+    rows: outputRows.map(annotateInstallability),
     sourceKind,
     metadata,
     flattenedText,

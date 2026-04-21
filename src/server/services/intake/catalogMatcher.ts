@@ -61,6 +61,17 @@ function extractCatalogFamilies(item: CatalogItem): string[] {
   if (searchText.includes('shower curtain hook')) families.push('shower curtain hooks');
   if (searchText.includes('folding shower seat') || searchText.includes('fold down shower seat')) families.push('folding shower seat');
   if (searchText.includes('mirror')) families.push('mirror');
+  if (searchText.includes('toilet partition') || searchText.includes('partition compartment')) families.push('toilet partition');
+  if (searchText.includes('urinal screen')) families.push('urinal screen');
+  if (searchText.includes('pilaster')) families.push('pilaster');
+  if (searchText.includes('partition hardware')) families.push('partition hardware');
+  if (searchText.includes('hdpe')) families.push('hdpe');
+  if (searchText.includes('phenolic')) families.push('phenolic');
+  if (searchText.includes('stainless steel') || /\bstainless\b/.test(searchText)) families.push('stainless');
+  if (searchText.includes('powder coat')) families.push('powder coated');
+  if (searchText.includes('overhead braced')) families.push('overhead braced');
+  if (searchText.includes('floor mounted')) families.push('floor mounted');
+  if (searchText.includes('ceiling hung')) families.push('ceiling hung');
   return Array.from(new Set(families));
 }
 

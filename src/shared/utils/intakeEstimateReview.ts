@@ -260,15 +260,32 @@ export function resolveIntakePersistFieldsForTakeoffLine(input: {
   fingerprint: string | undefined;
   lineByFingerprint: Record<string, EstimateReviewLineState>;
   catalogItemId: string | null;
-}): { intakeScopeBucket: IntakeScopeBucket | null; intakeMatchConfidence: IntakeMatchConfidence | null } {
+}): {
+  intakeScopeBucket: IntakeScopeBucket | null;
+  intakeMatchConfidence: IntakeMatchConfidence | null;
+  isInstallableScope: boolean | null;
+  installScopeType: string | null;
+  sourceManufacturer: string | null;
+  sourceBidBucket: string | null;
+  sourceSectionHeader: string | null;
+  generatedLaborMinutes: number | null;
+  laborOrigin: 'source' | 'catalog' | 'install_family' | null;
+} {
   const { draft, fingerprint, lineByFingerprint, catalogItemId } = input;
-  if (!draft || !fingerprint) {
-    return { intakeScopeBucket: null, intakeMatchConfidence: null };
-  }
+  const empty = {
+    intakeScopeBucket: null,
+    intakeMatchConfidence: null,
+    isInstallableScope: null,
+    installScopeType: null,
+    sourceManufacturer: null,
+    sourceBidBucket: null,
+    sourceSectionHeader: null,
+    generatedLaborMinutes: null,
+    laborOrigin: null,
+  } as const;
+  if (!draft || !fingerprint) return { ...empty };
   const row = draft.lineSuggestions.find((r) => r.reviewLineFingerprint === fingerprint);
-  if (!row) {
-    return { intakeScopeBucket: null, intakeMatchConfidence: null };
-  }
+  if (!row) return { ...empty };
   const st = lineByFingerprint[fingerprint];
   const m = st ? getActiveCatalogMatchForRow(row, st) : null;
   let confidence: IntakeMatchConfidence | null = m?.confidence ?? null;
@@ -276,9 +293,19 @@ export function resolveIntakePersistFieldsForTakeoffLine(input: {
     const alt = row.topCatalogCandidates.find((c) => c.catalogItemId === catalogItemId);
     confidence = alt?.confidence ?? null;
   }
+  const generatedLaborMinutes = row.pricingPreview?.laborFromInstallFamily
+    ? row.pricingPreview?.laborMinutesEach ?? null
+    : null;
   return {
     intakeScopeBucket: row.scopeBucket ?? null,
     intakeMatchConfidence: confidence,
+    isInstallableScope: row.isInstallableScope ?? null,
+    installScopeType: row.installScopeType ?? null,
+    sourceManufacturer: row.sourceManufacturer ?? null,
+    sourceBidBucket: row.sourceBidBucket ?? null,
+    sourceSectionHeader: row.sourceSectionHeader ?? null,
+    generatedLaborMinutes,
+    laborOrigin: row.laborOrigin ?? null,
   };
 }
 
@@ -365,13 +392,100 @@ export type DraftBasisSummary = {
   materialSubtotalPreview: number;
   laborMinutesSubtotalPreview: number;
   warnings: string[];
+  /**
+   * Per–bid-bucket breakdown of priced-scope rows. Empty when the source document had no bid
+   * splits (i.e. all rows share the same bucket or none at all). Order: base first, then
+   * alternates (numeric sort), then allowance/unit-price, then unbucketed.
+   */
+  byBidBucket: BidBucketBreakdown[];
+  /** True when the source document contains >1 bid bucket among priced-scope rows. */
+  hasBidSplits: boolean;
 };
+
+export type BidBucketKind = 'base' | 'alternate' | 'deduct' | 'allowance' | 'unit_price' | 'unbucketed' | 'other';
+
+export interface BidBucketBreakdown {
+  /** Display label, e.g. `Base Bid`, `Alt 1`, `(no bucket)`. */
+  label: string;
+  /** Normalized key for stable maps/toggles. Empty string for unbucketed. */
+  key: string;
+  kind: BidBucketKind;
+  totalLines: number;
+  acceptedPricedLines: number;
+  needsReviewPricedLines: number;
+  materialSubtotalPreview: number;
+  laborMinutesSubtotalPreview: number;
+  /** True when this bucket's totals contributed to the headline draft totals in this summary. */
+  includedInPrimaryTotals: boolean;
+}
+
+/**
+ * Classify a bid-bucket label into a canonical kind used for ordering and default-inclusion.
+ *
+ * Defaults:
+ * - `base` (`Base Bid`, empty bucket when no splits exist) → included in primary totals
+ * - `alternate` (`Alt 1`, `Voluntary Alt 1`) → excluded from primary totals (conditional scope)
+ * - `deduct` (`Deduct Alt 1`) → excluded from primary totals (conditional credit)
+ * - `allowance` → included; the estimator intended to carry it
+ * - `unit_price` → excluded; priced separately
+ * - `unbucketed` → included (no signal that it's conditional)
+ */
+export function classifyBidBucketKind(raw: string | null | undefined): BidBucketKind {
+  const label = (raw || '').trim();
+  if (!label) return 'unbucketed';
+  const lower = label.toLowerCase();
+  if (/\bbase\s*bid\b/.test(lower) || lower === 'base') return 'base';
+  if (/\bdeduct/.test(lower)) return 'deduct';
+  if (/\balt(?:ernate)?\b/.test(lower)) return 'alternate';
+  if (/\ballowance/.test(lower)) return 'allowance';
+  if (/\bunit\s*price/.test(lower)) return 'unit_price';
+  if (/\bexclud/.test(lower)) return 'other';
+  return 'other';
+}
+
+/** Sort keys: base first, then numeric-sorted alternates, deducts, allowance, unit prices, other, unbucketed last. */
+export function compareBidBucketKeys(
+  a: { key: string; kind: BidBucketKind; label: string },
+  b: { key: string; kind: BidBucketKind; label: string }
+): number {
+  const kindOrder: Record<BidBucketKind, number> = {
+    base: 0,
+    alternate: 1,
+    deduct: 2,
+    allowance: 3,
+    unit_price: 4,
+    other: 5,
+    unbucketed: 6,
+  };
+  const ko = kindOrder[a.kind] - kindOrder[b.kind];
+  if (ko !== 0) return ko;
+  // Within a kind, sort by trailing number (Alt 1 before Alt 2) then by label.
+  const numA = Number((a.label.match(/\b(\d+)\b/) || [, ''])[1] || '0');
+  const numB = Number((b.label.match(/\b(\d+)\b/) || [, ''])[1] || '0');
+  if (numA !== numB) return numA - numB;
+  return a.label.localeCompare(b.label);
+}
+
+/** Bid buckets included by default in headline draft totals. */
+export function isBidBucketIncludedByDefault(kind: BidBucketKind): boolean {
+  return kind === 'base' || kind === 'unbucketed' || kind === 'allowance';
+}
 
 export function computeDraftBasisSummary(
   draft: IntakeEstimateDraft,
   lineByFingerprint: Record<string, EstimateReviewLineState>,
-  ai: IntakeAiSuggestions | null | undefined
+  ai: IntakeAiSuggestions | null | undefined,
+  options?: {
+    pricingMode?: string | null;
+    /**
+     * Explicit inclusion set keyed by normalized bid-bucket key (empty string = unbucketed).
+     * When omitted, defaults to: base + unbucketed + allowance included; alternates/deducts excluded.
+     */
+    bidBucketsIncluded?: ReadonlySet<string> | null;
+  }
 ): DraftBasisSummary {
+  const pricingMode = (options?.pricingMode || '').toLowerCase();
+  const isMaterialOnly = pricingMode.includes('material_only') || pricingMode === 'material only';
   const warnings: string[] = [];
   let acceptedPricedLines = 0;
   let needsReviewPricedLines = 0;
@@ -383,6 +497,38 @@ export function computeDraftBasisSummary(
   let materialSubtotalPreview = 0;
   let laborMinutesSubtotalPreview = 0;
 
+  // Per-bucket accumulators keyed by normalized bucket key ('' = unbucketed).
+  type BucketAcc = {
+    label: string;
+    key: string;
+    kind: BidBucketKind;
+    totalLines: number;
+    acceptedPricedLines: number;
+    needsReviewPricedLines: number;
+    materialSubtotalPreview: number;
+    laborMinutesSubtotalPreview: number;
+  };
+  const bucketMap = new Map<string, BucketAcc>();
+  function getBucket(rawLabel: string | null | undefined): BucketAcc {
+    const label = (rawLabel || '').trim();
+    const key = label;
+    const existing = bucketMap.get(key);
+    if (existing) return existing;
+    const kind = classifyBidBucketKind(label);
+    const acc: BucketAcc = {
+      label: label || '(no bucket)',
+      key,
+      kind,
+      totalLines: 0,
+      acceptedPricedLines: 0,
+      needsReviewPricedLines: 0,
+      materialSubtotalPreview: 0,
+      laborMinutesSubtotalPreview: 0,
+    };
+    bucketMap.set(key, acc);
+    return acc;
+  }
+
   for (const row of draft.lineSuggestions) {
     const st = lineByFingerprint[row.reviewLineFingerprint]?.applicationStatus ?? row.applicationStatus;
 
@@ -391,23 +537,34 @@ export function computeDraftBasisSummary(
       continue;
     }
 
-    if (row.scopeBucket !== 'priced_base_scope') {
+    // Install-family-only rows (installable scope, generated labor, no catalog item) don't have
+    // scopeBucket === 'priced_base_scope' until a catalog match is picked, but their generated
+    // labor should still roll into the draft totals (and be gated by material-only mode).
+    const hasInstallFamilyLabor = Boolean(row.pricingPreview?.laborFromInstallFamily);
+    if (row.scopeBucket !== 'priced_base_scope' && !hasInstallFamilyLabor) {
       otherScopeLines += 1;
       continue;
     }
 
     const lineState = lineByFingerprint[row.reviewLineFingerprint];
     const preview = row.pricingPreview;
+    const bucket = getBucket(row.sourceBidBucket ?? null);
+    bucket.totalLines += 1;
 
     if (st === 'accepted' || st === 'replaced') {
       acceptedPricedLines += 1;
+      bucket.acceptedPricedLines += 1;
       const selId = lineState?.selectedCatalogItemId ?? row.suggestedCatalogItemId;
-      if (preview && selId) {
-        materialSubtotalPreview += preview.materialEach * preview.qty;
-        laborMinutesSubtotalPreview += preview.laborMinutesEach * preview.qty;
+      if (preview && (selId || hasInstallFamilyLabor)) {
+        const materialDelta = selId ? preview.materialEach * preview.qty : 0;
+        const excludeGeneratedLabor = isMaterialOnly && preview.laborFromInstallFamily;
+        const laborDelta = excludeGeneratedLabor ? 0 : preview.laborMinutesEach * preview.qty;
+        bucket.materialSubtotalPreview += materialDelta;
+        bucket.laborMinutesSubtotalPreview += laborDelta;
       }
     } else if (st === 'suggested') {
       needsReviewPricedLines += 1;
+      bucket.needsReviewPricedLines += 1;
       const m = getActiveCatalogMatchForRow(row, lineState);
       if (!m) warnings.push(`Priced-scope line (${row.reviewLineFingerprint.slice(0, 8)}…) has no catalog candidate.`);
       else if (m.confidence === 'none' || (m.score ?? 0) < ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD) {
@@ -416,9 +573,43 @@ export function computeDraftBasisSummary(
     }
   }
 
+  // Decide inclusion per bucket. Explicit filter wins; otherwise default per-kind.
+  const explicit = options?.bidBucketsIncluded ?? null;
+  const byBidBucket: BidBucketBreakdown[] = Array.from(bucketMap.values())
+    .sort(compareBidBucketKeys)
+    .map((acc) => {
+      const included = explicit ? explicit.has(acc.key) : isBidBucketIncludedByDefault(acc.kind);
+      if (included) {
+        materialSubtotalPreview += acc.materialSubtotalPreview;
+        laborMinutesSubtotalPreview += acc.laborMinutesSubtotalPreview;
+      }
+      return {
+        label: acc.label,
+        key: acc.key,
+        kind: acc.kind,
+        totalLines: acc.totalLines,
+        acceptedPricedLines: acc.acceptedPricedLines,
+        needsReviewPricedLines: acc.needsReviewPricedLines,
+        materialSubtotalPreview: acc.materialSubtotalPreview,
+        laborMinutesSubtotalPreview: acc.laborMinutesSubtotalPreview,
+        includedInPrimaryTotals: included,
+      };
+    });
+  const hasBidSplits = bucketMap.size > 1;
+
   const suggestedPricingModeLabel = ai?.pricingModeSuggested
     ? ai.pricingModeSuggested.replace(/_/g, ' ')
     : '(not suggested)';
+
+  // Flag when alternates exist but are being excluded from primary totals.
+  const excludedAltCount = byBidBucket.filter(
+    (b) => !b.includedInPrimaryTotals && (b.kind === 'alternate' || b.kind === 'deduct') && b.totalLines > 0
+  ).length;
+  if (excludedAltCount > 0) {
+    warnings.push(
+      `${excludedAltCount} alternate / deduct bucket${excludedAltCount === 1 ? '' : 's'} not included in primary totals. Toggle them on to include.`
+    );
+  }
 
   return {
     acceptedPricedLines,
@@ -432,5 +623,7 @@ export function computeDraftBasisSummary(
     materialSubtotalPreview,
     laborMinutesSubtotalPreview,
     warnings,
+    byBidBucket,
+    hasBidSplits,
   };
 }

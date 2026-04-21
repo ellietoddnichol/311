@@ -75,6 +75,11 @@ interface NormalizedIntakeLine {
   semanticTags?: string[];
   bundleCandidates?: string[];
   reasoning?: IntakeReasoningEnvelope;
+  sourceManufacturer?: string;
+  sourceBidBucket?: string;
+  sourceSectionHeader?: string;
+  isInstallableScope?: boolean;
+  installScopeType?: string | null;
 }
 
 interface StructuredSpreadsheetResult {
@@ -87,7 +92,16 @@ interface StructuredSpreadsheetResult {
 
 const SPREADSHEET_GEMINI_TIMEOUT_MS = Number.parseInt(process.env.INTAKE_SPREADSHEET_GEMINI_TIMEOUT_MS || '12000', 10);
 
-type ParsedChunkType = 'project_metadata' | 'header_row' | 'section_header' | 'actual_scope_line' | 'ignore';
+type ParsedChunkType =
+  | 'project_metadata'
+  | 'header_row'
+  | 'section_header'
+  | 'actual_scope_line'
+  | 'bundle_item'
+  | 'pricing_notice'
+  | 'adder_option'
+  | 'logistics_note'
+  | 'ignore';
 
 interface ParsedChunkClassification {
   kind: ParsedChunkType;
@@ -350,9 +364,24 @@ function classifyParsedChunk(cells: string[], lineIndex: number, knownMetadata?:
   const metadata = extractMetadataFromCells(compactCells);
 
   if (!text) return { kind: 'ignore', metadata };
-  if (looksLikeIntakePricingSummaryOrDisclaimerLine(text)) return { kind: 'ignore', metadata };
+  if (looksLikeIntakePricingSummaryOrDisclaimerLine(text)) return { kind: 'pricing_notice', metadata };
   if (looksLikeHeaderChunk(compactCells)) return { kind: 'header_row', metadata };
   if (hasProjectMetadataValue(metadata) || looksLikeProjectMetadataChunk(text, lineIndex, knownMetadata)) return { kind: 'project_metadata', metadata };
+  {
+    const normalized = normalizeComparableText(text);
+    if (/\b(material total|sub ?total|grand total|total material|total labor|if labor (is )?needed|labor (is )?by (quote|others)|quote(d)? separately|call for (a )?quote)\b/.test(normalized)) {
+      return { kind: 'pricing_notice', metadata };
+    }
+    if (/^(add (for|to)|bond|performance bond|bid bond|surety)\b/.test(normalized) || (/\b(y\s*\/\s*n|yes\s*\/\s*no|if required)\b/.test(normalized) && normalized.length <= 120)) {
+      return { kind: 'adder_option', metadata };
+    }
+    if (/\b(customer to (receive|unload|store|sign)|receive and unload|ship (to )?(jobsite|site)|freight (on|included|separate)|delivery (included|separate|not included))\b/.test(normalized)) {
+      return { kind: 'logistics_note', metadata };
+    }
+    if ((/\bset\s*:\s*\d/.test(normalized) || /\b\d+\s*(in|")\b.*,\s*\d+\s*(in|")\b/.test(normalized)) && /\b(grab bar|set|kit|bundle)\b/.test(normalized)) {
+      return { kind: 'bundle_item', metadata };
+    }
+  }
   if (looksLikeIgnoreChunk(text)) return { kind: 'ignore', metadata };
   if (compactCells.length === 1 && looksLikeSectionHeader(text)) return { kind: 'section_header', metadata };
 
@@ -375,7 +404,7 @@ function shouldKeepNormalizedLine(line: NormalizedIntakeLine, lineIndex: number,
     line.notes,
   ], lineIndex, knownMetadata);
 
-  if (classification.kind !== 'actual_scope_line') return false;
+  if (classification.kind !== 'actual_scope_line' && classification.kind !== 'bundle_item') return false;
   const identity = asText(line.description || line.itemName);
   if (!identity) return false;
   if (looksLikeHeaderChunk([line.itemName, line.description, line.category, line.unit, line.notes])) return false;
@@ -675,7 +704,14 @@ function parseSpreadsheetRows(rows: Array<Array<string | number | boolean | null
       const classification = classifyParsedChunk(row, headerRowIndex + relativeIndex + 1, preludeMetadata);
       const line = row.filter(Boolean).join(' ').trim();
       if (!line) return;
-      if (classification.kind === 'project_metadata' || classification.kind === 'header_row' || classification.kind === 'ignore') return;
+      if (
+        classification.kind === 'project_metadata' ||
+        classification.kind === 'header_row' ||
+        classification.kind === 'ignore' ||
+        classification.kind === 'pricing_notice' ||
+        classification.kind === 'adder_option' ||
+        classification.kind === 'logistics_note'
+      ) return;
       if (classification.kind === 'section_header' || (row.filter(Boolean).length === 1 && line.length < 48)) {
         currentCategory = line;
         return;

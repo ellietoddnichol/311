@@ -415,6 +415,21 @@ export function initEstimatorSchema(db: Database) {
     db.exec('ALTER TABLE takeoff_lines_v1 ADD COLUMN intake_match_confidence TEXT');
   }
 
+  const takeoffIntakeCols3 = db.prepare('PRAGMA table_info(takeoff_lines_v1)').all() as Array<{ name: string }>;
+  const ensureTakeoffColumn = (name: string, ddl: string) => {
+    if (!takeoffIntakeCols3.some((c) => c.name === name)) {
+      db.exec(`ALTER TABLE takeoff_lines_v1 ADD COLUMN ${ddl}`);
+    }
+  };
+  ensureTakeoffColumn('source_manufacturer', 'source_manufacturer TEXT');
+  ensureTakeoffColumn('source_bid_bucket', 'source_bid_bucket TEXT');
+  ensureTakeoffColumn('source_section_header', 'source_section_header TEXT');
+  ensureTakeoffColumn('is_installable_scope', 'is_installable_scope INTEGER');
+  ensureTakeoffColumn('install_scope_type', 'install_scope_type TEXT');
+  ensureTakeoffColumn('source_material_cost', 'source_material_cost REAL');
+  ensureTakeoffColumn('generated_labor_minutes', 'generated_labor_minutes REAL');
+  ensureTakeoffColumn('labor_origin', 'labor_origin TEXT');
+
   const modifierColumns = db.prepare('PRAGMA table_info(modifiers_v1)').all() as Array<{ name: string }>;
   if (modifierColumns.length > 0 && !modifierColumns.some((c) => c.name === 'description')) {
     db.exec("ALTER TABLE modifiers_v1 ADD COLUMN description TEXT NOT NULL DEFAULT ''");
@@ -445,6 +460,9 @@ export function initEstimatorSchema(db: Database) {
     }
     if (!catalogItemColumns.some((c) => c.name === 'image_url')) {
       db.exec('ALTER TABLE catalog_items ADD COLUMN image_url TEXT');
+    }
+    if (!catalogItemColumns.some((c) => c.name === 'install_labor_family')) {
+      db.exec('ALTER TABLE catalog_items ADD COLUMN install_labor_family TEXT');
     }
   }
 

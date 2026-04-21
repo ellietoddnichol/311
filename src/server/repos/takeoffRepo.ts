@@ -61,6 +61,32 @@ function parseIntakeMatchConfidence(raw: unknown): IntakeMatchConfidence | null 
   return null;
 }
 
+function parseLaborOrigin(raw: unknown): TakeoffLineRecord['laborOrigin'] {
+  const s = String(raw ?? '').trim();
+  if (s === 'source' || s === 'catalog' || s === 'install_family') return s;
+  return null;
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const s = String(value).trim();
+  return s ? s : null;
+}
+
+function normalizeNullableBool(value: unknown): boolean | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'boolean') return value;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return n > 0;
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Record catalog learning when the link or identifying text changed (skip pure pricing/qty edits). */
 function shouldRecordCatalogMemoryForLineChange(previous: TakeoffLineRecord | null, next: TakeoffLineRecord): boolean {
   if (!next.catalogItemId) return false;
@@ -100,6 +126,14 @@ function mapTakeoffRow(row: any): TakeoffLineRecord {
     variantId: row.variant_id,
     intakeScopeBucket: parseIntakeScopeBucket(row.intake_scope_bucket),
     intakeMatchConfidence: parseIntakeMatchConfidence(row.intake_match_confidence),
+    sourceManufacturer: normalizeNullableString(row.source_manufacturer),
+    sourceBidBucket: normalizeNullableString(row.source_bid_bucket),
+    sourceSectionHeader: normalizeNullableString(row.source_section_header),
+    isInstallableScope: normalizeNullableBool(row.is_installable_scope),
+    installScopeType: normalizeNullableString(row.install_scope_type),
+    sourceMaterialCost: normalizeNullableNumber(row.source_material_cost),
+    generatedLaborMinutes: normalizeNullableNumber(row.generated_labor_minutes),
+    laborOrigin: parseLaborOrigin(row.labor_origin),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -242,8 +276,23 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
   const catalogDefaults = resolveCatalogDefaults(input);
   const laborRatePerHour = getConfiguredLaborRatePerHour();
   const qty = input.qty ?? 1;
-  const materialCost = input.materialCost ?? catalogDefaults.materialCost ?? 0;
-  const laborMinutes = input.laborMinutes ?? catalogDefaults.laborMinutes ?? 0;
+  const sourceMaterialCost = normalizeNullableNumber(input.sourceMaterialCost);
+  const materialCost = input.materialCost ?? catalogDefaults.materialCost ?? sourceMaterialCost ?? 0;
+  const generatedLaborMinutes = normalizeNullableNumber(input.generatedLaborMinutes);
+  const hasCatalogLabor = catalogDefaults.laborMinutes !== undefined && catalogDefaults.laborMinutes > 0;
+  const laborMinutes = input.laborMinutes
+    ?? (hasCatalogLabor ? catalogDefaults.laborMinutes : undefined)
+    ?? generatedLaborMinutes
+    ?? 0;
+  const laborOrigin: TakeoffLineRecord['laborOrigin'] = input.laborOrigin !== undefined
+    ? parseLaborOrigin(input.laborOrigin)
+    : input.laborMinutes !== undefined && input.laborMinutes !== null
+      ? 'source'
+      : hasCatalogLabor
+        ? 'catalog'
+        : generatedLaborMinutes !== null && generatedLaborMinutes > 0
+          ? 'install_family'
+          : null;
   const baseMaterialCost = input.baseMaterialCost ?? materialCost;
   const baseLaborCost = input.baseLaborCost !== undefined
     ? Number(input.baseLaborCost) || 0
@@ -263,6 +312,11 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     input.intakeMatchConfidence !== undefined && input.intakeMatchConfidence !== null
       ? parseIntakeMatchConfidence(input.intakeMatchConfidence)
       : null;
+  const sourceManufacturer = normalizeNullableString(input.sourceManufacturer);
+  const sourceBidBucket = normalizeNullableString(input.sourceBidBucket);
+  const sourceSectionHeader = normalizeNullableString(input.sourceSectionHeader);
+  const isInstallableScope = normalizeNullableBool(input.isInstallableScope);
+  const installScopeType = normalizeNullableString(input.installScopeType);
 
   const line: TakeoffLineRecord = {
     id: input.id ?? randomUUID(),
@@ -291,6 +345,14 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     variantId: input.variantId ?? null,
     intakeScopeBucket,
     intakeMatchConfidence,
+    sourceManufacturer,
+    sourceBidBucket,
+    sourceSectionHeader,
+    isInstallableScope,
+    installScopeType,
+    sourceMaterialCost,
+    generatedLaborMinutes,
+    laborOrigin,
     createdAt: now,
     updatedAt: now
   };
@@ -299,8 +361,11 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     INSERT INTO takeoff_lines_v1 (
       id, project_id, room_id, source_type, source_ref, description, sku, category, subcategory, base_type,
       qty, unit, material_cost, base_material_cost, labor_minutes, labor_cost, base_labor_cost, pricing_source, unit_sell, line_total, notes, bundle_id, catalog_item_id,
-      variant_id, intake_scope_bucket, intake_match_confidence, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      variant_id, intake_scope_bucket, intake_match_confidence,
+      source_manufacturer, source_bid_bucket, source_section_header,
+      is_installable_scope, install_scope_type, source_material_cost, generated_labor_minutes, labor_origin,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     line.id,
     line.projectId,
@@ -328,6 +393,14 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     line.variantId,
     line.intakeScopeBucket,
     line.intakeMatchConfidence,
+    line.sourceManufacturer,
+    line.sourceBidBucket,
+    line.sourceSectionHeader,
+    line.isInstallableScope === null ? null : line.isInstallableScope ? 1 : 0,
+    line.installScopeType,
+    line.sourceMaterialCost,
+    line.generatedLaborMinutes,
+    line.laborOrigin,
     line.createdAt,
     line.updatedAt
   );
@@ -383,6 +456,30 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
         ? null
         : parseIntakeMatchConfidence(input.intakeMatchConfidence)
       : existing.intakeMatchConfidence ?? null;
+  const nextSourceManufacturer = input.sourceManufacturer !== undefined
+    ? normalizeNullableString(input.sourceManufacturer)
+    : existing.sourceManufacturer ?? null;
+  const nextSourceBidBucket = input.sourceBidBucket !== undefined
+    ? normalizeNullableString(input.sourceBidBucket)
+    : existing.sourceBidBucket ?? null;
+  const nextSourceSectionHeader = input.sourceSectionHeader !== undefined
+    ? normalizeNullableString(input.sourceSectionHeader)
+    : existing.sourceSectionHeader ?? null;
+  const nextIsInstallable = input.isInstallableScope !== undefined
+    ? normalizeNullableBool(input.isInstallableScope)
+    : existing.isInstallableScope ?? null;
+  const nextInstallScopeType = input.installScopeType !== undefined
+    ? normalizeNullableString(input.installScopeType)
+    : existing.installScopeType ?? null;
+  const nextSourceMaterialCost = input.sourceMaterialCost !== undefined
+    ? normalizeNullableNumber(input.sourceMaterialCost)
+    : existing.sourceMaterialCost ?? null;
+  const nextGeneratedLaborMinutes = input.generatedLaborMinutes !== undefined
+    ? normalizeNullableNumber(input.generatedLaborMinutes)
+    : existing.generatedLaborMinutes ?? null;
+  const nextLaborOrigin = input.laborOrigin !== undefined
+    ? parseLaborOrigin(input.laborOrigin)
+    : existing.laborOrigin ?? null;
 
   const next: TakeoffLineRecord = {
     ...existing,
@@ -399,6 +496,14 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
     lineTotal: totals.lineTotal,
     intakeScopeBucket: nextIntakeScope,
     intakeMatchConfidence: nextIntakeConf,
+    sourceManufacturer: nextSourceManufacturer,
+    sourceBidBucket: nextSourceBidBucket,
+    sourceSectionHeader: nextSourceSectionHeader,
+    isInstallableScope: nextIsInstallable,
+    installScopeType: nextInstallScopeType,
+    sourceMaterialCost: nextSourceMaterialCost,
+    generatedLaborMinutes: nextGeneratedLaborMinutes,
+    laborOrigin: nextLaborOrigin,
     updatedAt: new Date().toISOString()
   };
 
@@ -406,7 +511,10 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
     UPDATE takeoff_lines_v1 SET
       room_id = ?, source_type = ?, source_ref = ?, description = ?, sku = ?, category = ?, subcategory = ?, base_type = ?,
       qty = ?, unit = ?, material_cost = ?, base_material_cost = ?, labor_minutes = ?, labor_cost = ?, base_labor_cost = ?, pricing_source = ?, unit_sell = ?, line_total = ?, notes = ?,
-      bundle_id = ?, catalog_item_id = ?, variant_id = ?, intake_scope_bucket = ?, intake_match_confidence = ?, updated_at = ?
+      bundle_id = ?, catalog_item_id = ?, variant_id = ?, intake_scope_bucket = ?, intake_match_confidence = ?,
+      source_manufacturer = ?, source_bid_bucket = ?, source_section_header = ?,
+      is_installable_scope = ?, install_scope_type = ?, source_material_cost = ?, generated_labor_minutes = ?, labor_origin = ?,
+      updated_at = ?
     WHERE id = ?
   `).run(
     next.roomId,
@@ -433,6 +541,14 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
     next.variantId,
     next.intakeScopeBucket,
     next.intakeMatchConfidence,
+    next.sourceManufacturer,
+    next.sourceBidBucket,
+    next.sourceSectionHeader,
+    next.isInstallableScope === null ? null : next.isInstallableScope ? 1 : 0,
+    next.installScopeType,
+    next.sourceMaterialCost,
+    next.generatedLaborMinutes,
+    next.laborOrigin,
     next.updatedAt,
     lineId
   );

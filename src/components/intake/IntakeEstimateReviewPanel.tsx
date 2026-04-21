@@ -15,6 +15,8 @@ import type {
 import type { CatalogItem } from '../../types';
 import {
   applicationStatusLabel,
+  classifyBidBucketKind,
+  compareBidBucketKeys,
   computeDraftBasisSummary,
   estimateReviewAcceptSourceLabel,
   ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD,
@@ -23,9 +25,11 @@ import {
   formatParsingHintSubtitle,
   getActiveCatalogMatchForRow,
   groupDraftLinesByScopeBucket,
+  isBidBucketIncludedByDefault,
   matchConfidenceTier,
   matchSignalTags,
   scopeBucketShortLabel,
+  type BidBucketKind,
   type DraftBasisSummary,
   type EstimateReviewLineState,
 } from '../../shared/utils/intakeEstimateReview';
@@ -166,16 +170,63 @@ export function IntakeEstimateReviewPanel({
   const [expandedFps, setExpandedFps] = useState<Record<string, boolean>>({});
   const [matchDensity, setMatchDensity] = useState<'compact' | 'comfortable'>('compact');
 
+  /**
+   * Which bid buckets (keyed by label — `''` for unbucketed) should roll into the headline
+   * draft totals. `null` means "use the built-in default" (base + unbucketed + allowance).
+   */
+  const [bidBucketsIncluded, setBidBucketsIncluded] = useState<ReadonlySet<string> | null>(null);
+
   function toggleExpanded(fp: string) {
     setExpandedFps((prev) => ({ ...prev, [fp]: !prev[fp] }));
   }
 
   const basisSummary: DraftBasisSummary = useMemo(
-    () => computeDraftBasisSummary(draft, lineByFingerprint, aiSuggestions ?? null),
-    [draft, lineByFingerprint, aiSuggestions]
+    () =>
+      computeDraftBasisSummary(draft, lineByFingerprint, aiSuggestions ?? null, {
+        pricingMode: pricingModeDraft,
+        bidBucketsIncluded,
+      }),
+    [draft, lineByFingerprint, aiSuggestions, pricingModeDraft, bidBucketsIncluded]
   );
 
+  /** The subset of base-scope rows for a given bucket key (empty string = unbucketed). */
+  const baseScopeRowsByBucketKey = useMemo(() => {
+    const out = new Map<string, IntakeLineEstimateSuggestion[]>();
+    for (const row of draft.lineSuggestions) {
+      if (row.scopeBucket !== 'priced_base_scope') continue;
+      const key = (row.sourceBidBucket || '').trim();
+      const bucket = out.get(key) || [];
+      bucket.push(row);
+      out.set(key, bucket);
+    }
+    return out;
+  }, [draft.lineSuggestions]);
+
+  function toggleBucketInclusion(key: string) {
+    setBidBucketsIncluded((prev) => {
+      // Materialize the default-inclusion set the first time the user toggles anything.
+      const base = prev
+        ? new Set(prev)
+        : new Set(
+            basisSummary.byBidBucket.filter((b) => isBidBucketIncludedByDefault(b.kind)).map((b) => b.key)
+          );
+      if (base.has(key)) base.delete(key);
+      else base.add(key);
+      return base;
+    });
+  }
+
   const grouped = useMemo(() => groupDraftLinesByScopeBucket(draft.lineSuggestions), [draft.lineSuggestions]);
+
+  const installFamilyLaborSummary = useMemo(() => {
+    const rows = draft.lineSuggestions.filter(
+      (r) => r.pricingPreview?.laborFromInstallFamily || r.laborOrigin === 'install_family'
+    );
+    const totalMinutes = rows.reduce((sum, r) => sum + (r.pricingPreview?.laborMinutesEach ?? 0) * (r.pricingPreview?.qty ?? 1), 0);
+    return { count: rows.length, totalMinutes };
+  }, [draft.lineSuggestions]);
+  const isMaterialOnlyPricingMode = (pricingModeDraft || '').toLowerCase().includes('material_only')
+    || (pricingModeDraft || '').toLowerCase() === 'material only';
 
   const catalogById = useMemo(() => new Map(catalog.map((c) => [c.id, c])), [catalog]);
 
@@ -190,6 +241,26 @@ export function IntakeEstimateReviewPanel({
       return { ...g, rows: sorted };
     }).filter((g) => g.rows.length > 0);
   }, [grouped, lineByFingerprint, draft.lineSuggestions]);
+
+  const bulkEligibleCounts = useMemo(() => {
+    let strong = 0;
+    let tierAOrB = 0;
+    let weakOrNoMatch = 0;
+    for (const row of draft.lineSuggestions) {
+      if (row.scopeBucket !== 'priced_base_scope') continue;
+      const st = lineStateForRow(row, lineByFingerprint);
+      if (st.applicationStatus !== 'suggested') continue;
+      const m = getActiveCatalogMatchForRow(row, st);
+      const tier = row.catalogAutoApplyTier || 'C';
+      if (m?.confidence === 'strong') strong += 1;
+      if (tier === 'A' || (tier === 'B' && (m?.confidence === 'strong' || m?.confidence === 'possible' || row.topCatalogCandidates.length > 0))) {
+        tierAOrB += 1;
+      }
+      const low = !m || m.confidence === 'none' || (typeof m.score === 'number' && m.score < ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD);
+      if (low) weakOrNoMatch += 1;
+    }
+    return { strong, tierAOrB, weakOrNoMatch };
+  }, [draft.lineSuggestions, lineByFingerprint]);
 
   const jobPatches: IntakeSuggestedJobConditionPatch[] = draft.projectSuggestion.suggestedJobConditionsPatch ?? [];
 
@@ -425,6 +496,22 @@ export function IntakeEstimateReviewPanel({
                   Review
                 </span>
               ) : null}
+              {row.pricingPreview?.laborFromInstallFamily ? (
+                <span
+                  className="rounded-full bg-indigo-50 px-1.5 py-0 text-[10px] font-semibold text-indigo-900 ring-1 ring-indigo-200/80"
+                  title={`Labor minutes (${row.pricingPreview.laborMinutesEach}) generated from install family "${row.pricingPreview.installFamilyKey ?? 'default'}" — source document did not provide labor pricing for this line.`}
+                >
+                  Labor from default
+                </span>
+              ) : null}
+              {row.isInstallableScope && !row.pricingPreview?.laborFromInstallFamily && row.laborOrigin === 'install_family' ? (
+                <span
+                  className="rounded-full bg-indigo-50 px-1.5 py-0 text-[10px] font-semibold text-indigo-900 ring-1 ring-indigo-200/80"
+                  title={`Installable scope (${row.installScopeType ?? 'generic'}) — labor minutes supplied by install-family fallback.`}
+                >
+                  Labor from default
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -614,6 +701,124 @@ export function IntakeEstimateReviewPanel({
         ) : null}
       </div>
 
+      {installFamilyLaborSummary.count > 0 ? (
+        <div className={`rounded-lg border px-3 py-2 text-[12px] ${isMaterialOnlyPricingMode ? 'border-amber-300/80 bg-amber-50/70 text-amber-950' : 'border-indigo-200/80 bg-indigo-50/60 text-indigo-950'}`}>
+          <p className="font-semibold">
+            {installFamilyLaborSummary.count} line{installFamilyLaborSummary.count === 1 ? '' : 's'} used install-family defaults for labor
+            <span className="ml-1 font-normal text-[11px]">({Math.round(installFamilyLaborSummary.totalMinutes)} min total)</span>
+          </p>
+          <p className="mt-0.5 text-[11px] leading-snug">
+            {isMaterialOnlyPricingMode
+              ? 'Project pricing mode is Material Only, but the source document includes installable scope. Labor minutes shown are estimator-generated fallbacks — review before pricing.'
+              : 'Labor minutes for these lines came from the install-family registry because the catalog match had no explicit labor. Review or replace the catalog match to override.'}
+          </p>
+        </div>
+      ) : null}
+
+      {basisSummary.hasBidSplits ? (
+        <div className="rounded-lg border border-sky-300/80 bg-sky-50/70 px-3 py-2.5 text-[12px] text-sky-950">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-sky-900">Bid splits detected</p>
+              <p className="mt-0.5 text-[12px] leading-snug text-sky-950/90">
+                The source document contains {basisSummary.byBidBucket.length} bid buckets. Primary draft totals include only the buckets highlighted below — click any bucket to include or exclude it.
+              </p>
+            </div>
+            {bidBucketsIncluded ? (
+              <button
+                type="button"
+                className="h-7 rounded-md border border-sky-300/80 bg-white px-2 text-[11px] font-semibold text-sky-900 hover:bg-sky-50"
+                onClick={() => setBidBucketsIncluded(null)}
+                title="Restore the default inclusion: base, allowance, and unbucketed rows contribute to the primary totals; alternates and deducts do not."
+              >
+                Reset to default
+              </button>
+            ) : null}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {basisSummary.byBidBucket.map((b) => {
+              const chipBase =
+                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[12px] font-medium ring-1 transition';
+              const chipOn =
+                b.kind === 'alternate'
+                  ? 'bg-amber-100 text-amber-950 ring-amber-300/80 hover:bg-amber-50'
+                  : b.kind === 'deduct'
+                    ? 'bg-rose-100 text-rose-950 ring-rose-300/80 hover:bg-rose-50'
+                    : 'bg-emerald-100 text-emerald-950 ring-emerald-300/80 hover:bg-emerald-50';
+              const chipOff = 'bg-white text-slate-600 ring-slate-200/80 hover:bg-slate-50';
+              return (
+                <button
+                  key={b.key}
+                  type="button"
+                  onClick={() => toggleBucketInclusion(b.key)}
+                  className={`${chipBase} ${b.includedInPrimaryTotals ? chipOn : chipOff}`}
+                  title={
+                    b.includedInPrimaryTotals
+                      ? `${b.label} is included in the primary draft total. Click to exclude.`
+                      : `${b.label} is excluded from the primary draft total (conditional scope). Click to include.`
+                  }
+                >
+                  <span className="font-semibold">{b.label}</span>
+                  <span className="rounded-full bg-white/70 px-1.5 py-0 text-[10px] tabular-nums">
+                    {b.totalLines}
+                  </span>
+                  {b.kind === 'alternate' ? (
+                    <span className="rounded bg-amber-600/10 px-1 text-[9px] font-bold uppercase tracking-wide text-amber-900">
+                      alt
+                    </span>
+                  ) : null}
+                  {b.kind === 'deduct' ? (
+                    <span className="rounded bg-rose-600/10 px-1 text-[9px] font-bold uppercase tracking-wide text-rose-900">
+                      deduct
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2 overflow-hidden rounded border border-sky-200/70 bg-white/80">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="bg-sky-50 text-left text-[10px] font-semibold uppercase tracking-wide text-sky-900">
+                  <th className="px-2 py-1">Bucket</th>
+                  <th className="px-2 py-1 text-right">Lines (accepted / total)</th>
+                  <th className="px-2 py-1 text-right">Material (draft)</th>
+                  <th className="px-2 py-1 text-right">Labor min (draft)</th>
+                  <th className="px-2 py-1 text-right">In primary total?</th>
+                </tr>
+              </thead>
+              <tbody>
+                {basisSummary.byBidBucket.map((b) => (
+                  <tr key={b.key} className="border-t border-sky-100 text-slate-800">
+                    <td className="px-2 py-1 font-semibold">{b.label}</td>
+                    <td className="px-2 py-1 text-right tabular-nums">
+                      {b.acceptedPricedLines} / {b.totalLines}
+                    </td>
+                    <td className="px-2 py-1 text-right tabular-nums">
+                      {formatCurrencySafe(b.materialSubtotalPreview)}
+                    </td>
+                    <td className="px-2 py-1 text-right tabular-nums">
+                      {formatNumberSafe(b.laborMinutesSubtotalPreview, 1)}
+                    </td>
+                    <td className="px-2 py-1 text-right">
+                      <span
+                        className={`rounded-full px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide ${
+                          b.includedInPrimaryTotals
+                            ? 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80'
+                            : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200/80'
+                        }`}
+                      >
+                        {b.includedInPrimaryTotals ? 'yes' : 'no'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
       {div10ProposalClauseHints && div10ProposalClauseHints.length > 0 ? (
         <details className="rounded-lg border border-violet-200/80 bg-violet-50/50 px-3 py-2">
           <summary className="cursor-pointer text-[12px] font-semibold text-violet-950">Proposal clause ideas (Div 10 Brain)</summary>
@@ -639,18 +844,35 @@ export function IntakeEstimateReviewPanel({
         </summary>
         <div className="border-t border-slate-100 px-3 pb-3 pt-2">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <button type="button" className="h-8 rounded-md bg-slate-900 px-3 text-[12px] font-semibold text-white hover:bg-slate-800" onClick={onBulkAcceptHighConfidence}>
+            <button
+              type="button"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-900 px-3 text-[12px] font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={onBulkAcceptHighConfidence}
+              disabled={bulkEligibleCounts.strong === 0}
+              title={bulkEligibleCounts.strong === 0 ? 'No suggested base-scope rows currently have a strong match.' : 'Accept every suggested base-scope row whose current match is strong.'}
+            >
               Accept all strong matches
+              <span className="rounded-full bg-white/15 px-1.5 py-0 text-[10px] font-bold tabular-nums">{bulkEligibleCounts.strong}</span>
             </button>
             <button
               type="button"
-              className="h-8 rounded-md border border-slate-300 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-50"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={onBulkAcceptTierAStrongB}
+              disabled={bulkEligibleCounts.tierAOrB === 0}
+              title={bulkEligibleCounts.tierAOrB === 0 ? 'No Tier A or Tier B rows are still awaiting confirmation. Tier A rows are often auto-accepted during import.' : 'Accept all Tier A rows and any Tier B rows that have a catalog candidate.'}
             >
-              Accept Tier A + strong Tier B
+              Accept Tier A + Tier B matches
+              <span className="rounded-full bg-slate-900/10 px-1.5 py-0 text-[10px] font-bold tabular-nums text-slate-900">{bulkEligibleCounts.tierAOrB}</span>
             </button>
-            <button type="button" className="ui-btn-secondary h-8 px-3 text-[12px]" onClick={onBulkIgnoreLowConfidence}>
+            <button
+              type="button"
+              className="ui-btn-secondary inline-flex h-8 items-center gap-1.5 px-3 text-[12px] disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={onBulkIgnoreLowConfidence}
+              disabled={bulkEligibleCounts.weakOrNoMatch === 0}
+              title={bulkEligibleCounts.weakOrNoMatch === 0 ? 'No weak / unmatched rows to ignore.' : `Ignore every row whose current match is weak, missing, or scored below ${ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD}.`}
+            >
               Ignore weak matches (score &lt; {ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD})
+              <span className="rounded-full bg-slate-900/10 px-1.5 py-0 text-[10px] font-bold tabular-nums text-slate-900">{bulkEligibleCounts.weakOrNoMatch}</span>
             </button>
             <div className="ml-auto flex items-center gap-2">
               <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5 text-[11px] font-semibold">
@@ -693,18 +915,80 @@ export function IntakeEstimateReviewPanel({
               <span className="text-right">Action</span>
             </div>
             <div className="space-y-0">
-              {sectionGroups.map((section) => (
-                <details key={section.key} className="group/sec" open={section.defaultOpen}>
-                  <summary className="sticky top-[30px] z-[9] flex cursor-pointer list-none items-center justify-between gap-2 border-b border-slate-200 bg-slate-100/90 px-2 py-1.5 text-left backdrop-blur [&::-webkit-details-marker]:hidden sm:px-3">
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-700">
-                      {section.title}
-                      <span className="ml-1.5 font-normal text-slate-500">({section.rows.length})</span>
-                    </span>
-                    <ChevronDown className="h-3.5 w-3.5 text-slate-500 transition group-open/sec:rotate-180" />
-                  </summary>
-                  <div>{section.rows.map((row) => renderLineRow(row))}</div>
-                </details>
-              ))}
+              {sectionGroups.map((section) => {
+                // Sub-group the base scope section by sourceBidBucket so estimators can see
+                // Base Bid / Alt 1 clusters at a glance. Only kicks in when multiple buckets exist.
+                const isBase = section.key === 'base';
+                const bidGroups = (() => {
+                  if (!isBase || !basisSummary.hasBidSplits) return null;
+                  const groups = new Map<string, IntakeLineEstimateSuggestion[]>();
+                  for (const row of section.rows) {
+                    const key = (row.sourceBidBucket || '').trim();
+                    const arr = groups.get(key) || [];
+                    arr.push(row);
+                    groups.set(key, arr);
+                  }
+                  return Array.from(groups.entries())
+                    .map(([key, rows]) => ({
+                      key,
+                      label: key || '(no bucket)',
+                      kind: classifyBidBucketKind(key) as BidBucketKind,
+                      rows,
+                    }))
+                    .sort(compareBidBucketKeys);
+                })();
+                return (
+                  <details key={section.key} className="group/sec" open={section.defaultOpen}>
+                    <summary className="sticky top-[30px] z-[9] flex cursor-pointer list-none items-center justify-between gap-2 border-b border-slate-200 bg-slate-100/90 px-2 py-1.5 text-left backdrop-blur [&::-webkit-details-marker]:hidden sm:px-3">
+                      <span className="text-[11px] font-bold uppercase tracking-wide text-slate-700">
+                        {section.title}
+                        <span className="ml-1.5 font-normal text-slate-500">({section.rows.length})</span>
+                      </span>
+                      <ChevronDown className="h-3.5 w-3.5 text-slate-500 transition group-open/sec:rotate-180" />
+                    </summary>
+                    <div>
+                      {bidGroups
+                        ? bidGroups.map((g) => {
+                            const included = basisSummary.byBidBucket.find((b) => b.key === g.key)?.includedInPrimaryTotals ?? true;
+                            const accent =
+                              g.kind === 'alternate'
+                                ? 'border-amber-300/80 bg-amber-50/70'
+                                : g.kind === 'deduct'
+                                  ? 'border-rose-300/80 bg-rose-50/70'
+                                  : 'border-sky-200/80 bg-sky-50/60';
+                            return (
+                              <div key={g.key || '(unbucketed)'}>
+                                <div
+                                  className={`flex items-center justify-between gap-2 border-y ${accent} px-3 py-1 text-[11px] font-semibold text-slate-700`}
+                                  title={
+                                    included
+                                      ? `${g.label} — included in primary draft totals.`
+                                      : `${g.label} — excluded from primary draft totals (click the bucket chip above to include).`
+                                  }
+                                >
+                                  <span>
+                                    <span className="uppercase tracking-wide">{g.label}</span>
+                                    <span className="ml-1.5 font-normal text-slate-500">({g.rows.length})</span>
+                                  </span>
+                                  <span
+                                    className={`rounded-full px-1.5 py-0 text-[9px] font-bold uppercase tracking-wide ${
+                                      included
+                                        ? 'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200/80'
+                                        : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200/80'
+                                    }`}
+                                  >
+                                    {included ? 'in primary total' : 'excluded from primary'}
+                                  </span>
+                                </div>
+                                {g.rows.map((row) => renderLineRow(row))}
+                              </div>
+                            );
+                          })
+                        : section.rows.map((row) => renderLineRow(row))}
+                    </div>
+                  </details>
+                );
+              })}
             </div>
           </div>
         </div>

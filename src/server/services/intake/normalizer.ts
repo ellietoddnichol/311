@@ -11,7 +11,8 @@ import { analyzeIntakeLineSemantics, applyIntakeSemanticsToItem, type ParsedLine
 import { looksLikeIntakePricingSummaryOrDisclaimerLine } from '../../../shared/utils/intakeTextGuards.ts';
 import { extractDocumentWithGemini } from '../geminiExtractionService.ts';
 import { intakeAsText, normalizeComparableText } from '../metadataExtractorService.ts';
-import { inferCategoryFromText, normalizeExtractedCategory } from '../rowClassifierService.ts';
+import { EMPTY_SECTION_CONTEXT, inferCategoryFromText, normalizeExtractedCategory, parseSectionHeaderText, type SectionContext } from '../rowClassifierService.ts';
+import { evaluateInstallability } from './installabilityRules.ts';
 import {
   compactDescription,
   extractManufacturerModelFinish,
@@ -132,6 +133,16 @@ export function normalizeSpreadsheetRows(input: {
       catalogMatchCandidates: row.catalogMatchCandidates,
       reviewRequired: false,
     };
+    const installExcel = evaluateInstallability({
+      itemName: item.description,
+      description: item.description,
+      category: item.category,
+      sourceManufacturer: item.sourceManufacturer,
+      sourceSectionHeader: item.sourceSectionHeader,
+      unit: item.unit,
+    });
+    item.isInstallableScope = installExcel.isInstallableScope;
+    item.installScopeType = installExcel.installScopeType;
     applyIntakeSemanticsToItem(item);
     return item;
   });
@@ -144,6 +155,8 @@ export function normalizePdfLinesDeterministically(
   const items: NormalizedIntakeItem[] = [];
   /** Carry room headers across pages/chunks so PDF takeoffs are not all "un-roomed" per chunk. */
   let currentRoom: string | null = null;
+  /** Carry section header (brand / category / bid bucket) across lines so child rows inherit context. */
+  let currentSection: SectionContext = EMPTY_SECTION_CONTEXT;
   const strict = options?.scopeRowFilter === 'strict';
 
   input.chunks.forEach((chunk) => {
@@ -154,6 +167,18 @@ export function normalizePdfLinesDeterministically(
       if (/^(project|client|owner|gc|general contractor|address|site|bid date|proposal date|estimator|prepared by)\b/i.test(line)) return;
 
       const lineKindEarly = analyzeIntakeLineSemantics(line).kind;
+
+      // Section header (brand - category - bid bucket) takes precedence over room-name capture.
+      const parsedSection = parseSectionHeaderText(line);
+      if (parsedSection && (parsedSection.manufacturer || parsedSection.bidBucket || parsedSection.category)) {
+        currentSection = {
+          manufacturer: parsedSection.manufacturer || currentSection.manufacturer,
+          category: parsedSection.category || currentSection.category,
+          bidBucket: parsedSection.bidBucket || currentSection.bidBucket,
+          sectionHeader: parsedSection.sectionHeader,
+        };
+        return;
+      }
 
       if (
         /^(room|area|phase)\b/i.test(line) ||
@@ -189,12 +214,12 @@ export function normalizePdfLinesDeterministically(
           chunkId: chunk.chunkId,
         },
         itemType: 'item',
-        category,
+        category: category || currentSection.category || null,
         roomName: currentRoom,
         description,
         quantity,
         unit: null,
-        manufacturer: labeled.manufacturer,
+        manufacturer: labeled.manufacturer || currentSection.manufacturer || null,
         model: labeled.model,
         finish: labeled.finish,
         modifiers: [],
@@ -203,7 +228,20 @@ export function normalizePdfLinesDeterministically(
         alternate: detectAlternate(description),
         exclusion: detectExclusion(description),
         confidence: clampConfidence(0.42 + (category ? 0.08 : 0) + (quantity ? 0.06 : 0)),
+        sourceManufacturer: currentSection.manufacturer || undefined,
+        sourceBidBucket: currentSection.bidBucket || undefined,
+        sourceSectionHeader: currentSection.sectionHeader || undefined,
       };
+      const install = evaluateInstallability({
+        itemName: pdfItem.description,
+        description: pdfItem.description,
+        category: pdfItem.category,
+        sourceManufacturer: pdfItem.sourceManufacturer,
+        sourceSectionHeader: pdfItem.sourceSectionHeader,
+        unit: pdfItem.unit,
+      });
+      pdfItem.isInstallableScope = install.isInstallableScope;
+      pdfItem.installScopeType = install.installScopeType;
       applyIntakeSemanticsToItem(pdfItem);
       items.push(pdfItem);
     });
@@ -278,6 +316,16 @@ export async function normalizePdfChunks(input: {
             0.62 + (category ? 0.08 : 0) + (line.roomArea ? 0.05 : 0) + (unit ? 0.03 : 0)
           ),
         };
+        const installLlm = evaluateInstallability({
+          itemName: llmItem.description,
+          description: llmItem.description,
+          category: llmItem.category,
+          sourceManufacturer: llmItem.sourceManufacturer,
+          sourceSectionHeader: llmItem.sourceSectionHeader,
+          unit: llmItem.unit,
+        });
+        llmItem.isInstallableScope = installLlm.isInstallableScope;
+        llmItem.installScopeType = installLlm.installScopeType;
         applyIntakeSemanticsToItem(llmItem);
         llmItems.push(llmItem);
       });

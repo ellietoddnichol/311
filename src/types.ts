@@ -41,6 +41,12 @@ export interface CatalogItem {
   tags?: string[];
   notes?: string;
   active: boolean;
+  /**
+   * Optional install-labor-family key used for fallback install pricing when an intake row
+   * is flagged as installable scope but no exact SKU/labor is present in the catalog. Values
+   * must match keys in `src/server/services/intake/installLaborFamilies.ts`.
+   */
+  installLaborFamily?: string | null;
 }
 
 export interface ProjectSettings {

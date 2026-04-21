@@ -133,6 +133,16 @@ export interface NormalizedIntakeItem {
   reviewRequired?: boolean;
   /** Parser-derived flags (e.g. field_assembly, finish_modifier) for review and estimating. */
   semanticTags?: string[];
+  /** Manufacturer carried from the nearest `Brand - Category - Bucket` section header. */
+  sourceManufacturer?: string;
+  /** Bid bucket carried from the nearest section header (e.g. `Base Bid`, `Alt 1`). */
+  sourceBidBucket?: string;
+  /** Raw section header text (e.g. `Scranton - Toilet Partitions - Base Bid`). */
+  sourceSectionHeader?: string;
+  /** Physically-installable scope flag derived from installabilityRules.ts. */
+  isInstallableScope?: boolean;
+  /** Normalized install scope type key (e.g. `partition_hdpe_compartment`). */
+  installScopeType?: string | null;
 }
 
 export interface ValidationResult {
@@ -373,6 +383,22 @@ export interface IntakeReviewLine {
   semanticTags?: string[];
   /** Division 10 bid reasoning + install intelligence (structured). */
   reasoning?: IntakeReasoningEnvelope;
+  /** Manufacturer carried from the nearest `Brand - Category - Bucket` section header. */
+  sourceManufacturer?: string;
+  /** Bid bucket carried from the nearest section header (e.g. `Base Bid`, `Alt 1`). */
+  sourceBidBucket?: string;
+  /** Raw section header text (e.g. `Scranton - Toilet Partitions - Base Bid`). */
+  sourceSectionHeader?: string;
+  /** True when the line describes physically-installable scope (partition, grab bar, mirror, etc.). */
+  isInstallableScope?: boolean;
+  /** Normalized install scope type key (e.g. `partition_hdpe_compartment`, `grab_bar_18`). */
+  installScopeType?: string | null;
+  /** Install labor family fallback when catalog matching did not provide usable labor. */
+  installFamilyFallback?: {
+    key: string;
+    minutes: number;
+    basis: string;
+  } | null;
 }
 
 export interface IntakeRoomCandidate {
@@ -507,7 +533,23 @@ export interface IntakeLineEstimateSuggestion {
     materialEach: number;
     laborMinutesEach: number;
     qty: number;
+    /** When true, the labor minutes came from a generic install-labor-family default rather than
+     *  a catalog SKU or source-priced labor line. */
+    laborFromInstallFamily?: boolean;
+    /** The install-labor-family key used (e.g. `partition_compartment`, `grab_bar_36`). */
+    installFamilyKey?: string | null;
+    /** Source of material pricing: `source` means the vendor quote, `catalog` means seeded catalog,
+     *  null when unknown. */
+    materialOrigin?: 'source' | 'catalog' | null;
   } | null;
+  /** Labor pricing origin: where the labor minutes above came from. */
+  laborOrigin?: 'source' | 'catalog' | 'install_family' | null;
+  /** Copied through from the intake review line so project-creation can persist context. */
+  sourceManufacturer?: string | null;
+  sourceBidBucket?: string | null;
+  sourceSectionHeader?: string | null;
+  isInstallableScope?: boolean | null;
+  installScopeType?: string | null;
   /** Optional Div 10 Brain layer (classify / retrieval / catalog assist / modifier assist). */
   div10Brain?: Div10LineBrainEvidence;
 }

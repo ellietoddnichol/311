@@ -263,15 +263,41 @@ export function buildIntakeEstimateDraft(params: {
       (autoMode === 'preselect_only' || autoMode === 'auto_link_tier_a') && tier === 'A' && Boolean(line.catalogMatch);
 
     let pricingPreview: IntakeLineEstimateSuggestion['pricingPreview'] = null;
+    let laborOrigin: IntakeLineEstimateSuggestion['laborOrigin'] = null;
     if (scopeBucket === 'priced_base_scope' && suggestedCatalogItemId) {
       const item = catalogById.get(suggestedCatalogItemId);
       if (item) {
+        const catalogLabor = item.baseLaborMinutes ?? 0;
+        const fallback = line.installFamilyFallback;
+        const useFallback = (!catalogLabor || catalogLabor <= 0) && line.isInstallableScope && fallback;
         pricingPreview = {
           materialEach: item.baseMaterialCost,
-          laborMinutesEach: item.baseLaborMinutes,
+          laborMinutesEach: useFallback ? fallback!.minutes : catalogLabor,
           qty: line.quantity,
+          laborFromInstallFamily: Boolean(useFallback),
+          installFamilyKey: useFallback ? fallback!.key : item.installLaborFamily ?? null,
+          materialOrigin: 'catalog',
         };
+        laborOrigin = useFallback ? 'install_family' : catalogLabor > 0 ? 'catalog' : null;
       }
+    } else if (
+      line.isInstallableScope &&
+      line.installFamilyFallback &&
+      scopeBucket !== 'excluded_by_others' &&
+      scopeBucket !== 'informational_only'
+    ) {
+      // Even if the row isn't classified as `priced_base_scope` (e.g. no catalog match yet and
+      // no AI classifier signal), an installable-scope line with a fallback family should still
+      // surface generated labor minutes so the review UI and finalize path see them.
+      pricingPreview = {
+        materialEach: 0,
+        laborMinutesEach: line.installFamilyFallback.minutes,
+        qty: line.quantity,
+        laborFromInstallFamily: true,
+        installFamilyKey: line.installFamilyFallback.key,
+        materialOrigin: null,
+      };
+      laborOrigin = 'install_family';
     }
 
     const marketingNotes: string[] = [];
@@ -298,6 +324,12 @@ export function buildIntakeEstimateDraft(params: {
       matcherSignals,
       marketingNotes,
       pricingPreview,
+      laborOrigin,
+      sourceManufacturer: line.sourceManufacturer ?? null,
+      sourceBidBucket: line.sourceBidBucket ?? null,
+      sourceSectionHeader: line.sourceSectionHeader ?? null,
+      isInstallableScope: line.isInstallableScope ?? null,
+      installScopeType: line.installScopeType ?? null,
     };
   });
 

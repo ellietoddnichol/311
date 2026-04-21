@@ -7,11 +7,164 @@ import {
 import { matchesDiv10CommercialOrMetadataLine } from './bidReasoning/div10BidReasoningService.ts';
 import { extractMetadataFromCells, hasProjectMetadataValue, intakeAsText, normalizeComparableText } from './metadataExtractorService.ts';
 
-export type ParsedChunkType = 'project_metadata' | 'header_row' | 'section_header' | 'actual_scope_line' | 'ignore';
+export type ParsedChunkType =
+  | 'project_metadata'
+  | 'header_row'
+  | 'section_header'
+  | 'actual_scope_line'
+  | 'bundle_item'
+  | 'pricing_notice'
+  | 'adder_option'
+  | 'logistics_note'
+  | 'ignore';
 
 export interface ParsedChunkClassification {
   kind: ParsedChunkType;
   metadata: Partial<IntakeProjectMetadata>;
+}
+
+/** Rolling parse-time state carried from a section header down onto each child scope line. */
+export interface SectionContext {
+  manufacturer: string;
+  category: string;
+  bidBucket: string;
+  sectionHeader: string;
+}
+
+export const EMPTY_SECTION_CONTEXT: SectionContext = {
+  manufacturer: '',
+  category: '',
+  bidBucket: '',
+  sectionHeader: '',
+};
+
+const BID_BUCKET_PATTERNS: Array<{ pattern: RegExp; label: (m: RegExpExecArray) => string }> = [
+  { pattern: /\bbase\s*bid\b/i, label: () => 'Base Bid' },
+  { pattern: /\balt(?:ernate)?\.?\s*(\d+)\b/i, label: (m) => `Alt ${m[1]}` },
+  { pattern: /\ballowance\b/i, label: () => 'Allowance' },
+  { pattern: /\bdeduct(ion|)?\s*alt(?:ernate)?\.?\s*(\d+)?\b/i, label: (m) => `Deduct Alt ${m[2] ?? ''}`.trim() },
+  { pattern: /\bvoluntary\s*alt(?:ernate)?\.?\s*(\d+)?\b/i, label: (m) => `Voluntary Alt ${m[1] ?? ''}`.trim() },
+  { pattern: /\bunit\s*price(s)?\b/i, label: () => 'Unit Prices' },
+  { pattern: /\bexcluded\b/i, label: () => 'Excluded' },
+  { pattern: /\ballowances?\b/i, label: () => 'Allowance' },
+];
+
+/** Known Division 10-ish manufacturers that commonly appear as section prefixes. */
+const KNOWN_MANUFACTURER_TOKENS = new Set([
+  'scranton',
+  'scranton products',
+  'bradley',
+  'asi',
+  'asi group',
+  'bobrick',
+  'koala',
+  'bradley corporation',
+  'general partitions',
+  'gp',
+  'hadrian',
+  'global partitions',
+  'metpar',
+  'accurate partitions',
+  'sunroc',
+  'sloan',
+  'gamco',
+  'mcgard',
+  'american specialties',
+  'baltimore partitions',
+  'salsbury',
+  'hollman',
+  'lyon',
+  'penco',
+  'republic',
+  'list industries',
+]);
+
+function titleCaseToken(token: string): string {
+  return token
+    .split(/\s+/)
+    .map((part) => (part.length === 0 ? part : part[0].toUpperCase() + part.slice(1).toLowerCase()))
+    .join(' ');
+}
+
+function matchBidBucket(text: string): string {
+  for (const { pattern, label } of BID_BUCKET_PATTERNS) {
+    const match = pattern.exec(text);
+    if (match) return label(match);
+  }
+  return '';
+}
+
+/**
+ * Parse a section header line like "Scranton - Toilet Partitions - Base Bid" or
+ * "Bradley Toilet Accessories / Alt 1 Bid" into normalized fields.
+ * Returns null when the text cannot be interpreted as a section header.
+ */
+export function parseSectionHeaderText(text: string): SectionContext | null {
+  const compact = intakeAsText(text);
+  if (!compact) return null;
+  if (!looksLikeSectionHeader(compact)) {
+    // Also accept longer multi-part headers like "Brand - Category - Bucket" even if they fail the narrow guard.
+    if (!/[\-–—|/·•]/.test(compact)) return null;
+    if (compact.length > 160) return null;
+    if (/\d{3,}/.test(compact)) return null;
+  }
+  const parts = compact.split(/\s*[\-–—|/·•]\s*|\s+\-\s+/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+
+  let manufacturer = '';
+  let category = '';
+  let bidBucket = '';
+
+  for (const part of parts) {
+    const lower = part.toLowerCase();
+    if (!manufacturer && KNOWN_MANUFACTURER_TOKENS.has(lower)) {
+      manufacturer = titleCaseToken(part);
+      continue;
+    }
+    if (!bidBucket) {
+      const bucket = matchBidBucket(part);
+      if (bucket) {
+        bidBucket = bucket;
+        continue;
+      }
+    }
+    if (!category) {
+      const inferred = inferCategoryFromText(part);
+      if (inferred) {
+        category = inferred;
+        continue;
+      }
+    }
+  }
+
+  // If no known manufacturer matched but first token is Title Case and not a category/bucket, treat as manufacturer.
+  if (!manufacturer && parts.length >= 2) {
+    const first = parts[0];
+    const firstLower = first.toLowerCase();
+    const firstIsCategory = Boolean(inferCategoryFromText(first));
+    const firstIsBucket = Boolean(matchBidBucket(first));
+    if (!firstIsCategory && !firstIsBucket && /^[A-Z]/.test(first) && first.length <= 32 && !/\d/.test(first)) {
+      manufacturer = titleCaseToken(first);
+    }
+    if (!category) {
+      for (const part of parts.slice(1)) {
+        const inferred = inferCategoryFromText(part);
+        if (inferred) {
+          category = inferred;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!manufacturer && !category && !bidBucket) return null;
+
+  return {
+    manufacturer,
+    category,
+    bidBucket,
+    sectionHeader: compact,
+  };
 }
 
 export interface RowClassifierLineLike {
@@ -115,6 +268,46 @@ export function looksLikeIgnoreChunk(text: string): boolean {
   return false;
 }
 
+/** Detect a pricing notice / subtotal / "labor by quote" line that should not be priced as a takeoff row. */
+export function looksLikePricingNotice(text: string): boolean {
+  const normalized = normalizeComparableText(text);
+  if (!normalized) return false;
+  if (/\b(material total|sub ?total|grand total|total material|total labor|total (of )?material)\b/.test(normalized)) return true;
+  if (/\b(if labor (is )?needed|labor (is )?by (quote|others)|quote(d)? separately|call for (a )?quote)\b/.test(normalized)) return true;
+  if (/\b(material only|labor only|material and labor|includes material only)\b/.test(normalized)) return true;
+  return false;
+}
+
+/** Detect an optional adder / toggle line ("Add for sales tax", "Bond: Y/N", "Performance bond if required"). */
+export function looksLikeAdderOption(text: string): boolean {
+  const normalized = normalizeComparableText(text);
+  if (!normalized) return false;
+  if (/^(add (for|to)|adder for|optional adder|add on|bond|performance bond|bid bond|surety)\b/.test(normalized)) return true;
+  if (/\b(y\s*\/\s*n|yes\s*\/\s*no|if required|if requested)\b/.test(normalized) && normalized.length <= 120) return true;
+  if (/^add(s)? (for|to) (sales )?tax\b/.test(normalized)) return true;
+  return false;
+}
+
+/** Detect a logistics / project-condition note ("Customer to receive and unload", "Ship to jobsite"). */
+export function looksLikeLogisticsNote(text: string): boolean {
+  const normalized = normalizeComparableText(text);
+  if (!normalized) return false;
+  if (/\b(customer to (receive|unload|store|sign)|receive and unload|ship (to )?(jobsite|site)|freight (on|included|separate)|delivery (included|separate|not included))\b/.test(normalized)) return true;
+  if (/\b(install by (others|gc)|by (general contractor|others)|not our scope)\b/.test(normalized)) return true;
+  return false;
+}
+
+/** Detect a bundled-item description ("Grab bar set: 18 in, 36 in"). */
+export function looksLikeBundleItemLine(text: string): boolean {
+  const normalized = normalizeComparableText(text);
+  if (!normalized) return false;
+  if (!/\bset\b/.test(normalized) && !/\bbundle\b/.test(normalized) && !/\bkit\b/.test(normalized)) return false;
+  if (/\b\d+\s*(in|")\b.*,\s*\d+\s*(in|")\b/.test(normalized)) return true;
+  if (/\bset\s*:\s*\d/.test(normalized)) return true;
+  if (/\bkit\s*of\s*\d/.test(normalized)) return true;
+  return false;
+}
+
 export function classifyParsedChunk(cells: string[], lineIndex: number, knownMetadata?: Partial<IntakeProjectMetadata>): ParsedChunkClassification {
   const compactCells = cells.map((cell) => intakeAsText(cell)).filter(Boolean);
   const text = compactCells.join(' ');
@@ -122,9 +315,13 @@ export function classifyParsedChunk(cells: string[], lineIndex: number, knownMet
 
   if (!text) return { kind: 'ignore', metadata };
   if (matchesDiv10CommercialOrMetadataLine(text)) return { kind: 'ignore', metadata };
-  if (looksLikeIntakePricingSummaryOrDisclaimerLine(text)) return { kind: 'ignore', metadata };
+  if (looksLikeIntakePricingSummaryOrDisclaimerLine(text)) return { kind: 'pricing_notice', metadata };
   if (looksLikeHeaderChunk(compactCells)) return { kind: 'header_row', metadata };
   if (hasProjectMetadataValue(metadata) || looksLikeProjectMetadataChunk(text, lineIndex, knownMetadata)) return { kind: 'project_metadata', metadata };
+  if (looksLikePricingNotice(text)) return { kind: 'pricing_notice', metadata };
+  if (looksLikeAdderOption(text)) return { kind: 'adder_option', metadata };
+  if (looksLikeLogisticsNote(text)) return { kind: 'logistics_note', metadata };
+  if (looksLikeBundleItemLine(text)) return { kind: 'bundle_item', metadata };
   if (looksLikeIgnoreChunk(text)) return { kind: 'ignore', metadata };
   if (compactCells.length === 1 && looksLikeSectionHeader(text)) return { kind: 'section_header', metadata };
 
@@ -154,7 +351,8 @@ export function shouldKeepNormalizedLine(line: RowClassifierLineLike, lineIndex:
     line.notes,
   ], lineIndex, knownMetadata);
 
-  if (classification.kind !== 'actual_scope_line') return false;
+  // Bundle items are real installable scope; they're only flagged so we can pre-expand them before matching.
+  if (classification.kind !== 'actual_scope_line' && classification.kind !== 'bundle_item') return false;
   if (looksLikeHeaderChunk([line.itemName, line.description, line.category, line.unit, line.notes])) return false;
   if (looksLikeProjectMetadataChunk(identity, lineIndex, knownMetadata)) return false;
   if (looksLikeIntakePricingSummaryOrDisclaimerLine(identity)) return false;
