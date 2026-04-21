@@ -17,7 +17,6 @@ export interface ExpandableLineLike {
   sourceManufacturer?: string;
   sourceBidBucket?: string;
   sourceSectionHeader?: string;
-  [key: string]: unknown;
 }
 
 export interface ExpandedChild<T extends ExpandableLineLike> {
