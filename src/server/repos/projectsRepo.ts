@@ -2,6 +2,34 @@ import { randomUUID } from 'crypto';
 import { estimatorDb } from '../db/connection.ts';
 import { ProjectRecord } from '../../shared/types/estimator.ts';
 import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../../shared/utils/jobConditions.ts';
+import { canonicalizeManufacturer } from '../../shared/utils/itemNameBeautifier.ts';
+
+function parseStringArray(value: unknown): string[] {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value || '[]') : value;
+    return Array.isArray(parsed)
+      ? parsed.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizePreferredBrands(input: unknown): string[] {
+  const list = Array.isArray(input)
+    ? input.map((entry) => String(entry || '').trim()).filter(Boolean)
+    : parseStringArray(input);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of list) {
+    const canonical = canonicalizeManufacturer(value) || value;
+    const key = canonical.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(canonical);
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
 
 function mapProjectRow(row: any): ProjectRecord {
   let parsedJobConditions = createDefaultProjectJobConditions();
@@ -20,6 +48,8 @@ function mapProjectRow(row: any): ProjectRecord {
   } catch {
     selectedScopeCategories = [];
   }
+
+  const preferredBrands = normalizePreferredBrands(row.preferred_brands_json);
 
   return {
     id: row.id,
@@ -45,6 +75,7 @@ function mapProjectRow(row: any): ProjectRecord {
     taxPercent: row.tax_percent,
     pricingMode: row.pricing_mode || 'labor_and_material',
     selectedScopeCategories,
+    preferredBrands,
     jobConditions: parsedJobConditions,
     status: row.status,
     notes: row.notes,
@@ -92,6 +123,7 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     selectedScopeCategories: Array.isArray(input.selectedScopeCategories)
       ? input.selectedScopeCategories.map((entry) => String(entry || '').trim()).filter(Boolean)
       : [],
+    preferredBrands: normalizePreferredBrands(input.preferredBrands),
     jobConditions: normalizeProjectJobConditions(input.jobConditions),
     status: input.status ?? 'Draft',
     notes: input.notes ?? null,
@@ -104,8 +136,8 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     INSERT INTO projects_v1 (
       id, project_number, project_name, client_name, general_contractor, estimator, bid_date, proposal_date, due_date, address, project_type,
       project_size, floor_level, access_difficulty, install_height, material_handling, wall_substrate,
-      labor_burden_percent, overhead_percent, profit_percent, tax_percent, pricing_mode, scope_categories_json, job_conditions_json, status, notes, special_notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      labor_burden_percent, overhead_percent, profit_percent, tax_percent, pricing_mode, scope_categories_json, preferred_brands_json, job_conditions_json, status, notes, special_notes, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     project.id,
     project.projectNumber,
@@ -130,6 +162,7 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     project.taxPercent,
     project.pricingMode,
     JSON.stringify(project.selectedScopeCategories),
+    JSON.stringify(project.preferredBrands),
     JSON.stringify(project.jobConditions),
     project.status,
     project.notes,
@@ -151,6 +184,9 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
     selectedScopeCategories: Array.isArray(input.selectedScopeCategories)
       ? input.selectedScopeCategories.map((entry) => String(entry || '').trim()).filter(Boolean)
       : existing.selectedScopeCategories,
+    preferredBrands: input.preferredBrands !== undefined
+      ? normalizePreferredBrands(input.preferredBrands)
+      : existing.preferredBrands,
     jobConditions: normalizeProjectJobConditions(input.jobConditions ?? existing.jobConditions),
     id: projectId,
     updatedAt: new Date().toISOString()
@@ -161,7 +197,7 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
       project_number = ?, project_name = ?, client_name = ?, general_contractor = ?, estimator = ?, bid_date = ?, proposal_date = ?, due_date = ?,
       address = ?, project_type = ?, project_size = ?, floor_level = ?, access_difficulty = ?, install_height = ?,
       material_handling = ?, wall_substrate = ?, labor_burden_percent = ?, overhead_percent = ?,
-      profit_percent = ?, tax_percent = ?, pricing_mode = ?, scope_categories_json = ?, job_conditions_json = ?, status = ?, notes = ?, special_notes = ?, updated_at = ?
+      profit_percent = ?, tax_percent = ?, pricing_mode = ?, scope_categories_json = ?, preferred_brands_json = ?, job_conditions_json = ?, status = ?, notes = ?, special_notes = ?, updated_at = ?
     WHERE id = ?
   `).run(
     next.projectNumber,
@@ -186,6 +222,7 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
     next.taxPercent,
     next.pricingMode,
     JSON.stringify(next.selectedScopeCategories),
+    JSON.stringify(next.preferredBrands),
     JSON.stringify(next.jobConditions),
     next.status,
     next.notes,

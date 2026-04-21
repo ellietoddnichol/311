@@ -80,6 +80,8 @@ export interface ProjectRecord {
   taxPercent: number;
   pricingMode: PricingMode;
   selectedScopeCategories: string[];
+  /** Brands/manufacturers preferred for this project. Used to prioritize catalog/match suggestions. */
+  preferredBrands: string[];
   jobConditions: ProjectJobConditions;
   status: ProjectStatus;
   notes: string | null;

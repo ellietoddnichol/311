@@ -16,6 +16,10 @@ import { collectPastProjectDateErrors, mapProjectDateErrors } from '../shared/ut
 import { OFFICE_ADDRESS, getDistanceInMiles } from '../utils/geo';
 import { formatNumberSafe } from '../utils/numberFormat';
 import { touchCatalogSyncTimestamp } from '../utils/catalogBackgroundSync';
+import { beautifyItemName, canonicalizeManufacturer } from '../shared/utils/itemNameBeautifier';
+import { PreferredBrandsSelector } from '../components/intake/PreferredBrandsSelector';
+import { ImportTemplateCallout } from '../components/intake/ImportTemplateCallout';
+import { BeautifiedLineHeader } from '../components/intake/BeautifiedLineHeader';
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
 type IntakeStep = 1 | 2 | 3 | 4 | 5;
@@ -774,11 +778,17 @@ function geminiLinesToParsedRows(lines: GeminiIntakeLine[], sourceReference: str
   }));
 }
 
-function suggestCatalogMatch(input: { itemName?: string; category?: string | null; description?: string; rawText?: string }, catalog: CatalogItem[]): CatalogItem | null {
+function suggestCatalogMatch(
+  input: { itemName?: string; category?: string | null; description?: string; rawText?: string; manufacturer?: string | null },
+  catalog: CatalogItem[],
+  preferredBrands: string[] = [],
+): CatalogItem | null {
   const itemName = String(input.itemName || '').trim();
   const category = String(input.category || '').trim();
   const description = String(input.description || '').trim();
   const raw = String(input.rawText || '').trim();
+  const explicitManufacturer = String(input.manufacturer || '').trim().toLowerCase();
+  const preferredLower = preferredBrands.map((brand) => brand.toLowerCase()).filter(Boolean);
   const normalized = normalizeComparableText(`${itemName} ${description} ${category} ${raw}`);
 
   if (!normalized) return null;
@@ -810,7 +820,13 @@ function suggestCatalogMatch(input: { itemName?: string; category?: string | nul
     const categoryOverlap = scoreTokenOverlap(category, `${candidate.category} ${candidate.subcategory || ''} ${candidate.family || ''}`);
     const searchOverlap = scoreTokenOverlap(`${itemName} ${description} ${raw}`, candidateSearch);
     const manufacturerModelBoost = scoreTokenOverlap(raw, `${candidate.manufacturer || ''} ${candidate.model || ''}`) > 0.5 ? 2 : 0;
-    const score = exactDescriptionBoost + (itemOverlap * 8) + (categoryOverlap * 3) + (searchOverlap * 5) + manufacturerModelBoost;
+
+    // Preferred-brand boost: prioritize catalog entries matching selected brands for this project.
+    const candidateBrand = String(candidate.manufacturer || '').trim().toLowerCase();
+    const explicitBrandMatch = explicitManufacturer && candidateBrand && candidateBrand === explicitManufacturer ? 3 : 0;
+    const preferredBrandBoost = candidateBrand && preferredLower.includes(candidateBrand) ? 2.5 : 0;
+
+    const score = exactDescriptionBoost + (itemOverlap * 8) + (categoryOverlap * 3) + (searchOverlap * 5) + manufacturerModelBoost + explicitBrandMatch + preferredBrandBoost;
 
     if (score > bestScore) {
       bestScore = score;
@@ -818,6 +834,7 @@ function suggestCatalogMatch(input: { itemName?: string; category?: string | nul
     }
   }
 
+  // Keep threshold where it was so weak matches still require confidence.
   return bestScore >= 4.5 ? best : null;
 }
 
@@ -1053,6 +1070,7 @@ function createInitialProjectDraft(settings?: SettingsRecord | null): Partial<Pr
     taxPercent: settings?.defaultTaxPercent ?? 8.25,
     pricingMode: 'labor_and_material',
     selectedScopeCategories: [],
+    preferredBrands: [],
     bidDate: '',
     dueDate: '',
     notes: '',
@@ -1203,6 +1221,16 @@ export function ProjectIntake() {
     ].filter(Boolean))).sort(),
     [catalog, lineSuggestions]
   );
+
+  const brandOptions = useMemo(() => {
+    const bucket = new Map<string, string>();
+    catalog.forEach((item) => {
+      const canonical = canonicalizeManufacturer(item.manufacturer);
+      if (!canonical) return;
+      if (!bucket.has(canonical.toLowerCase())) bucket.set(canonical.toLowerCase(), canonical);
+    });
+    return Array.from(bucket.values()).sort((a, b) => a.localeCompare(b));
+  }, [catalog]);
 
   const basicsChecklist = useMemo(() => {
     const missing: string[] = [];
@@ -1410,7 +1438,7 @@ export function ProjectIntake() {
       importedFromProject = sourceLines.map((line) => {
         const match = line.catalogItemId
           ? catalog.find((item) => item.id === line.catalogItemId)
-          : suggestCatalogMatch({ itemName: line.description, category: line.category, description: line.description }, catalog);
+          : suggestCatalogMatch({ itemName: line.description, category: line.category, description: line.description }, catalog, projectDraft.preferredBrands || []);
         const roomName = sourceRooms.find((room) => room.id === line.roomId)?.roomName || 'General';
 
         return {
@@ -1543,7 +1571,8 @@ export function ProjectIntake() {
             description: line.description,
             rawText: `${line.itemName} ${line.description}`,
           },
-          catalog
+          catalog,
+          projectDraft.preferredBrands || []
         );
 
         const flags = [
@@ -1613,7 +1642,8 @@ export function ProjectIntake() {
           description: line.description,
           rawText: `${line.itemName} ${line.description} ${line.notes || ''}`,
         },
-        catalog
+        catalog,
+        projectDraft.preferredBrands || []
       );
 
       return {
@@ -1771,7 +1801,7 @@ export function ProjectIntake() {
 
     const parsed = adaptive.lines.map((line) => {
       const roomFromLine = line.roomName || 'General';
-      const match = suggestCatalogMatch({ itemName: line.itemName, category: line.category, description: line.description, rawText: `${line.description} ${line.notes || ''}` }, catalog);
+      const match = suggestCatalogMatch({ itemName: line.itemName, category: line.category, description: line.description, rawText: `${line.description} ${line.notes || ''}` }, catalog, projectDraft.preferredBrands || []);
 
       return {
         id: makeId('line-suggest'),
@@ -1915,7 +1945,7 @@ export function ProjectIntake() {
       ['2 Grab Bar 36', '1 Mirror 18x36', '1 Paper Towel Dispenser'],
       'Template seed'
     ).map((line) => {
-      const match = suggestCatalogMatch({ itemName: line.itemName, description: line.description, rawText: line.description }, catalog);
+      const match = suggestCatalogMatch({ itemName: line.itemName, description: line.description, rawText: line.description }, catalog, projectDraft.preferredBrands || []);
       return {
         id: makeId('line-suggest'),
         include: true,
@@ -2086,6 +2116,7 @@ export function ProjectIntake() {
         taxPercent: Number(projectDraft.taxPercent ?? settingsDefaults?.defaultTaxPercent ?? 8.25),
         pricingMode: (projectDraft.pricingMode as PricingMode) || 'labor_and_material',
         selectedScopeCategories: projectDraft.selectedScopeCategories || [],
+        preferredBrands: projectDraft.preferredBrands || [],
         jobConditions: normalizedJobConditions,
         notes: projectDraft.notes || null,
         specialNotes: projectDraft.specialNotes || null
@@ -2234,6 +2265,8 @@ export function ProjectIntake() {
 
           {mode === 'takeoff' && (
             <>
+              <ImportTemplateCallout />
+
               <div className="space-y-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Upload Takeoff File</p>
                 <div
@@ -2482,6 +2515,12 @@ export function ProjectIntake() {
                     {scopeCategoryOptions.length === 0 ? <p className="text-xs text-slate-500">Categories appear after review lines load.</p> : null}
                   </div>
                 </div>
+
+                <PreferredBrandsSelector
+                  value={projectDraft.preferredBrands || []}
+                  options={brandOptions}
+                  onChange={(next) => patchProjectDraft({ preferredBrands: next })}
+                />
                     </>
                   ) : null}
                 </div>
@@ -2860,6 +2899,18 @@ export function ProjectIntake() {
                           onChange={(e) => patchLineSuggestion(line.id, { include: e.target.checked })}
                         />
                         <div className="text-xs text-slate-700 flex-1 space-y-2">
+                          <BeautifiedLineHeader
+                            rawText={line.rawText || line.description || line.itemName || ''}
+                            itemName={line.itemName}
+                            description={line.description}
+                            preferredBrands={projectDraft.preferredBrands || []}
+                            brandInferredFromPreferred={(() => {
+                              const preferred = (projectDraft.preferredBrands || []).map((brand) => brand.toLowerCase());
+                              const matched = catalog.find((item) => item.id === line.catalogItemId);
+                              const brand = matched?.manufacturer?.toLowerCase();
+                              return Boolean(brand && preferred.includes(brand));
+                            })()}
+                          />
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                             <label className="text-[11px] text-slate-600">Room / Area
                               <input className="ui-input mt-1 h-8" value={line.roomName || ''} onChange={(e) => patchLineSuggestion(line.id, { roomName: e.target.value })} />
@@ -2909,6 +2960,12 @@ export function ProjectIntake() {
                   {unmatchedSuggestions.map((line) => (
                     <div key={line.id} className="border border-amber-200 bg-amber-50/35 rounded-md p-2.5">
                       <div className="text-xs text-slate-700 mb-2 space-y-2">
+                        <BeautifiedLineHeader
+                          rawText={line.rawText || line.description || line.itemName || ''}
+                          itemName={line.itemName}
+                          description={line.description}
+                          preferredBrands={projectDraft.preferredBrands || []}
+                        />
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                           <label className="text-[11px] text-slate-600">Room / Area
                             <input className="ui-input mt-1 h-8" value={line.roomName || ''} onChange={(e) => patchLineSuggestion(line.id, { roomName: e.target.value })} />

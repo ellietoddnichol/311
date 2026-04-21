@@ -36,6 +36,7 @@ export function initEstimatorSchema() {
       tax_percent REAL NOT NULL DEFAULT 0,
       pricing_mode TEXT NOT NULL DEFAULT 'labor_and_material',
       scope_categories_json TEXT NOT NULL DEFAULT '[]',
+      preferred_brands_json TEXT NOT NULL DEFAULT '[]',
       job_conditions_json TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'Draft',
       notes TEXT,
@@ -255,8 +256,14 @@ export function initEstimatorSchema() {
     estimatorDb.exec('ALTER TABLE projects_v1 ADD COLUMN proposal_date TEXT');
   }
 
+  const hasPreferredBrands = projectColumns.some((column) => column.name === 'preferred_brands_json');
+  if (!hasPreferredBrands) {
+    estimatorDb.exec("ALTER TABLE projects_v1 ADD COLUMN preferred_brands_json TEXT NOT NULL DEFAULT '[]'");
+  }
+
   estimatorDb.exec("UPDATE projects_v1 SET job_conditions_json = '{}' WHERE job_conditions_json IS NULL OR trim(job_conditions_json) = ''");
   estimatorDb.exec("UPDATE projects_v1 SET scope_categories_json = '[]' WHERE scope_categories_json IS NULL OR trim(scope_categories_json) = ''");
+  estimatorDb.exec("UPDATE projects_v1 SET preferred_brands_json = '[]' WHERE preferred_brands_json IS NULL OR trim(preferred_brands_json) = ''");
   const hasBaseMaterialCost = takeoffColumns.some((column) => column.name === 'base_material_cost');
   if (!hasBaseMaterialCost) {
     estimatorDb.exec("ALTER TABLE takeoff_lines_v1 ADD COLUMN base_material_cost REAL NOT NULL DEFAULT 0");

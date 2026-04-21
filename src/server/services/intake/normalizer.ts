@@ -71,12 +71,15 @@ export function normalizeSpreadsheetRows(input: {
     const itemType = detectItemType(`${text} ${row.mappedFields.notes || ''}`);
     const alternate = detectAlternate(`${text} ${row.mappedFields.notes || ''}`);
     const exclusion = detectExclusion(`${text} ${row.mappedFields.notes || ''}`);
+    const preferredTemplate = row.parsingNotes.some((note) => /preferred import template/i.test(note));
+    const penalizedNotes = row.parsingNotes.filter((note) => !/preferred import template/i.test(note));
     const confidence = 0.56
       + (row.mappedFields.itemDescription ? 0.12 : 0)
       + (row.mappedFields.quantity !== null && row.mappedFields.quantity !== undefined ? 0.08 : 0)
       + (row.mappedFields.unit ? 0.06 : 0)
       + (category ? 0.08 : 0)
-      - (row.parsingNotes.length * 0.05);
+      + (preferredTemplate ? 0.12 : 0)
+      - (penalizedNotes.length * 0.05);
 
     return {
       sourceType: input.fileType,

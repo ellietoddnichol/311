@@ -29,6 +29,7 @@ function buildProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     taxPercent: 8.25,
     pricingMode: 'labor_and_material',
     selectedScopeCategories: [],
+    preferredBrands: [],
     jobConditions: createDefaultProjectJobConditions(),
     status: 'Draft',
     notes: null,

@@ -1730,6 +1730,14 @@ export function ProjectWorkspace() {
                     <span key={category} className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] border border-slate-200">{category}</span>
                   )) : <p className="text-xs text-slate-500">No categories selected yet.</p>}
                 </div>
+                {(project?.preferredBrands?.length ?? 0) > 0 ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500 font-semibold">Preferred brands</p>
+                    {(project?.preferredBrands || []).map((brand) => (
+                      <span key={brand} className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-[11px] border border-blue-200 font-medium">{brand}</span>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="mt-2 flex flex-wrap gap-1.5 border-t border-slate-200 pt-2">
                   {rooms.slice(0, 6).map((room) => (
                     <span key={room.id} className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] border border-slate-200">{room.roomName}</span>
