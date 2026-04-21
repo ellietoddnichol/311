@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ChevronDown, MoreHorizontal } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, MoreHorizontal, Search, X } from 'lucide-react';
 import type { ModifierRecord } from '../../shared/types/estimator';
 import type {
   IntakeAiSuggestions,
@@ -30,17 +30,6 @@ import {
   type EstimateReviewLineState,
 } from '../../shared/utils/intakeEstimateReview';
 import { formatCurrencySafe, formatNumberSafe } from '../../utils/numberFormat';
-
-function ConfidencePill({ tier }: { tier: 'high' | 'medium' | 'low' }) {
-  const cls =
-    tier === 'high'
-      ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/80'
-      : tier === 'medium'
-        ? 'bg-amber-50 text-amber-900 ring-1 ring-amber-200/70'
-        : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/80';
-  const label = tier === 'high' ? 'High confidence' : tier === 'medium' ? 'Medium' : 'Low';
-  return <span className={`rounded-full px-2 py-0.5 text-[12px] font-medium ${cls}`}>{label}</span>;
-}
 
 function StatusPill({ status }: { status: IntakeApplicationStatus }) {
   if (status === 'suggested') {
@@ -173,6 +162,13 @@ export function IntakeEstimateReviewPanel({
   const [openDiv10Fp, setOpenDiv10Fp] = useState<string | null>(null);
   /** Single open row actions menu (backdrop closes sibling rows). */
   const [openRowActionsFp, setOpenRowActionsFp] = useState<string | null>(null);
+  /** Rows expanded inline to show alternatives / details. */
+  const [expandedFps, setExpandedFps] = useState<Record<string, boolean>>({});
+  const [matchDensity, setMatchDensity] = useState<'compact' | 'comfortable'>('compact');
+
+  function toggleExpanded(fp: string) {
+    setExpandedFps((prev) => ({ ...prev, [fp]: !prev[fp] }));
+  }
 
   const basisSummary: DraftBasisSummary = useMemo(
     () => computeDraftBasisSummary(draft, lineByFingerprint, aiSuggestions ?? null),
@@ -238,274 +234,312 @@ export function IntakeEstimateReviewPanel({
     );
   }
 
-  function renderLineCard(row: IntakeLineEstimateSuggestion) {
+  function renderExpandedDetails(row: IntakeLineEstimateSuggestion, st: EstimateReviewLineState, selectedId: string | null, match: IntakeCatalogMatch | null) {
+    const fp = row.reviewLineFingerprint;
+    const aiRow = findAiClassificationForFingerprint(fp, reviewLines, aiSuggestions ?? null);
+    const hint = formatParsingHintSubtitle(aiRow);
+    const tags = match ? matchSignalTags(match.reason, row.matcherSignals) : [];
+    const alternatives = row.topCatalogCandidates.filter((c) => c.catalogItemId !== selectedId).slice(0, 4);
+
+    return (
+      <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 px-3 py-2.5 text-[12px]">
+        {hint ? (
+          <div>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Parsing hint</span>
+            <p className="mt-0.5 leading-snug text-slate-700">{hint}</p>
+          </div>
+        ) : null}
+        {st.applicationStatus === 'accepted' && estimateReviewAcceptSourceLabel(st.acceptSource) ? (
+          <p
+            className={`text-[11px] font-medium ${
+              st.acceptSource === 'auto_strong_match' ? 'text-sky-800' : st.acceptSource === 'server' ? 'text-slate-600' : 'text-emerald-800'
+            }`}
+            title={
+              st.acceptSource === 'auto_strong_match'
+                ? 'This line started accepted because the catalog match was strong.'
+                : st.acceptSource === 'server'
+                  ? 'Marked accepted when the import was built.'
+                  : 'You confirmed this line in review.'
+            }
+          >
+            Accepted via {estimateReviewAcceptSourceLabel(st.acceptSource)}
+          </p>
+        ) : null}
+        {match ? (
+          <div>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Why this match</span>
+            <p className="mt-0.5 leading-snug text-slate-700">{shortMatchReason(match.reason)}</p>
+            {tags.length > 0 ? (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {tags.map((t) => (
+                  <span key={t} className="rounded bg-slate-200/70 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-slate-700">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="mt-1 text-[11px] font-medium text-sky-700 hover:underline"
+              onClick={() => setOpenTechnicalFp((cur) => (cur === fp ? null : fp))}
+            >
+              {openTechnicalFp === fp ? 'Hide technical details' : 'Show score & full reason'}
+            </button>
+            {openTechnicalFp === fp ? (
+              <div className="mt-1 rounded border border-slate-200 bg-white px-2 py-1.5 font-mono text-[11px] text-slate-600">
+                <div>Score: {formatNumberSafe(match.score, 3)}</div>
+                <div className="mt-0.5 whitespace-pre-wrap break-words">{match.reason}</div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-amber-900">No catalog match — use <strong>Find</strong> to pick an item.</p>
+        )}
+
+        {alternatives.length > 0 ? (
+          <div>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Other likely matches (click to replace)</span>
+            <div className="mt-1 grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
+              {alternatives.map((c) => renderAlternativeOption(c, fp, false))}
+            </div>
+          </div>
+        ) : null}
+
+        {row.div10Brain ? (
+          <div className="rounded border border-violet-200/80 bg-violet-50/50 px-2 py-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-900">Div 10 Brain (advisory)</span>
+              <span className="text-[9px] font-medium text-violet-800">Does not change pricing</span>
+            </div>
+            {row.div10Brain.div10Error ? <p className="mt-1 text-red-800">{row.div10Brain.div10Error}</p> : null}
+            {row.div10Brain.classify ? (
+              <p className="mt-1 leading-snug text-slate-800">
+                <span className="font-semibold text-violet-950">Classify:</span> {row.div10Brain.classify.line_kind} · {row.div10Brain.classify.scope_bucket} · {row.div10Brain.classify.category}
+                {row.div10Brain.classify.needs_human_review ? (
+                  <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-bold text-amber-950">Review</span>
+                ) : null}
+                <span className="mt-0.5 block text-[11px] text-slate-600">{row.div10Brain.classify.reasoning_summary}</span>
+              </p>
+            ) : null}
+            {row.div10Brain.catalogAssist ? (
+              <p className="mt-1 text-slate-800">
+                <span className="font-semibold text-violet-950">Catalog assist:</span> {row.div10Brain.catalogAssist.confidence} confidence — {row.div10Brain.catalogAssist.rationale}
+              </p>
+            ) : null}
+            {row.div10Brain.modifierAssist ? (
+              <p className="mt-1 text-slate-800">
+                <span className="font-semibold text-violet-950">Modifier ideas:</span>{' '}
+                {[...row.div10Brain.modifierAssist.suggested_line_modifier_keys, ...row.div10Brain.modifierAssist.suggested_project_modifier_keys].join(', ') || '—'}
+              </p>
+            ) : null}
+            {row.div10Brain.retrieval && row.div10Brain.retrieval.length > 0 ? (
+              <div className="mt-1">
+                <button
+                  type="button"
+                  className="text-[11px] font-medium text-violet-800 hover:underline"
+                  onClick={() => setOpenDiv10Fp((cur) => (cur === fp ? null : fp))}
+                >
+                  {openDiv10Fp === fp ? 'Hide sources' : 'Show retrieved sources'}
+                </button>
+                {openDiv10Fp === fp ? (
+                  <ul className="mt-1 space-y-1 rounded border border-violet-100 bg-white/90 p-2 text-[11px] text-slate-700">
+                    {row.div10Brain.retrieval.map((s) => (
+                      <li key={s.id}>
+                        <span className="font-mono text-[10px] text-violet-900">{s.source_label}</span>{' '}
+                        <span className="text-slate-500">({s.score.toFixed(3)})</span>
+                        <div className="line-clamp-3 text-slate-600">{s.text}</div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderLineRow(row: IntakeLineEstimateSuggestion) {
     const fp = row.reviewLineFingerprint;
     const st = lineStateForRow(row, lineByFingerprint);
     const match = getActiveCatalogMatchForRow(row, st);
     const tier = match ? matchConfidenceTier(match.confidence) : 'low';
-    const aiRow = findAiClassificationForFingerprint(fp, reviewLines, aiSuggestions ?? null);
-    const hint = formatParsingHintSubtitle(aiRow);
     const needsReview = rowNeedsEstimatorReview(row, st, match);
-    const tags = match ? matchSignalTags(match.reason, row.matcherSignals) : [];
     const catItem = catalogItemForSelection(row, st);
     const selectedId = st.selectedCatalogItemId ?? row.suggestedCatalogItemId;
+    const isExpanded = !!expandedFps[fp];
+    const isSuggested = st.applicationStatus === 'suggested';
+    const rowStatusAccent =
+      st.applicationStatus === 'accepted'
+        ? 'border-l-emerald-400/90'
+        : st.applicationStatus === 'replaced'
+          ? 'border-l-sky-400/90'
+          : st.applicationStatus === 'ignored'
+            ? 'border-l-slate-300'
+            : needsReview
+              ? 'border-l-amber-400/90'
+              : 'border-l-slate-200';
+    const rowPadY = matchDensity === 'compact' ? 'py-1.5' : 'py-2.5';
+    const sourceText = linePreviewText(fp);
+    const suggestedSku = catItem?.sku ?? match?.sku ?? '—';
+    const suggestedDesc = catItem?.description ?? match?.description ?? '';
+    const suggestedMeta = catItem ? [catItem.category, catItem.manufacturer].filter(Boolean).join(' · ') : '';
 
     return (
-      <div
-        key={fp}
-        className="rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm"
-      >
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-4">
-          {/* Left: source */}
-          <div className="min-w-0 flex-1 lg:max-w-[min(100%,280px)]">
-            <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Source line</p>
-            <p className="mt-0.5 text-sm font-medium leading-snug text-slate-900">{linePreviewText(fp)}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+      <div key={fp} className={`border-b border-slate-100 border-l-[3px] ${rowStatusAccent} last:border-b-0 hover:bg-slate-50/60`}>
+        <div className={`grid grid-cols-[1.25rem_minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(0,10rem)_auto] items-start gap-2 px-2 ${rowPadY} text-[12px] sm:gap-3 sm:px-3`}>
+          <button
+            type="button"
+            aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
+            onClick={() => toggleExpanded(fp)}
+            className="mt-0.5 flex h-5 w-5 items-center justify-center rounded text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+          >
+            {isExpanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+          </button>
+
+          <div className="min-w-0">
+            <div className="flex items-start gap-1.5">
+              <p className={`min-w-0 ${matchDensity === 'compact' ? 'line-clamp-1' : 'line-clamp-2'} font-medium text-slate-900`} title={sourceText}>
+                {sourceText}
+              </p>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1">
               <ScopeChip bucket={row.scopeBucket} />
               {row.catalogAutoApplyTier ? (
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ring-1 ${
+                  className={`rounded px-1 py-0 text-[9px] font-bold uppercase tracking-wide ring-1 ${
                     row.catalogAutoApplyTier === 'A'
                       ? 'bg-emerald-50 text-emerald-900 ring-emerald-200/80'
                       : row.catalogAutoApplyTier === 'B'
                         ? 'bg-amber-50 text-amber-950 ring-amber-200/70'
                         : 'bg-slate-100 text-slate-600 ring-slate-200/80'
                   }`}
-                  title="Automation tier: A = eligible for auto-link / pre-accept; B = suggest; C = needs review"
+                  title="Automation tier"
                 >
-                  Tier {row.catalogAutoApplyTier}
+                  T{row.catalogAutoApplyTier}
                 </span>
               ) : null}
               {needsReview ? (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[12px] font-semibold text-amber-950 ring-1 ring-amber-200/80">
-                  Review needed
+                <span className="rounded-full bg-amber-100 px-1.5 py-0 text-[10px] font-semibold text-amber-950 ring-1 ring-amber-200/80">
+                  Review
                 </span>
               ) : null}
             </div>
-            {hint ? <p className="mt-1 text-[12px] leading-snug text-slate-500">{hint}</p> : null}
-            <p className="mt-1 font-mono text-[9px] text-slate-400" title={fp}>
-              {fp.slice(0, 12)}…
-            </p>
           </div>
 
-          {/* Middle: match */}
-          <div className="min-w-0 flex-[1.4] border-t border-slate-100 pt-2 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Current choice</p>
-              {st.applicationStatus === 'accepted' || st.applicationStatus === 'replaced' ? (
-                <StatusPill status={st.applicationStatus} />
-              ) : (
-                <span className="text-[12px] text-slate-500">Not confirmed</span>
-              )}
-            </div>
-            {st.applicationStatus === 'accepted' && estimateReviewAcceptSourceLabel(st.acceptSource) ? (
-              <p
-                className={`mt-1 max-w-xl text-[10px] font-medium leading-snug ${
-                  st.acceptSource === 'auto_strong_match' ? 'text-sky-800' : st.acceptSource === 'server' ? 'text-slate-600' : 'text-emerald-800'
-                }`}
-                title={
-                  st.acceptSource === 'auto_strong_match'
-                    ? 'This line started accepted because the catalog match was strong. You can still Replace or Ignore.'
-                    : st.acceptSource === 'server'
-                      ? 'Marked accepted when the import was built (e.g. Tier A or parser).'
-                      : 'You confirmed this line in review.'
-                }
-              >
-                {estimateReviewAcceptSourceLabel(st.acceptSource)}
-              </p>
-            ) : null}
+          <div className="min-w-0">
             {match && selectedId ? (
               <>
-                <div className="mt-1 font-mono text-sm font-semibold text-slate-900">{catItem?.sku ?? match.sku}</div>
-                <div className="text-[12px] leading-snug text-slate-800">{catItem?.description ?? match.description}</div>
-                {catItem ? (
-                  <p className="mt-0.5 text-[12px] text-slate-500">
-                    {[catItem.category, catItem.manufacturer].filter(Boolean).join(' · ') || null}
-                  </p>
-                ) : null}
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <ConfidencePill tier={tier} />
-                  {tags.map((t) => (
-                    <span
-                      key={t}
-                      className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-slate-600"
-                    >
-                      {t}
-                    </span>
-                  ))}
+                <div className="flex items-start gap-1.5">
+                  <span className="min-w-0 shrink-0 truncate font-mono text-[12px] font-semibold text-slate-900" title={suggestedSku}>
+                    {suggestedSku}
+                  </span>
+                  <span
+                    className={`mt-0.5 inline-flex shrink-0 rounded-full px-1.5 py-0 text-[10px] font-semibold ${
+                      tier === 'high'
+                        ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/70'
+                        : tier === 'medium'
+                          ? 'bg-amber-50 text-amber-900 ring-1 ring-amber-200/70'
+                          : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/80'
+                    }`}
+                    title={match.reason}
+                  >
+                    {tier === 'high' ? 'Strong' : tier === 'medium' ? 'Check' : 'Weak'}
+                  </span>
                 </div>
-                <p className="mt-1 text-[12px] leading-snug text-slate-600 line-clamp-2">{shortMatchReason(match.reason)}</p>
-                <button
-                  type="button"
-                  className="mt-1 text-[12px] font-medium text-sky-700 hover:underline"
-                  onClick={() => setOpenTechnicalFp((cur) => (cur === fp ? null : fp))}
-                >
-                  {openTechnicalFp === fp ? 'Hide technical details' : 'Technical details (score, full reason)'}
-                </button>
-                {openTechnicalFp === fp ? (
-                  <div className="mt-1 rounded border border-slate-100 bg-slate-50/90 px-2 py-1.5 font-mono text-[12px] text-slate-600">
-                    <div>Score: {formatNumberSafe(match.score, 3)}</div>
-                    <div className="mt-0.5 whitespace-pre-wrap break-words">{match.reason}</div>
-                  </div>
+                <p className={`${matchDensity === 'compact' ? 'line-clamp-1' : 'line-clamp-2'} leading-snug text-slate-800`} title={suggestedDesc}>
+                  {suggestedDesc}
+                </p>
+                {suggestedMeta && matchDensity !== 'compact' ? (
+                  <p className="text-[11px] text-slate-500 line-clamp-1">{suggestedMeta}</p>
                 ) : null}
               </>
             ) : (
-              <p className="mt-1 text-sm text-amber-900">No catalog match — use Replace to pick an item.</p>
+              <p className="text-[12px] text-amber-900">No match — use <strong>Find</strong> to pick one.</p>
             )}
-
-            {row.topCatalogCandidates.filter((c) => c.catalogItemId !== selectedId).length > 0 ? (
-              <div className="mt-2 border-t border-slate-100 pt-2">
-                <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Other likely matches</p>
-                <div className="mt-1 grid gap-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                  {row.topCatalogCandidates
-                    .filter((c) => c.catalogItemId !== selectedId)
-                    .slice(0, 3)
-                    .map((c) => renderAlternativeOption(c, fp, false))}
-                </div>
-              </div>
-            ) : null}
-
-            {row.div10Brain ? (
-              <div className="mt-2 border-t border-violet-100 bg-violet-50/40 pt-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[12px] font-semibold uppercase tracking-wide text-violet-900">Div 10 Brain (advisory)</p>
-                  <span className="text-[10px] font-medium text-violet-800">Does not change pricing or auto-accept</span>
-                </div>
-                {row.div10Brain.div10Error ? (
-                  <p className="mt-1 text-[12px] text-red-800">{row.div10Brain.div10Error}</p>
-                ) : null}
-                {row.div10Brain.classify ? (
-                  <p className="mt-1 text-[12px] leading-snug text-slate-800">
-                    <span className="font-semibold text-violet-950">Classify:</span> {row.div10Brain.classify.line_kind} ·{' '}
-                    {row.div10Brain.classify.scope_bucket} · {row.div10Brain.classify.category}
-                    {row.div10Brain.classify.needs_human_review ? (
-                      <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-bold text-amber-950">Review</span>
-                    ) : null}
-                    <span className="mt-0.5 block text-[11px] text-slate-600">{row.div10Brain.classify.reasoning_summary}</span>
-                  </p>
-                ) : null}
-                {row.div10Brain.catalogAssist ? (
-                  <p className="mt-1 text-[12px] text-slate-800">
-                    <span className="font-semibold text-violet-950">Catalog assist:</span> {row.div10Brain.catalogAssist.confidence} confidence —{' '}
-                    {row.div10Brain.catalogAssist.rationale}
-                    {row.div10Brain.catalogAssist.needs_human_review ? (
-                      <span className="ml-1 text-[11px] font-medium text-amber-900">Estimator review suggested.</span>
-                    ) : null}
-                  </p>
-                ) : null}
-                {row.div10Brain.modifierAssist ? (
-                  <p className="mt-1 text-[12px] text-slate-800">
-                    <span className="font-semibold text-violet-950">Modifier ideas (keys):</span>{' '}
-                    {[...row.div10Brain.modifierAssist.suggested_line_modifier_keys, ...row.div10Brain.modifierAssist.suggested_project_modifier_keys].join(', ') ||
-                      '—'}
-                    <span className="mt-0.5 block text-[11px] text-slate-600">{row.div10Brain.modifierAssist.confidence_notes}</span>
-                  </p>
-                ) : null}
-                {row.div10Brain.retrieval && row.div10Brain.retrieval.length > 0 ? (
-                  <div className="mt-1">
-                    <button
-                      type="button"
-                      className="text-[12px] font-medium text-violet-800 hover:underline"
-                      onClick={() => setOpenDiv10Fp((cur) => (cur === fp ? null : fp))}
-                    >
-                      {openDiv10Fp === fp ? 'Hide sources' : 'Show retrieved sources'}
-                    </button>
-                    {openDiv10Fp === fp ? (
-                      <ul className="mt-1 space-y-1 rounded border border-violet-100 bg-white/90 p-2 text-[11px] text-slate-700">
-                        {row.div10Brain.retrieval.map((s) => (
-                          <li key={s.id}>
-                            <span className="font-mono text-[10px] text-violet-900">{s.source_label}</span>{' '}
-                            <span className="text-slate-500">({s.score.toFixed(3)})</span>
-                            <div className="line-clamp-3 text-slate-600">{s.text}</div>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
           </div>
 
-          {/* Right: primary Accept + overflow for catalog / ignore (shortlist stays in the match column). */}
-          <div className="relative flex shrink-0 flex-row items-start gap-1.5 border-t border-slate-100 pt-2 lg:w-[152px] lg:flex-col lg:border-l lg:border-t-0 lg:pl-3 lg:pt-0">
-            {st.applicationStatus === 'suggested' ? (
+          <div className="min-w-0">
+            {isSuggested ? (
+              <span className="text-[11px] text-slate-500">Not confirmed</span>
+            ) : (
+              <StatusPill status={st.applicationStatus} />
+            )}
+          </div>
+
+          <div className="relative flex shrink-0 items-center gap-1">
+            {isSuggested ? (
               <button
                 type="button"
-                className="min-h-10 min-w-0 flex-1 rounded-md bg-slate-900 px-3 py-2 text-center text-[12px] font-semibold text-white shadow-sm hover:bg-slate-800 lg:flex-none lg:min-h-0 lg:h-10"
+                className="inline-flex h-7 items-center gap-1 rounded-md bg-slate-900 px-2.5 text-[11px] font-semibold text-white shadow-sm hover:bg-slate-800"
                 onClick={() => onAcceptLine(fp)}
+                title="Accept this match"
               >
+                <Check className="h-3 w-3" aria-hidden />
                 Accept
               </button>
-            ) : (
-              <div className="flex min-h-10 flex-1 items-center rounded-md border border-slate-200/80 bg-slate-50/90 px-2 text-[11px] font-medium text-slate-700 lg:flex-none lg:min-h-8">
-                {applicationStatusLabel(st.applicationStatus)}
-              </div>
-            )}
-            <div className="relative shrink-0">
+            ) : null}
+            <button
+              type="button"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+              onClick={() => onOpenCatalogPicker(fp)}
+              title="Find catalog item"
+            >
+              <Search className="h-3 w-3" aria-hidden />
+              Find
+            </button>
+            {isSuggested ? (
               <button
                 type="button"
-                className="flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-900 lg:h-8 lg:w-8"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                onClick={() => onIgnoreLine(fp)}
+                title="Ignore this line"
+              >
+                <X className="h-3 w-3" aria-hidden />
+                Ignore
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                 aria-haspopup="menu"
                 aria-expanded={openRowActionsFp === fp}
-                aria-label="Line actions"
+                aria-label="More actions"
                 onClick={() => setOpenRowActionsFp((cur) => (cur === fp ? null : fp))}
               >
-                <MoreHorizontal className="h-4 w-4" aria-hidden />
+                <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
               </button>
-              {openRowActionsFp === fp ? (
-                <>
+            )}
+            {openRowActionsFp === fp ? (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-30 cursor-default bg-transparent"
+                  aria-label="Close menu"
+                  onClick={() => setOpenRowActionsFp(null)}
+                />
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-40 mt-1 min-w-[11.5rem] rounded-lg border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-slate-900/5"
+                >
                   <button
                     type="button"
-                    className="fixed inset-0 z-30 cursor-default bg-transparent"
-                    aria-label="Close menu"
-                    onClick={() => setOpenRowActionsFp(null)}
-                  />
-                  <div
-                    role="menu"
-                    className="absolute right-0 top-full z-40 mt-1 min-w-[11.5rem] rounded-lg border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-slate-900/5"
+                    role="menuitem"
+                    className="block w-full px-3 py-2 text-left text-[12px] text-red-700 hover:bg-red-50/80"
+                    onClick={() => {
+                      onIgnoreLine(fp);
+                      setOpenRowActionsFp(null);
+                    }}
                   >
-                    {st.applicationStatus === 'suggested' ? (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="block w-full px-3 py-3 text-left text-[12px] text-slate-800 hover:bg-slate-50 sm:py-2 lg:hidden"
-                        onClick={() => {
-                          onAcceptLine(fp);
-                          setOpenRowActionsFp(null);
-                        }}
-                      >
-                        Accept line
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="block w-full px-3 py-3 text-left text-[12px] text-slate-800 hover:bg-slate-50 sm:py-2"
-                      onClick={() => {
-                        onOpenCatalogPicker(fp);
-                        setOpenRowActionsFp(null);
-                      }}
-                    >
-                      Find catalog item…
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="block w-full px-3 py-3 text-left text-[12px] text-red-700 hover:bg-red-50/80 sm:py-2"
-                      onClick={() => {
-                        onIgnoreLine(fp);
-                        setOpenRowActionsFp(null);
-                      }}
-                    >
-                      Ignore line
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </div>
+                    Ignore line
+                  </button>
+                </div>
+              </>
+            ) : null}
           </div>
         </div>
+        {isExpanded ? renderExpandedDetails(row, st, selectedId, match) : null}
       </div>
     );
   }
@@ -599,12 +633,12 @@ export function IntakeEstimateReviewPanel({
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
           <div>
             <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-600">Review suggested matches</p>
-            <p className="text-[12px] text-slate-600">Confirm or change each catalog link before creating the project.</p>
+            <p className="text-[12px] text-slate-600">Scan top-to-bottom. Accept the suggestion or click the chevron for details.</p>
           </div>
           <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180" />
         </summary>
         <div className="border-t border-slate-100 px-3 pb-3 pt-2">
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <button type="button" className="h-8 rounded-md bg-slate-900 px-3 text-[12px] font-semibold text-white hover:bg-slate-800" onClick={onBulkAcceptHighConfidence}>
               Accept all strong matches
             </button>
@@ -618,20 +652,60 @@ export function IntakeEstimateReviewPanel({
             <button type="button" className="ui-btn-secondary h-8 px-3 text-[12px]" onClick={onBulkIgnoreLowConfidence}>
               Ignore weak matches (score &lt; {ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD})
             </button>
+            <div className="ml-auto flex items-center gap-2">
+              <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5 text-[11px] font-semibold">
+                <button
+                  type="button"
+                  className={`rounded-sm px-2 py-1 ${matchDensity === 'compact' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                  onClick={() => setMatchDensity('compact')}
+                >
+                  Compact
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-sm px-2 py-1 ${matchDensity === 'comfortable' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                  onClick={() => setMatchDensity('comfortable')}
+                >
+                  Comfortable
+                </button>
+              </div>
+              <button
+                type="button"
+                className="text-[11px] font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 hover:text-slate-900"
+                onClick={() => {
+                  const allFps = draft.lineSuggestions.map((r) => r.reviewLineFingerprint);
+                  const anyClosed = allFps.some((fp) => !expandedFps[fp]);
+                  const next: Record<string, boolean> = {};
+                  for (const fp of allFps) next[fp] = anyClosed;
+                  setExpandedFps(next);
+                }}
+              >
+                {draft.lineSuggestions.every((r) => expandedFps[r.reviewLineFingerprint]) ? 'Collapse all' : 'Expand all'}
+              </button>
+            </div>
           </div>
-          <div className="max-h-[min(60vh,640px)] space-y-3 overflow-y-auto pr-0.5">
-            {sectionGroups.map((section) => (
-              <details key={section.key} className="group/sec rounded-md border border-slate-100 bg-slate-50/40" open={section.defaultOpen}>
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-1.5 text-left [&::-webkit-details-marker]:hidden">
-                  <span className="text-[12px] font-bold text-slate-800">
-                    {section.title}
-                    <span className="ml-1.5 font-normal text-slate-500">({section.rows.length})</span>
-                  </span>
-                  <ChevronDown className="h-3.5 w-3.5 text-slate-500 transition group-open/sec:rotate-180" />
-                </summary>
-                <div className="space-y-2 border-t border-slate-100 bg-white/80 p-2">{section.rows.map((row) => renderLineCard(row))}</div>
-              </details>
-            ))}
+          <div className="max-h-[min(70vh,760px)] overflow-y-auto rounded-md border border-slate-200 bg-white pr-0.5">
+            <div className="sticky top-0 z-10 grid grid-cols-[1.25rem_minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(0,10rem)_auto] items-center gap-2 border-b border-slate-200 bg-slate-50/95 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 backdrop-blur sm:gap-3 sm:px-3">
+              <span />
+              <span>Source line</span>
+              <span>Suggested catalog match</span>
+              <span>Status</span>
+              <span className="text-right">Action</span>
+            </div>
+            <div className="space-y-0">
+              {sectionGroups.map((section) => (
+                <details key={section.key} className="group/sec" open={section.defaultOpen}>
+                  <summary className="sticky top-[30px] z-[9] flex cursor-pointer list-none items-center justify-between gap-2 border-b border-slate-200 bg-slate-100/90 px-2 py-1.5 text-left backdrop-blur [&::-webkit-details-marker]:hidden sm:px-3">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-700">
+                      {section.title}
+                      <span className="ml-1.5 font-normal text-slate-500">({section.rows.length})</span>
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 text-slate-500 transition group-open/sec:rotate-180" />
+                  </summary>
+                  <div>{section.rows.map((row) => renderLineRow(row))}</div>
+                </details>
+              ))}
+            </div>
           </div>
         </div>
       </details>
