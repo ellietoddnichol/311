@@ -56,7 +56,13 @@ export function finalizeIntakeReviewLines(
 
 export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogItem[], matchCatalog: boolean, bundles: BundleRecord[] = []): IntakeReviewLine[] {
   const useMemory = matchCatalog && catalog.length > 0;
-  const expandedLines = expandBundleLines(lines as unknown as Array<NormalizedIntakeLine & { description: string; quantity: number }>) as NormalizedIntakeLine[];
+  const expandedLines = expandBundleLines(
+    lines.map((line) => ({
+      ...line,
+      description: line.description || line.itemName || '',
+      quantity: Number.isFinite(line.quantity) && Number(line.quantity) > 0 ? Number(line.quantity) : 1,
+    }))
+  );
   return expandedLines.map((line) => {
     const description = line.description || line.itemName;
     const seededMatch = line.catalogMatch || null;
