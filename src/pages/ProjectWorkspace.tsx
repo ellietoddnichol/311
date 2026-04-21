@@ -55,7 +55,7 @@ import { ProjectStepNav } from '../components/workflow/ProjectStepNav.tsx';
 import { WorkflowRightDrawer } from '../components/workflow/WorkflowRightDrawer';
 import { EstimateToolbar, type EstimateToolbarBidBucketStat } from '../components/workflow/EstimateToolbar';
 import { classifyBidBucketKind, compareBidBucketKeys } from '../shared/utils/intakeEstimateReview';
-import { RoomList } from '../components/workflow/RoomList';
+import { RoomManager } from '../components/workspace/RoomManager';
 import { ProposalSectionEditor } from '../components/workflow/ProposalSectionEditor';
 import { ProposalSettingsRail } from '../components/workflow/ProposalSettingsRail';
 import { ProposalPreview } from '../components/workflow/ProposalPreview';
@@ -178,29 +178,9 @@ export function ProjectWorkspace() {
   projectRef.current = project;
 
   const [activeRoomId, setActiveRoomId] = useState('');
-  /** `TAKEOFF_ALL_ROOMS` = combined view; otherwise a real room id (matches sidebar selection when drilling into one room). */
+  /** `TAKEOFF_ALL_ROOMS` = combined view; otherwise a real room id (matches working room / takeoff filter when drilling into one room). */
   const [takeoffRoomFilter, setTakeoffRoomFilter] = useState<string>(TAKEOFF_ALL_ROOMS);
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
-  /**
-   * Phase 1.3 — persistent right-rail modifier lane. When a line is selected and the
-   * viewport is wide enough, the lane renders alongside the estimate grid so add-ins
-   * can be applied without opening the full line-detail modal. Users can dismiss the
-   * lane and still fall back to the modal path. Dismissal resets on next selection
-   * change so the lane doesn't stay hidden forever.
-   */
-  /**
-   * Rooms sidebar can be collapsed to a 48px rail so the estimate grid gets the
-   * full width of the workspace. Persisted in localStorage so it stays folded
-   * across reloads once the user has chosen the wider layout.
-   */
-  const [roomsCollapsed, setRoomsCollapsed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem('estimator.roomsCollapsed') === '1';
-  });
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem('estimator.roomsCollapsed', roomsCollapsed ? '1' : '0');
-  }, [roomsCollapsed]);
   const [pricingOrganizeMode, setPricingOrganizeMode] = useState<'rooms' | 'categories'>('rooms');
   const [pricingCategoryFilter, setPricingCategoryFilter] = useState<string>(PRICING_ALL_CATEGORIES);
 
@@ -208,6 +188,7 @@ export function ProjectWorkspace() {
   const [bundleModalOpen, setBundleModalOpen] = useState(false);
   const [modifiersModalOpen, setModifiersModalOpen] = useState(false);
   const [roomCreateModalOpen, setRoomCreateModalOpen] = useState(false);
+  const [roomManagerOpen, setRoomManagerOpen] = useState(false);
   const [roomCreationDraft, setRoomCreationDraft] = useState<RoomCreationDraft>(DEFAULT_ROOM_CREATION_DRAFT);
   const [creatingRoom, setCreatingRoom] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState('');
@@ -1588,23 +1569,10 @@ export function ProjectWorkspace() {
            * removed per estimator feedback — it crowded the grid; clicking a row
            * opens the same editor as a modal on demand.
            */
-          const estimateGridClass = roomsCollapsed
-            ? 'flex min-h-0 min-w-0 flex-1 flex-col gap-4 xl:flex-row xl:items-start'
-            : 'grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,300px)_1fr]';
+          const estimateGridClass = 'isolate grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4';
           return (
           <div className="flex min-w-0 flex-col gap-1">
           <div className={estimateGridClass}>
-            <RoomList
-              rooms={rooms}
-              activeRoomId={activeRoomId}
-              onSelectRoom={selectWorkspaceRoom}
-              onOpenCreateRoom={openCreateRoomModal}
-              onRenameRoom={(room) => void renameRoom(room)}
-              onDuplicateRoom={(room) => void duplicateRoom(room)}
-              onDeleteRoom={(room) => void deleteRoom(room)}
-              collapsed={roomsCollapsed}
-              onToggleCollapsed={() => setRoomsCollapsed((v) => !v)}
-            />
             <div className="flex min-w-0 flex-col gap-1">
               {searchParams.get('scopeChecked') === '1' ? (
                 <div className="mb-1 flex items-start gap-2 rounded-lg border border-emerald-200/90 bg-emerald-50/70 px-3 py-2 text-sm text-emerald-950">
@@ -1649,6 +1617,9 @@ export function ProjectWorkspace() {
                 selectedLineLabel={selectedLine?.description ?? null}
                 activeRoomId={activeRoomId}
                 activeRoomLabel={roomNamesById[activeRoomId] || 'select a room'}
+                onWorkingRoomChange={selectWorkspaceRoom}
+                onOpenCreateRoom={openCreateRoomModal}
+                onOpenManageRooms={() => setRoomManagerOpen(true)}
                 projectTotal={summary?.baseBidTotal}
                 formatCurrency={(n) => formatCurrencySafe(n)}
                 disabledAdd={!activeRoomId}
@@ -1674,9 +1645,9 @@ export function ProjectWorkspace() {
                     <p className="text-xs leading-snug text-slate-500">
                       <span className="font-medium text-slate-700">Combined across rooms:</span> lines that match the same catalog item or SKU are rolled into one row (qty and install time are summed). Room names are listed under each item.{' '}
                       <span className="text-slate-600">
-                        New lines and bundles still go to the room selected in the left sidebar (
+                        New lines and bundles go to the room chosen under <span className="font-medium text-slate-800">Room for new lines</span> (
                         <span className="font-medium text-slate-800">{roomNamesById[activeRoomId] || 'select a room'}</span>
-                        ). Use a single room in the view menu to edit or delete a specific line.
+                        ). Use <span className="font-medium text-slate-800">Takeoff view</span> for one room to edit or delete a specific line.
                       </span>
                     </p>
                   ) : null}
@@ -1760,7 +1731,7 @@ export function ProjectWorkspace() {
                       </div>
                       <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
                         {pricingOrganizeMode === 'rooms'
-                          ? 'Jump between rooms (same as sidebar).'
+                          ? 'Jump between rooms (same as the room chips below).'
                           : 'Filter the table by catalog category for this room; All keeps every line.'}
                       </p>
                     </div>
@@ -2076,7 +2047,7 @@ export function ProjectWorkspace() {
               </div>
             </details>
 
-            <div className="grid gap-4 xl:grid-cols-[minmax(260px,300px)_minmax(340px,460px)_minmax(0,1fr)] xl:items-start">
+            <div className="grid gap-4 xl:grid-cols-[minmax(240px,280px)_minmax(0,1fr)_minmax(520px,640px)] xl:items-start">
               <ProposalSettingsRail
                 proposalFormat={project.proposalFormat || 'standard'}
                 onProposalFormatChange={(value) =>
@@ -2113,7 +2084,7 @@ export function ProjectWorkspace() {
                   </div>
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600">Print / export</span>
                 </div>
-                <div className="overflow-hidden rounded-2xl ring-1 ring-slate-200/80">
+                <div className="max-h-[calc(100vh-220px)] overflow-auto rounded-2xl bg-slate-100/60 p-3 ring-1 ring-slate-200/80">
                   <ProposalPreview
                     project={project}
                     settings={settings}
@@ -2310,6 +2281,45 @@ export function ProjectWorkspace() {
           </div>
         </div>
       )}
+
+      {roomManagerOpen ? (
+        <div
+          className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/45 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="room-manager-dialog-title"
+          onClick={() => setRoomManagerOpen(false)}
+        >
+          <div className="relative w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between gap-2 px-0.5">
+              <p id="room-manager-dialog-title" className="text-sm font-semibold text-white drop-shadow-sm">
+                Rooms and areas
+              </p>
+              <button
+                type="button"
+                onClick={() => setRoomManagerOpen(false)}
+                className="rounded-lg bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
+              >
+                Close
+              </button>
+            </div>
+            <RoomManager
+              rooms={rooms}
+              activeRoomId={activeRoomId}
+              onSelectRoom={(roomId) => {
+                selectWorkspaceRoom(roomId);
+              }}
+              onOpenCreateRoom={() => {
+                setRoomManagerOpen(false);
+                openCreateRoomModal();
+              }}
+              onRenameRoom={(room) => void renameRoom(room)}
+              onDuplicateRoom={(room) => void duplicateRoom(room)}
+              onDeleteRoom={(room) => void deleteRoom(room)}
+            />
+          </div>
+        </div>
+      ) : null}
 
       {roomCreateModalOpen && (
         <div className="fixed inset-0 z-[60] bg-slate-900/45 p-3 sm:p-6" onClick={closeCreateRoomModal}>

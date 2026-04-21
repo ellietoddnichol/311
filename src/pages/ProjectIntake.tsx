@@ -2875,6 +2875,13 @@ export function ProjectIntake() {
                     <p className="text-sm font-medium text-slate-800">Upload Takeoff File</p>
                   </div>
                   <p className="text-xs text-slate-500 mb-2">Upload PDF, Excel, or CSV.</p>
+                  <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-700">Preferred</span>
+                    <a className="font-semibold text-blue-700 underline-offset-2 hover:underline" href="/api/v1/intake/templates/preferred-import.xlsx">
+                      Download our import template (XLSX)
+                    </a>
+                    <span className="text-slate-500">— files matching this format import with exact column mapping (no guessing).</span>
+                  </div>
                   <p className="text-xs text-slate-500 mb-3">Drag and drop, or browse.</p>
                   <input
                     type="file"

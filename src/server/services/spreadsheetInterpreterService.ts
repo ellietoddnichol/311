@@ -157,7 +157,56 @@ function findColumn(headers: string[], aliases: string[]): number | null {
   return null;
 }
 
+const TEMPLATE_V1_HEADERS = [
+  'project name',
+  'project number',
+  'client',
+  'address',
+  'bid date',
+  'room',
+  'category',
+  'item code',
+  'item name',
+  'description',
+  'quantity',
+  'unit',
+  'labor included',
+  'material included',
+  'manufacturer',
+  'bid bucket',
+  'section header',
+  'notes',
+] as const;
+
+function looksLikePreferredImportTemplate(headers: string[]): boolean {
+  if (headers.length < TEMPLATE_V1_HEADERS.length) return false;
+  const head = headers.slice(0, TEMPLATE_V1_HEADERS.length);
+  return TEMPLATE_V1_HEADERS.every((h, i) => head[i] === h);
+}
+
 function detectSpreadsheetColumns(headers: string[]) {
+  if (looksLikePreferredImportTemplate(headers)) {
+    return {
+      project: 0,
+      projectNumber: 1,
+      client: 2,
+      address: 3,
+      bidDate: 4,
+      room: 5,
+      category: 6,
+      itemCode: 7,
+      item: 8,
+      description: 9,
+      qty: 10,
+      unit: 11,
+      laborIncluded: 12,
+      materialIncluded: 13,
+      manufacturer: 14,
+      bidBucket: 15,
+      sectionHeader: 16,
+      notes: 17,
+    };
+  }
   return {
     project: findColumn(headers, ['project', 'project name', 'job']),
     projectNumber: findColumn(headers, ['project number', 'job number', 'bid package', 'package', 'pkg']),
@@ -174,6 +223,9 @@ function detectSpreadsheetColumns(headers: string[]) {
     materialIncluded: findColumn(headers, ['material included', 'material']),
     notes: findColumn(headers, ['notes', 'remarks', 'comment']),
     room: findColumn(headers, ['room', 'area', 'location', 'zone']),
+    manufacturer: findColumn(headers, ['manufacturer', 'mfg', 'brand']),
+    bidBucket: findColumn(headers, ['bid bucket', 'bucket', 'alt', 'alternate']),
+    sectionHeader: findColumn(headers, ['section header', 'section', 'header']),
   };
 }
 
@@ -543,6 +595,9 @@ export function parseSpreadsheetRows(rows: Array<Array<string | number | boolean
       const quantityText = mapping.qty !== null ? intakeAsText(row[mapping.qty]) : '';
       const explicitUnit = mapping.unit !== null ? intakeAsText(row[mapping.unit]) : '';
       const roomName = mapping.room !== null ? normalizeRoomName(row[mapping.room]) : 'General Scope';
+      const explicitManufacturer = mapping.manufacturer != null ? intakeAsText(row[mapping.manufacturer]) : '';
+      const explicitBidBucket = mapping.bidBucket != null ? intakeAsText(row[mapping.bidBucket]) : '';
+      const explicitSectionHeader = mapping.sectionHeader != null ? intakeAsText(row[mapping.sectionHeader]) : '';
 
       if (!rawItem && !rawDescription && !rawCategory && !quantityText) continue;
       if (looksLikeHeaderChunk(row.map((cell) => intakeAsText(cell)))) continue;
@@ -574,9 +629,9 @@ export function parseSpreadsheetRows(rows: Array<Array<string | number | boolean
         warnings: [],
         quantityWasDefaulted: parsedQuantity.defaulted,
         unitWasDefaulted: !explicitUnit,
-        sourceManufacturer: structuredSection.manufacturer || undefined,
-        sourceBidBucket: structuredSection.bidBucket || undefined,
-        sourceSectionHeader: structuredSection.sectionHeader || undefined,
+        sourceManufacturer: explicitManufacturer || structuredSection.manufacturer || undefined,
+        sourceBidBucket: explicitBidBucket || structuredSection.bidBucket || undefined,
+        sourceSectionHeader: explicitSectionHeader || structuredSection.sectionHeader || undefined,
       });
     }
   }

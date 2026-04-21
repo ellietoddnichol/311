@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight, LayoutList, Plus, Sparkles } from 'lucide-react';
 import type { EstimateWorkspaceView } from '../../shared/types/projectWorkflow';
 import type { RoomRecord } from '../../shared/types/estimator';
 import { TAKEOFF_ALL_ROOMS } from '../../shared/constants/workspaceUi';
@@ -31,6 +31,11 @@ interface EstimateToolbarProps {
   selectedLineLabel?: string | null;
   activeRoomId: string;
   activeRoomLabel: string;
+  /** Room that receives new catalog / bundle / manual lines (replaces left Rooms column). */
+  onWorkingRoomChange: (roomId: string) => void;
+  onOpenCreateRoom: () => void;
+  /** Rename, duplicate, delete rooms (full list). */
+  onOpenManageRooms: () => void;
   /** Project total when pricing view */
   projectTotal?: number;
   formatCurrency: (n: number | undefined) => string;
@@ -55,6 +60,9 @@ export function EstimateToolbar({
   selectedLineLabel,
   activeRoomId,
   activeRoomLabel,
+  onWorkingRoomChange,
+  onOpenCreateRoom,
+  onOpenManageRooms,
   projectTotal,
   formatCurrency,
   disabledAdd,
@@ -168,27 +176,66 @@ export function EstimateToolbar({
         ) : null}
       </div>
 
-      {view === 'quantities' ? (
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="ui-panel-muted px-3 py-2.5">
+        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:gap-4">
           <label className="block min-w-0 flex-1 text-xs font-medium text-slate-700">
-            <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">View</span>
-            <select
-              className="ui-input h-9 w-full max-w-md text-xs font-medium text-slate-900"
-              value={takeoffRoomFilter}
-              onChange={(e) => onTakeoffRoomFilterChange(e.target.value)}
-            >
-              <option value={TAKEOFF_ALL_ROOMS}>
-                All rooms ({lineCountForFilter} line{lineCountForFilter === 1 ? '' : 's'})
-              </option>
-              {rooms.map((room) => (
-                <option key={room.id} value={room.id}>
-                  {room.roomName}
-                </option>
-              ))}
-            </select>
+            <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Room for new lines</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="ui-input h-9 min-w-[12rem] max-w-md flex-1 text-xs font-medium text-slate-900"
+                value={activeRoomId}
+                onChange={(e) => onWorkingRoomChange(e.target.value)}
+                disabled={rooms.length === 0}
+              >
+                {rooms.length === 0 ? <option value="">No rooms yet</option> : null}
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.roomName}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={onOpenCreateRoom}
+                className="ui-btn-secondary inline-flex h-9 shrink-0 items-center gap-1 rounded-md px-2.5 text-xs font-semibold"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                Add room
+              </button>
+              <button
+                type="button"
+                onClick={onOpenManageRooms}
+                className="ui-btn-secondary inline-flex h-9 shrink-0 items-center gap-1 rounded-md px-2.5 text-xs font-semibold"
+              >
+                <LayoutList className="h-3.5 w-3.5" aria-hidden />
+                Manage rooms
+              </button>
+            </div>
+            <p className="mt-1 text-[10px] leading-snug text-slate-500">
+              Catalog, bundles, and manual lines are added to this room. Use Manage rooms to rename, duplicate, or delete.
+            </p>
           </label>
+          {view === 'quantities' ? (
+            <label className="block min-w-0 flex-1 text-xs font-medium text-slate-700 lg:max-w-md">
+              <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Takeoff view</span>
+              <select
+                className="ui-input h-9 w-full text-xs font-medium text-slate-900"
+                value={takeoffRoomFilter}
+                onChange={(e) => onTakeoffRoomFilterChange(e.target.value)}
+              >
+                <option value={TAKEOFF_ALL_ROOMS}>
+                  All rooms ({lineCountForFilter} line{lineCountForFilter === 1 ? '' : 's'})
+                </option>
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.roomName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
-      ) : null}
+      </div>
 
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="rounded-lg border border-slate-200/80 bg-white/90 px-2.5 py-2 shadow-sm">

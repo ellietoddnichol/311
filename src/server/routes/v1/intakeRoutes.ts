@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { Router } from 'express';
+import * as xlsx from 'xlsx';
 import { extractIntakeFromGemini } from '../../services/geminiIntakeExtraction.ts';
 import { parseUploadedIntake } from '../../services/parseRouterService.ts';
 import { readDiv10BrainEnv } from '../../div10Brain/env.ts';
@@ -7,6 +8,58 @@ import { getSupabaseAdmin } from '../../div10Brain/supabaseAdmin.ts';
 import { getErrorMessage } from '../../../shared/utils/errorMessage.ts';
 
 export const intakeRouter = Router();
+
+intakeRouter.get('/templates/preferred-import.xlsx', (_req, res) => {
+  const headers = [
+    'Project Name',
+    'Project Number',
+    'Client',
+    'Address',
+    'Bid Date',
+    'Room',
+    'Category',
+    'Item Code',
+    'Item Name',
+    'Description',
+    'Quantity',
+    'Unit',
+    'Labor Included',
+    'Material Included',
+    'Manufacturer',
+    'Bid Bucket',
+    'Section Header',
+    'Notes',
+  ];
+  const sample = [
+    'Example Project',
+    'JOB-123',
+    'Example GC',
+    '123 Main St City ST 12345',
+    '2026-04-21',
+    'Restroom A',
+    'Toilet Partitions',
+    'PT-HDPE-36',
+    'HDPE Partition 36"',
+    'Install HDPE toilet partitions',
+    2,
+    'EA',
+    'Yes',
+    'Yes',
+    'Scranton',
+    'Base Bid',
+    'Scranton - Toilet Partitions - Base Bid',
+    'Replace with your notes',
+  ];
+
+  const wb = xlsx.utils.book_new();
+  const ws = xlsx.utils.aoa_to_sheet([headers, sample]);
+  xlsx.utils.book_append_sheet(wb, ws, 'Import');
+  const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="preferred-intake-import-template.xlsx"');
+  return res.send(buf);
+});
 
 intakeRouter.post('/parse', async (req, res) => {
   try {
