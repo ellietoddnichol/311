@@ -68,7 +68,7 @@ export function Help() {
                     <step.icon className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Step {index + 1}</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Step {index + 1}</p>
                     <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">{step.title}</h2>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{step.description}</p>
                   </div>
@@ -88,7 +88,7 @@ export function Help() {
                 <BookOpenText className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Key Notes</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Key Notes</p>
                 <h2 className="text-base font-semibold text-slate-950">What to keep in mind</h2>
               </div>
             </div>
@@ -102,7 +102,7 @@ export function Help() {
           </section>
 
           <section className="rounded-[28px] border border-slate-200/80 bg-[linear-gradient(180deg,#10284f_0%,#0a224d_100%)] p-5 text-white shadow-[0_18px_44px_rgba(10,34,77,0.18)]">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-300">Default Setup</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-300">Default Setup</p>
             <h2 className="mt-2 text-lg font-semibold tracking-tight">Settings control your baseline</h2>
             <p className="mt-2 text-sm leading-6 text-slate-300">If new estimates or proposals look off, check global settings first. Base labor rate, markup defaults, and proposal wording all flow into the project workspace.</p>
             <button type="button" onClick={() => navigate('/settings')} className="mt-4 inline-flex h-10 items-center gap-2 rounded-full bg-white px-4 text-[11px] font-semibold text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-white/60">

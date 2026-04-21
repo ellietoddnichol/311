@@ -2767,12 +2767,12 @@ export function ProjectIntake() {
           <header className="min-w-0 flex-1 border-b border-slate-200/80 pb-4">
             <div className="flex items-center gap-2.5">
               <span className="ui-status-live">Live</span>
-              <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                 Brighten Builders <span className="mx-1 text-slate-300">/</span> Intake Station
               </span>
             </div>
             <h1 className="mt-1.5 text-[24px] font-semibold leading-tight tracking-tight text-slate-950 md:text-[28px]">Create New Project</h1>
-            <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-slate-500">
+            <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.06em] text-slate-500">
               Start Type · Source · Basics · Estimate Setup · Review
             </p>
           </header>
@@ -2805,7 +2805,7 @@ export function ProjectIntake() {
       {step === 1 && (
         <section className="mx-auto w-full max-w-[1600px] rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-4">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Step 1</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Step 1</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">How do you want to start?</h2>
             <p className="mt-1 text-sm text-slate-600">Pick one path; you can still edit everything before the project is created.</p>
           </div>
@@ -2847,7 +2847,7 @@ export function ProjectIntake() {
       {step === 2 && (
         <section className="mx-auto w-full max-w-[1600px] rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-5">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Step 2</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Step 2</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Source details</h2>
             <p className="mt-1 text-sm text-slate-600">Upload or paste based on the start type you chose.</p>
           </div>
@@ -3016,7 +3016,7 @@ export function ProjectIntake() {
           {(step === 3 || step === 4) && (
             <div className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-4">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{step === 3 ? 'Step 3' : 'Step 4'}</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">{step === 3 ? 'Step 3' : 'Step 4'}</p>
                 <h2 className="mt-1 text-lg font-semibold text-slate-900">{step === 3 ? 'Project basics' : 'Estimate setup'}</h2>
                 <p className="mt-1 text-sm text-slate-600">
                   {step === 3
@@ -3054,7 +3054,7 @@ export function ProjectIntake() {
                 <div className="space-y-4">
                   {step === 3 ? (
                 <div className="rounded-2xl border border-slate-200/70 bg-slate-50/50 p-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Job basics</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Job basics</p>
                   <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
                     <label className="text-xs text-slate-600">Project Name<input className="ui-input mt-1" value={projectDraft.projectName || ''} onChange={(e) => patchProjectDraft({ projectName: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">Bid Package / Job #<input className="ui-input mt-1" value={projectDraft.projectNumber || ''} onChange={(e) => patchProjectDraft({ projectNumber: e.target.value })} /></label>
@@ -3093,7 +3093,7 @@ export function ProjectIntake() {
                     <>
                       <div className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-6">
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 1</p>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Section 1</p>
                           <h3 className="mt-1 text-lg font-semibold text-slate-900">Project inputs</h3>
                           <p className="mt-2 text-sm text-slate-600">Price mode, scope, floors, substrate, and delivery — optional site and sizing fields stay collapsed unless you need them.</p>
                           <IntakeFieldLegend />
@@ -3323,7 +3323,7 @@ export function ProjectIntake() {
                       </div>
 
                       <div className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 2</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Section 2</p>
                         <h3 className="mt-1 text-lg font-semibold text-slate-900">Job conditions</h3>
                         <p className="mt-2 text-sm text-slate-600">Toggle what applies. Delivery is set under project inputs.</p>
                         <div className="mt-4 flex flex-wrap gap-2">
@@ -3392,7 +3392,7 @@ export function ProjectIntake() {
                   {step === 3 ? (
                     <>
                       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Required Before Pricing</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500">Required Before Pricing</p>
                         <div className="mt-3 space-y-2">
                           {['Project name', 'Client', 'Site address', 'Project type', 'Bid due date'].map((label) => {
                             const missing = basicsChecklist.includes(label);
@@ -3411,7 +3411,7 @@ export function ProjectIntake() {
                       </div>
 
                       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Source Summary</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500">Source Summary</p>
                         <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                           <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                             <p className="text-slate-500">Creation mode</p>
@@ -3439,7 +3439,7 @@ export function ProjectIntake() {
                       <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Travel</p>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Travel</p>
                             <p className="mt-1 text-xs text-slate-500">Office: {OFFICE_ADDRESS}</p>
                           </div>
                           {distanceCalculating ? <span className="text-[11px] font-semibold text-blue-700">Calculating…</span> : null}
@@ -3470,7 +3470,7 @@ export function ProjectIntake() {
                       <details className="group rounded-2xl border border-slate-300/80 bg-slate-50/50 shadow-sm open:bg-white">
                         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 [&::-webkit-details-marker]:hidden">
                           <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 3</p>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Section 3</p>
                             <p className="text-sm font-semibold text-slate-900">Advanced pricing &amp; field conditions</p>
                             <p className="mt-0.5 text-xs text-slate-500">Only open if this bid differs from normal company assumptions.</p>
                           </div>
@@ -3658,7 +3658,7 @@ export function ProjectIntake() {
                             </div>
                           </div>
                           <div className="rounded-xl border border-slate-200 bg-white p-3">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Notes</p>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Notes</p>
                             <h3 className="mt-1 text-sm font-semibold text-slate-900">Proposal &amp; internal</h3>
                             <div className="mt-3 space-y-3">
                               <label className="text-[11px] font-medium text-slate-700">
@@ -3703,7 +3703,7 @@ export function ProjectIntake() {
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Parser review</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">Parser review</p>
                   <h3 className="mt-0.5 text-base font-semibold text-slate-950">
                     {formatRecommendedAction(parserReviewSummary.recommendedAction)}
                   </h3>
@@ -3766,7 +3766,7 @@ export function ProjectIntake() {
                 <details className="group mt-3 rounded-lg border border-indigo-200/70 bg-indigo-50/40 open:bg-white/90">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-left [&::-webkit-details-marker]:hidden">
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-indigo-800">AI decision hints</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-indigo-800">AI decision hints</p>
                       <p className="text-[11px] text-indigo-950/90">
                         Document type, pricing role, and project hints from the model — <span className="font-medium">review only</span>; nothing here is auto-applied to
                         catalog or job conditions yet.
@@ -3886,7 +3886,7 @@ export function ProjectIntake() {
 
               {groupedWarningSummaries.length > 0 ? (
                 <div className="mt-3 border-t border-slate-200/60 pt-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">
                     Warnings · {groupedWarningSummaries.length} group{groupedWarningSummaries.length === 1 ? '' : 's'}
                   </p>
                   <div className="mt-2 space-y-2">
@@ -3960,7 +3960,7 @@ export function ProjectIntake() {
           ) : null}
           <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
             <div className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Step 5</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Step 5</p>
               <h3 className="mt-1 text-sm font-semibold text-slate-900">Rooms / areas</h3>
               <div className="mt-3 space-y-2 max-h-[55vh] overflow-y-auto pr-1">
                 {roomSuggestions.map((room) => (

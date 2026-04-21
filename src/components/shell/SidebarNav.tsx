@@ -115,7 +115,7 @@ export function SidebarNav() {
           <Wrench className="w-4 h-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Brighten Builders</p>
+          <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">Brighten Builders</p>
           <p className="text-sm font-semibold leading-tight text-white">Estimator OS</p>
         </div>
         <button
@@ -130,7 +130,7 @@ export function SidebarNav() {
       </div>
 
       <div className="px-4 pt-3">
-        <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Workspace</p>
+        <p className="text-[10px] uppercase tracking-[0.08em] text-slate-500">Workspace</p>
       </div>
 
       <nav className="p-2.5 space-y-1 overflow-y-auto">

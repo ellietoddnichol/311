@@ -39,7 +39,7 @@ export function ProposalSettingsRail({
         </div>
       )}
       <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Layout preset</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Layout preset</p>
         <p className="mt-1 text-xs text-slate-600">Pick a format; preview updates live.</p>
         <div className="mt-3">
           <ProposalPresetSelector value={proposalFormat} onChange={onProposalFormatChange} />

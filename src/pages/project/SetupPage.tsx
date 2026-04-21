@@ -53,7 +53,7 @@ export function SetupPage({ setActiveTab, onOpenEstimateQuantities, ...workspace
 
       <aside className="space-y-4 xl:sticky xl:top-[88px]">
         <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">At a glance</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">At a glance</p>
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
             <div className="rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
               <p className="text-slate-500">Installers</p>
@@ -79,7 +79,7 @@ export function SetupPage({ setActiveTab, onOpenEstimateQuantities, ...workspace
         </section>
 
         <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active assumptions</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Active assumptions</p>
           {(summary?.conditionAssumptions || []).length > 0 ? (
             <div className="mt-2 max-h-48 space-y-1.5 overflow-auto pr-1 text-xs text-slate-700">
               {(summary?.conditionAssumptions || []).slice(0, 12).map((assumption) => (
@@ -94,7 +94,7 @@ export function SetupPage({ setActiveTab, onOpenEstimateQuantities, ...workspace
         </section>
 
         <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Scope included</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Scope included</p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {selectedScopeCategories.length > 0 ? (
               selectedScopeCategories.map((category) => (
@@ -110,7 +110,7 @@ export function SetupPage({ setActiveTab, onOpenEstimateQuantities, ...workspace
 
         <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Rooms</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Rooms</p>
             <button type="button" onClick={onOpenEstimateQuantities} className="ui-btn-secondary h-8 shrink-0 px-2.5 text-[11px] font-semibold">
               Quantities
             </button>
@@ -130,7 +130,7 @@ export function SetupPage({ setActiveTab, onOpenEstimateQuantities, ...workspace
 
         <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Proposal</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Proposal</p>
             <button type="button" onClick={() => setActiveTab('proposal')} className="text-[11px] font-medium text-blue-700 hover:text-blue-800">
               Open
             </button>

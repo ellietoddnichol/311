@@ -323,12 +323,12 @@ export function Catalog() {
         <div>
           <div className="flex items-center gap-2.5">
             <span className="ui-status-live">Live</span>
-            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
               Brighten Builders <span className="mx-1 text-slate-300">/</span> Catalog Station
             </span>
           </div>
           <h1 className="mt-1.5 text-[24px] font-semibold leading-tight tracking-tight text-slate-950 md:text-[28px]">Catalog</h1>
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-slate-500">
+          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.06em] text-slate-500">
             Items · Modifiers · Bundles · Synced from Google Sheets
           </p>
         </div>

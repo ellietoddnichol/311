@@ -126,7 +126,7 @@ export function Dashboard() {
       <section className="ui-accent-card space-y-3 p-4 pl-5">
         <div className="flex items-center justify-between">
           <p className="ui-mono-kicker">{title}</p>
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.06em] text-slate-400">
             {String(items.length).padStart(2, '0')} Rows
           </span>
         </div>
@@ -142,7 +142,7 @@ export function Dashboard() {
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-slate-900">{project.projectName}</p>
-                  <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                  <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.05em] text-slate-500">
                     {project.clientName || 'No Client'} · {project.status} · {formatDateOrNA(resolveDateValue(project))}
                   </p>
                 </div>
@@ -161,12 +161,12 @@ export function Dashboard() {
         <div>
           <div className="flex items-center gap-2.5">
             <span className="ui-status-live">Live</span>
-            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
               Brighten Builders <span className="mx-1 text-slate-300">/</span> Operations Snapshot
             </span>
           </div>
           <h1 className="mt-1.5 text-[24px] font-semibold leading-tight tracking-tight text-slate-950 md:text-[28px]">Dashboard</h1>
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-slate-500">
+          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.06em] text-slate-500">
             Active Work · Bid Due Dates · Proposal Progress
           </p>
         </div>
@@ -174,7 +174,7 @@ export function Dashboard() {
           <button onClick={() => navigate('/project/new')} className="ui-btn-cta">
             <Plus className="mr-1.5 h-3.5 w-3.5" /> New Project
           </button>
-          <button onClick={() => navigate('/projects')} className="ui-btn-secondary h-10 px-3 text-[11px] font-semibold uppercase tracking-[0.14em]">
+          <button onClick={() => navigate('/projects')} className="ui-btn-secondary h-10 px-3 text-[11px] font-semibold uppercase tracking-[0.06em]">
             View All
           </button>
         </div>
@@ -193,7 +193,7 @@ export function Dashboard() {
               <div className="min-w-0">
                 <p className="ui-stat-tile-kicker">{stat.label}</p>
                 <p className="mt-2 font-mono text-[28px] font-semibold leading-none tabular-nums text-white">{String(stat.value).padStart(2, '0')}</p>
-                <p className="mt-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-slate-400">{stat.helper}</p>
+                <p className="mt-1.5 font-mono text-[9.5px] uppercase tracking-[0.06em] text-slate-400">{stat.helper}</p>
               </div>
               <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/15 bg-white/5 text-slate-300 transition-colors group-hover:bg-white/10 group-hover:text-white">
                 <ArrowRight className="h-3.5 w-3.5" />
@@ -206,13 +206,13 @@ export function Dashboard() {
       <section className="ui-accent-card p-4 pl-5">
         <p className="ui-mono-kicker mb-3">Module 01 / Quick Actions</p>
         <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-          <button onClick={() => navigate('/project/new')} className="ui-btn-secondary flex h-10 items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em]">
+          <button onClick={() => navigate('/project/new')} className="ui-btn-secondary flex h-10 items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.06em]">
             <Plus className="h-4 w-4" /> New Project
           </button>
-          <button onClick={() => navigate('/project/new')} className="ui-btn-secondary flex h-10 items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em]">
+          <button onClick={() => navigate('/project/new')} className="ui-btn-secondary flex h-10 items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.06em]">
             <Upload className="h-4 w-4" /> Upload Takeoff
           </button>
-          <button onClick={() => navigate('/catalog')} className="ui-btn-secondary flex h-10 items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em]">
+          <button onClick={() => navigate('/catalog')} className="ui-btn-secondary flex h-10 items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.06em]">
             <FolderOpen className="h-4 w-4" /> Open Catalog
           </button>
         </div>
@@ -266,7 +266,7 @@ export function Dashboard() {
                 </div>
                 <button
                   onClick={() => navigate(`/project/${project.id}`)}
-                  className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-700 hover:text-blue-800"
+                  className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-blue-700 hover:text-blue-800"
                 >
                   Open <ArrowRight className="h-3 w-3" />
                 </button>

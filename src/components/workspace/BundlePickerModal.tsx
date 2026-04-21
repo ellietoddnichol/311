@@ -153,7 +153,7 @@ export function BundlePickerModal({
         <div className="border-b border-slate-200 px-5 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Bundle Library</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Bundle Library</p>
               <h3 className="mt-1 text-base font-semibold text-slate-900">Add Prebuilt Scope Bundles</h3>
               <p className="mt-1 text-xs text-slate-600">Pick a room, review available bundles, and add a full scope package in one step.</p>
             </div>
@@ -209,7 +209,7 @@ export function BundlePickerModal({
             </div>
 
             <aside className="min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Bundle Detail</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Bundle Detail</p>
               {selectedBundle ? (
                 <>
                   <h4 className="mt-1 text-sm font-semibold text-slate-900">{selectedBundle.bundleName}</h4>
@@ -238,7 +238,7 @@ export function BundlePickerModal({
                   <div className="mt-4 border-t border-slate-200 pt-4">
                     <div className="flex items-center justify-between gap-2">
                       <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Staged Bundles</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Staged Bundles</p>
                         <p className="mt-1 text-xs text-slate-600">{stagedBundles.length} staged bundle{stagedBundles.length === 1 ? '' : 's'} · {stagedQuantityTotal} total units</p>
                       </div>
                     </div>

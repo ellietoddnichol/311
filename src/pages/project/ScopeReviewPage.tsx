@@ -148,12 +148,12 @@ export function ScopeReviewPage({
               <span className={`ui-mono-chip ${hasExceptions ? 'ui-mono-chip--warn' : 'ui-mono-chip--ok'}`}>
                 {hasExceptions ? 'Action Required' : 'Ready'}
               </span>
-              <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                 Module 02 <span className="mx-1 text-slate-300">/</span> Scope Review
               </span>
             </div>
             <h2 className="mt-1.5 text-[22px] font-semibold leading-tight tracking-tight text-slate-950">Exceptions first</h2>
-            <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-slate-500">
+            <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.06em] text-slate-500">
               {hasExceptions
                 ? `${exceptions.length} line${exceptions.length === 1 ? '' : 's'} need review · ${trusted.length} trusted`
                 : `${trusted.length} trusted · nothing flagged`}

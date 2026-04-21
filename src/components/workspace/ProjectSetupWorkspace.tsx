@@ -146,7 +146,7 @@ export function ProjectSetupWorkspace({
       {/* 1 — Project inputs */}
       <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 1</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Section 1</p>
           <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Project inputs</h2>
           <p className="mt-2 max-w-3xl text-sm text-slate-600">
             Core setup for this bid: how you price, what scope applies, and site context. Most estimates only need these fields.
@@ -396,7 +396,7 @@ export function ProjectSetupWorkspace({
 
       {/* 2 — Job conditions (chips) */}
       <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm px-5 py-5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 2</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Section 2</p>
         <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Job conditions</h2>
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
           Toggle only what applies. These adjust labor multipliers — they are not the same as company pricing defaults below.
@@ -437,7 +437,7 @@ export function ProjectSetupWorkspace({
       <details className="group rounded-2xl border border-slate-300/80 bg-slate-50/50 shadow-sm open:bg-white">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 3</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Section 3</p>
             <h2 className="mt-0.5 text-xl font-semibold text-slate-900">Advanced pricing defaults</h2>
             <p className="mt-1 text-sm text-slate-600">Office-style markups, optional labor burden, and adders. Same grid as intake — collapse if you only need Section 1.</p>
           </div>
@@ -794,7 +794,7 @@ export function ProjectSetupWorkspace({
 
       {/* Notes */}
       <section className="rounded-2xl border border-slate-200/70 bg-white shadow-sm px-5 py-5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Notes</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Notes</p>
         <h2 className="mt-1 text-lg font-semibold text-slate-900">Special notes</h2>
         <p className="mt-1 text-sm text-slate-600">Internal coordination — optional on the client proposal.</p>
         <label className="mt-3 block text-[11px] font-medium text-slate-700">

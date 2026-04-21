@@ -40,7 +40,7 @@ export function ModifierPanel({ modifiers, activeModifiers, selectedLinePresent,
       {hideKicker ? null : (
         <div className="flex items-center justify-between">
           <p className="ui-mono-kicker">Properties Context</p>
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.06em] text-slate-400">
             Modifiers · {activeModifiers.length}
           </span>
         </div>
@@ -88,7 +88,7 @@ export function ModifierPanel({ modifiers, activeModifiers, selectedLinePresent,
       <section>
         <div className="mb-2 flex items-center justify-between">
           <p className="ui-mono-kicker">Apply Add-in From Library</p>
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.06em] text-slate-400">
             {libraryCandidates.length} available
           </span>
         </div>
@@ -109,7 +109,7 @@ export function ModifierPanel({ modifiers, activeModifiers, selectedLinePresent,
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="truncate text-[12px] font-semibold text-slate-900">{modifier.name}</p>
-                  <span className="shrink-0 font-mono text-[9.5px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  <span className="shrink-0 font-mono text-[9.5px] font-semibold uppercase tracking-[0.05em] text-slate-500">
                     {modifier.modifierKey}
                   </span>
                 </div>

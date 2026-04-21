@@ -111,12 +111,12 @@ export function Projects() {
         <div>
           <div className="flex items-center gap-2.5">
             <span className="ui-status-live">Live</span>
-            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
               Brighten Builders <span className="mx-1 text-slate-300">/</span> Project Library
             </span>
           </div>
           <h1 className="mt-1.5 text-[24px] font-semibold leading-tight tracking-tight text-slate-950 md:text-[28px]">Projects</h1>
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-slate-500">
+          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.06em] text-slate-500">
             Search · Filter · Sort · Manage Every Estimate
           </p>
         </div>
@@ -232,7 +232,7 @@ export function Projects() {
                     }}
                   >
                     <td className="px-5 py-3.5">
-                      <div className="mb-0.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                      <div className="mb-0.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.05em] text-slate-400">
                         <span className="font-semibold tabular-nums">{rowNumber}</span>
                         {project.projectNumber ? (
                           <span>· IDREF <span className="text-slate-600">{project.projectNumber}</span></span>
@@ -257,7 +257,7 @@ export function Projects() {
                           e.stopPropagation();
                           void deleteProject(project.id, project.projectName);
                         }}
-                        className="h-8 rounded-md border border-red-200 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-red-700 outline-none hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-400/40"
+                        className="h-8 rounded-md border border-red-200 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-red-700 outline-none hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-400/40"
                       >
                         Delete
                       </button>

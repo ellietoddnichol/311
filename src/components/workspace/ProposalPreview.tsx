@@ -412,12 +412,12 @@ export function ProposalPreview({ project, settings, lines, summary, catalogImag
       >
         <div className="grid gap-12 sm:grid-cols-2">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Acceptance</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Acceptance</p>
             <div className="mt-10 min-h-[2.75rem] border-b border-slate-400" />
             <p className="mt-2 text-[11px] text-slate-500">{settings?.proposalAcceptanceLabel || DEFAULT_PROPOSAL_ACCEPTANCE_LABEL}</p>
           </div>
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Date</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Date</p>
             <div className="mt-10 min-h-[2.75rem] border-b border-slate-400" />
             <p className="mt-2 text-[11px] text-slate-500">Authorized signature date</p>
           </div>

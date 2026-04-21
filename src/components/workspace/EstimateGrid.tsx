@@ -714,7 +714,7 @@ export function EstimateGrid({
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-gradient-to-r from-white to-slate-50/60 px-3 py-2">
           <div className="flex min-w-0 items-baseline gap-2">
             <span className="ui-mono-kicker">Active Area</span>
-            <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-900">
+            <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.05em] text-slate-900">
               {activeAreaLabel}
             </span>
           </div>

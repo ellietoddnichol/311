@@ -77,7 +77,7 @@ export function TopProjectHeader({
       {/* Row 1 — LIVE breadcrumb */}
       <div className="flex items-center gap-2.5 text-[10px]">
         <span className="ui-status-live">LIVE</span>
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
           Brighten Builders <span className="mx-1 text-slate-300">/</span> Estimator Station
         </span>
       </div>
@@ -88,12 +88,12 @@ export function TopProjectHeader({
           <h1 className="truncate text-[22px] font-semibold leading-tight tracking-tight text-slate-950 md:text-[26px]">
             {project.projectName}
             {project.projectNumber ? (
-              <span className="ml-2 align-middle font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
+              <span className="ml-2 align-middle font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400">
                 #{project.projectNumber}
               </span>
             ) : null}
           </h1>
-          <p className="mt-1 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+          <p className="mt-1 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-slate-500">
             {subtitle}
             {subtitleSuffix}
             {project.estimator ? (
@@ -104,7 +104,7 @@ export function TopProjectHeader({
 
         <div className="flex items-center gap-2">
           <span className={readyChipClass}>{readyChipLabel}</span>
-          <span className="hidden font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 md:inline">
+          <span className="hidden font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500 md:inline">
             {syncLabel}
           </span>
           <div className="hidden items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5 md:flex">
@@ -137,7 +137,7 @@ export function TopProjectHeader({
           <button
             type="button"
             onClick={() => onSubmitBid()}
-            className="ui-btn-primary h-10 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.14em]"
+            className="ui-btn-primary h-10 rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.06em]"
             style={{ fontFamily: 'var(--font-mono)' }}
           >
             <Send className="mr-1.5 h-3.5 w-3.5" /> {statusActionLabel}

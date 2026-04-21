@@ -53,7 +53,7 @@ export function OverviewPage({
       <header className="rounded-2xl border border-slate-200/70 bg-white px-5 py-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Project overview</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Project overview</p>
             <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Dashboard</h2>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               Read-only snapshot of identity, scope, and pricing posture. Edit on Setup; build the bid on Estimate.
@@ -101,7 +101,7 @@ export function OverviewPage({
 
       <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_340px_280px] xl:items-start">
         <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Section 1 · Project inputs</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Section 1 · Project inputs</p>
           <h3 className="mt-1 text-lg font-semibold text-slate-900">Setup snapshot</h3>
           <p className="mt-2 text-sm text-slate-600">Labor basis, delivery posture, and what is in scope for catalog and takeoff.</p>
 
@@ -164,7 +164,7 @@ export function OverviewPage({
         </section>
 
         <section className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Pricing rollups</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Pricing rollups</p>
           <h3 className="mt-1 text-lg font-semibold text-slate-900">Conditions &amp; adders</h3>
           <p className="mt-2 text-sm text-slate-600">How job conditions and project adders flow into labor dollars.</p>
 
@@ -195,7 +195,7 @@ export function OverviewPage({
 
         <aside className="space-y-4 xl:sticky xl:top-[88px]">
           <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Recorded assumptions</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Recorded assumptions</p>
             <p className="mt-1 text-[11px] text-slate-500">Intake and automation notes stored on the project (proposal / audit).</p>
             {structuredAssumptions.length > 0 ? (
               <ul className="mt-2 max-h-52 space-y-2 overflow-auto pr-1 text-xs text-slate-700">
@@ -220,7 +220,7 @@ export function OverviewPage({
             )}
           </section>
           <section className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Active condition assumptions</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Active condition assumptions</p>
             {(summary?.conditionAssumptions || []).length > 0 ? (
               <div className="mt-2 max-h-56 space-y-1.5 overflow-auto pr-1 text-xs text-slate-700">
                 {(summary?.conditionAssumptions || []).slice(0, 14).map((assumption) => (
@@ -234,7 +234,7 @@ export function OverviewPage({
             )}
           </section>
           <section className="rounded-2xl border border-dashed border-slate-300/80 bg-slate-50/80 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Next step</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Next step</p>
             <p className="mt-2 text-xs text-slate-600">Review scope exceptions, then refine lines on the estimate.</p>
             <button type="button" onClick={() => setActiveTab('scope-review')} className="ui-btn-secondary mt-3 h-9 w-full text-[11px] font-semibold">
               Scope review

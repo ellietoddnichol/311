@@ -640,7 +640,7 @@ export function IntakeEstimateReviewPanel({
     <div className="mt-4 space-y-3">
       {/* Prominent draft summary — always visible */}
       <div className="rounded-lg border border-slate-200/90 bg-gradient-to-r from-slate-50/95 to-white px-3 py-2.5 shadow-sm">
-        <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-slate-700">Pre-pricing review</p>
+        <p className="text-[12px] font-bold uppercase tracking-[0.05em] text-slate-700">Pre-pricing review</p>
         <p className="text-[12px] text-slate-600">Confirm catalog links here; material and labor rollups fill in from accepted priced lines.</p>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-[12px] text-slate-800">
           <span className="rounded-md bg-emerald-50/90 px-2 py-0.5 ring-1 ring-emerald-200/70">
@@ -726,7 +726,7 @@ export function IntakeEstimateReviewPanel({
         <div className="rounded-lg border border-sky-300/80 bg-sky-50/70 px-3 py-2.5 text-[12px] text-sky-950">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-sky-900">Bid splits detected</p>
+              <p className="text-[12px] font-bold uppercase tracking-[0.05em] text-sky-900">Bid splits detected</p>
               <p className="mt-0.5 text-[12px] leading-snug text-sky-950/90">
                 The source document contains {basisSummary.byBidBucket.length} bid buckets. Primary draft totals include only the buckets highlighted below — click any bucket to include or exclude it.
               </p>
@@ -844,7 +844,7 @@ export function IntakeEstimateReviewPanel({
       <details className="group rounded-lg border border-slate-200 bg-white open:shadow-sm" open>
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
           <div>
-            <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-600">Review suggested matches</p>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.05em] text-slate-600">Review suggested matches</p>
             <p className="text-[12px] text-slate-600">Scan top-to-bottom. Accept the suggestion or click the chevron for details.</p>
           </div>
           <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180" />
@@ -1005,7 +1005,7 @@ export function IntakeEstimateReviewPanel({
         <details className="group rounded-lg border border-slate-200 bg-white">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-600">Suggested job conditions</p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.05em] text-slate-600">Suggested job conditions</p>
               <p className="text-[12px] text-slate-600">Document-derived conditions — suggestion only until you accept.</p>
             </div>
             <ChevronDown className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180" />
@@ -1055,7 +1055,7 @@ export function IntakeEstimateReviewPanel({
         <details className="group rounded-lg border border-emerald-200/80 bg-emerald-50/20">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-emerald-900">Suggested project modifiers</p>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.05em] text-emerald-900">Suggested project modifiers</p>
               <p className="text-[12px] text-emerald-950/80">Catalog modifiers (project scope) — not line-level pricing adders in this step.</p>
             </div>
             <ChevronDown className="h-4 w-4 shrink-0 text-emerald-800 transition group-open:rotate-180" />

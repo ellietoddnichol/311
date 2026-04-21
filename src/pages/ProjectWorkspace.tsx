@@ -1465,7 +1465,7 @@ export function ProjectWorkspace() {
             <button
               type="button"
               onClick={() => void syncCatalogFromSheets()}
-              className="ui-btn-secondary h-8 px-2.5 text-[10px] font-semibold uppercase tracking-[0.14em]"
+              className="ui-btn-secondary h-8 px-2.5 text-[10px] font-semibold uppercase tracking-[0.06em]"
             >
               Sync catalog
             </button>
@@ -1914,7 +1914,7 @@ export function ProjectWorkspace() {
                         {selectedLine.description || 'Untitled line'}
                       </p>
                       {selectedLine.sku ? (
-                        <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                        <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-slate-400">
                           IDREF · <span className="text-slate-200">{selectedLine.sku}</span>
                         </p>
                       ) : null}
@@ -1986,12 +1986,12 @@ export function ProjectWorkspace() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2.5">
                     <span className="ui-mono-chip ui-mono-chip--info">Proposal</span>
-                    <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                       Module 03 <span className="mx-1 text-slate-300">/</span> Client Document
                     </span>
                   </div>
                   <h3 className="mt-1.5 text-[22px] font-semibold leading-tight tracking-tight text-slate-950 sm:text-[26px]">Review, edit, export</h3>
-                  <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                  <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.06em] text-slate-500">
                     What you see is what prints · Export HTML → Print → Save as PDF
                   </p>
                 </div>
@@ -2128,7 +2128,7 @@ export function ProjectWorkspace() {
               <div className="space-y-3 xl:sticky xl:top-4">
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-white/95 px-3 py-2.5 shadow-sm backdrop-blur-sm">
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Live preview</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Live preview</p>
                     <p className="text-xs font-medium text-slate-700">What the client sees</p>
                   </div>
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600">Print / export</span>
@@ -2324,7 +2324,7 @@ export function ProjectWorkspace() {
         <div className="fixed inset-0 z-[60] bg-slate-900/45 p-3 sm:p-6" onClick={closeCreateRoomModal}>
           <div className="mx-auto max-w-xl rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-white px-5 py-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-700">Add Room</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-blue-700">Add Room</p>
               <h2 className="mt-1 text-lg font-semibold text-slate-900">Create a New Room or Area</h2>
               <p className="mt-1 text-sm text-slate-600">Name the room first, then choose whether to start it with a line item right away.</p>
             </div>

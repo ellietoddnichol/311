@@ -204,7 +204,7 @@ export function ItemPicker({ open, rooms, bundles, activeRoomId, categories, sea
         <div className="border-b border-slate-200 px-5 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Bulk Add Workflow</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Bulk Add Workflow</p>
               <h3 className="mt-1 text-base font-semibold text-slate-900">Add Items To Project Estimate</h3>
               <p className="mt-1 text-xs text-slate-600">Search the catalog, stage multiple items, assign rooms in bulk, add manual rows, and apply bundles without reopening the workflow.</p>
             </div>
@@ -266,7 +266,7 @@ export function ItemPicker({ open, rooms, bundles, activeRoomId, categories, sea
 
               <div className="border-t border-slate-200 bg-slate-50/60 p-4 lg:border-l lg:border-t-0">
                 <div className="rounded-xl border border-slate-200 bg-white p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Manual Add</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Manual Add</p>
                   <div className="mt-2 space-y-2">
                     <input value={manualDescription} onChange={(e) => setManualDescription(e.target.value)} className="h-9 w-full rounded-md border border-slate-300 px-3 text-sm" placeholder="Manual description" />
                     <div className="grid grid-cols-3 gap-2">
@@ -284,7 +284,7 @@ export function ItemPicker({ open, rooms, bundles, activeRoomId, categories, sea
                 <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Quick Add Bundle</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Quick Add Bundle</p>
                       <p className="mt-1 text-xs text-slate-600">Apply a prebuilt scope bundle to a room without leaving this session.</p>
                     </div>
                     <Layers3 className="h-4 w-4 text-slate-400" />
@@ -315,7 +315,7 @@ export function ItemPicker({ open, rooms, bundles, activeRoomId, categories, sea
             <div className="border-b border-slate-200 px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Staged Queue</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-slate-500">Staged Queue</p>
                   <h4 className="mt-1 text-sm font-semibold text-slate-900">{queueTotal} item{queueTotal === 1 ? '' : 's'} ready</h4>
                   <p className="mt-1 text-xs text-slate-600">Assign rooms per item, select a group, then push everything into the estimate at once.</p>
                 </div>
