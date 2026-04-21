@@ -1197,6 +1197,26 @@ export function ProjectWorkspace() {
       }
     },
   });
+  /**
+   * Labor minutes per unit field — lets the estimator adjust the install timer
+   * directly rather than only through labor dollars. Clearing this to a new
+   * number re-drives labor cost via the server's labor-rate × minutes rule on
+   * the next persist (takeoffRepo.updateTakeoffLine re-derives labor cost from
+   * minutes when the caller omits a labor-cost override or provides zero).
+   */
+  const lineLaborMinutesField = useTransientNumericField({
+    syncKey: `${lineEditorId}-labor-minutes`,
+    committed: selectedLine?.laborMinutes ?? 0,
+    onLive: (n) => {
+      if (lineEditorId) patchLineLocal(lineEditorId, { laborMinutes: n });
+    },
+    onCommit: (n) => {
+      if (lineEditorId) {
+        patchLineLocal(lineEditorId, { laborMinutes: n, laborCost: 0, baseLaborCost: 0 });
+        void persistLine(lineEditorId);
+      }
+    },
+  });
   const lineUnitSellField = useTransientNumericField({
     syncKey: `${lineEditorId}-unitsell`,
     committed: selectedLine?.unitSell ?? 0,
@@ -1229,19 +1249,36 @@ export function ProjectWorkspace() {
   }
 
   async function applyModifier(modifierId: string) {
-    if (!project || !selectedLineId) return;
-    const result = await api.applyV1ModifierToLine(selectedLineId, modifierId);
-    setLines((prev) => prev.map((line) => (line.id === selectedLineId ? result.line : line)));
-    setLineModifiers(await api.getV1LineModifiers(selectedLineId));
-    await refreshTakeoff(project.id);
+    if (!project) {
+      window.alert('No project loaded.');
+      return;
+    }
+    if (!selectedLineId) {
+      window.alert('Select a line item first before applying a modifier.');
+      return;
+    }
+    try {
+      const result = await api.applyV1ModifierToLine(selectedLineId, modifierId);
+      setLines((prev) => prev.map((line) => (line.id === selectedLineId ? result.line : line)));
+      setLineModifiers(await api.getV1LineModifiers(selectedLineId));
+      await refreshTakeoff(project.id);
+    } catch (error) {
+      console.error('Failed to apply modifier', error);
+      window.alert(error instanceof Error ? error.message : 'Could not apply modifier.');
+    }
   }
 
   async function removeModifier(lineModifierId: string) {
     if (!project || !selectedLineId) return;
-    const result = await api.removeV1LineModifier(selectedLineId, lineModifierId);
-    setLines((prev) => prev.map((line) => (line.id === selectedLineId ? result.line : line)));
-    setLineModifiers(await api.getV1LineModifiers(selectedLineId));
-    await refreshTakeoff(project.id);
+    try {
+      const result = await api.removeV1LineModifier(selectedLineId, lineModifierId);
+      setLines((prev) => prev.map((line) => (line.id === selectedLineId ? result.line : line)));
+      setLineModifiers(await api.getV1LineModifiers(selectedLineId));
+      await refreshTakeoff(project.id);
+    } catch (error) {
+      console.error('Failed to remove modifier', error);
+      window.alert(error instanceof Error ? error.message : 'Could not remove modifier.');
+    }
   }
 
   async function applyBundle(bundleId: string, roomId = activeRoomId) {
@@ -1939,20 +1976,42 @@ export function ProjectWorkspace() {
                       </button>
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="ui-stat-tile">
-                      <p className="ui-stat-tile-kicker">Base Value</p>
-                      <p className="ui-stat-tile-value">{formatCurrencySafe(selectedLine.materialCost)}</p>
-                    </div>
-                    <div className="ui-stat-tile">
-                      <p className="ui-stat-tile-kicker">Labor Min</p>
-                      <p className="ui-stat-tile-value">{formatNumberSafe(selectedLine.laborMinutes, 1)}</p>
-                    </div>
-                    <div className="ui-stat-tile">
-                      <p className="ui-stat-tile-kicker">Unit Sell</p>
-                      <p className="ui-stat-tile-value">{formatCurrencySafe(selectedLine.unitSell)}</p>
-                    </div>
-                  </div>
+                  {(() => {
+                    /**
+                     * Effective labor minutes = base minutes + sum(modifier add-minutes)
+                     *                         + base × (sum(modifier percentLabor) / 100).
+                     * Surfacing this in the inspector lets estimators actually SEE that an
+                     * applied modifier landed, since the stored laborMinutes value on the
+                     * line itself never mutates on modifier apply (modifiers only touch
+                     * materialCost / laborCost via recalculateLineFromModifiers).
+                     */
+                    const baseMin = Number(selectedLine.laborMinutes || 0);
+                    const addMinTotal = lineModifiers.reduce((sum, m) => sum + Number(m.addLaborMinutes || 0), 0);
+                    const percentLaborTotal = lineModifiers.reduce((sum, m) => sum + Number(m.percentLabor || 0), 0);
+                    const effectiveLaborMinutes = baseMin + addMinTotal + (baseMin * percentLaborTotal) / 100;
+                    const modifiersChangeLaborMin = Math.abs(effectiveLaborMinutes - baseMin) > 0.01;
+                    return (
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="ui-stat-tile">
+                          <p className="ui-stat-tile-kicker">Base Value</p>
+                          <p className="ui-stat-tile-value">{formatCurrencySafe(selectedLine.materialCost)}</p>
+                        </div>
+                        <div className="ui-stat-tile">
+                          <p className="ui-stat-tile-kicker">Labor Min</p>
+                          <p className="ui-stat-tile-value">{formatNumberSafe(effectiveLaborMinutes, 1)}</p>
+                          {modifiersChangeLaborMin ? (
+                            <p className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.06em] text-emerald-300/90">
+                              base {formatNumberSafe(baseMin, 1)} · +{formatNumberSafe(effectiveLaborMinutes - baseMin, 1)} mod
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="ui-stat-tile">
+                          <p className="ui-stat-tile-kicker">Unit Sell</p>
+                          <p className="ui-stat-tile-value">{formatCurrencySafe(selectedLine.unitSell)}</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div className="rounded-md bg-[#f8fafc] p-3 text-slate-900 shadow-inner">
                   <ModifierPanel
                     modifiers={modifiers}
@@ -2273,9 +2332,16 @@ export function ProjectWorkspace() {
                             </div>
                           </div>
                         </label>
-                        <div className="rounded-lg bg-white px-2.5 py-2 shadow-sm ring-1 ring-slate-200/80 md:col-span-2">
-                          <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-500">Install time (per unit)</p>
-                          <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-950">{formatNumberSafe(selectedLine.laborMinutes, 1)} min/unit</p>
+                        <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
+                          <span className="flex items-center justify-between">
+                            <span>Install time (per unit)</span>
+                            <span className="font-mono text-[9px] font-medium uppercase tracking-[0.08em] text-slate-400">min / unit</span>
+                          </span>
+                          <input
+                            className="ui-input mt-1 h-9 rounded-lg tabular-nums"
+                            inputMode="decimal"
+                            {...lineLaborMinutesField.inputProps}
+                          />
                           <p className="mt-1 text-[10px] leading-snug text-slate-600">
                             Extended for this line:{' '}
                             <span className="font-semibold tabular-nums text-slate-900">
@@ -2287,8 +2353,12 @@ export function ProjectWorkspace() {
                                 ({formatNumberSafe(selectedLine.qty, 0)} × {formatNumberSafe(selectedLine.laborMinutes, 1)} min)
                               </span>
                             ) : null}
+                            <span className="ml-1 text-slate-400">·</span>
+                            <span className="ml-1 text-[10px] text-slate-500">
+                              Saving re-drives labor cost from minutes × subcontractor rate.
+                            </span>
                           </p>
-                        </div>
+                        </label>
                       </div>
                     </div>
                   </div>
