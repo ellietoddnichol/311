@@ -1,9 +1,12 @@
-# App audit & roadmap
+# App audit & roadmap (current-state aligned)
 
 **Companion:** [`estimating-workspace-overhaul-brief.md`](./estimating-workspace-overhaul-brief.md), [`estimating-workspace-implementation-spec.md`](./estimating-workspace-implementation-spec.md).
 **Purpose:** Honest, whole-app snapshot of what works today, where the weak spots are, and the ordered plan to close them — without relitigating the UI/IA overhaul already in flight.
 
 The brief and spec cover **how the estimating workspace should look and feel**. This document covers **whether the data, engine, and integrations underneath can actually support that promise**, and the items not covered in those two docs.
+
+> Note (repo reality): the major workspace/intake/proposal overhaul and a large formatting/token pass have already landed.
+> The next work is stabilization and polish (Phase 4/5/6), not restarting the overhaul.
 
 ---
 
@@ -14,21 +17,20 @@ The brief and spec cover **how the estimating workspace should look and feel**. 
 - The **intake pipeline** is now the most sophisticated part of the app: section-context inheritance, bid bucket parsing, bundle expansion, installability rules, install-labor family fallback, scope buckets, match confidence tiers, training capture, optional Div 10 Brain enrichment.
 - The **v1 SQLite data model** is coherent: one project shape, one takeoff-line shape, one settings shape. Incremental schema migrations via defensive `PRAGMA`/`ALTER` branches are in place.
 - **Estimate engine**: pricing modes (`material_only | labor_only | labor_and_material`), the markup sequence (direct → OH → profit → bond → tax), and modifier repricing are implemented and covered by a real unit test (`estimateEngineV1.test.ts`).
-- **Intake review UI** is the most-refined surface in the app: bid-split banner, install-family banner, scope buckets, tier-based bulk actions, finalize into project.
+- **Estimate & scope transparency** has landed: the estimate grid surfaces `sourceBidBucket`, `laborOrigin`, and install-family context, and scope review uses persisted bid-bucket context for grouping and triage.
+- **Catalog item editing** includes install-labor family authoring via the item editor (dropdown from the registry).
 
 **Where the app is weakest.**
 
-1. **Intake-derived context dies at the project boundary.** `sourceBidBucket`, `laborOrigin`, `installScopeType`, `intakeScopeBucket` are **persisted on `takeoff_lines_v1`** but **never rendered in `EstimateGrid`, `ScopeReviewPage`, or the proposal**. All the work to compute bid splits and labor origin disappears from the estimator's view the moment they leave intake review.
-2. **`material_with_optional_install_quote` was promised but never modeled.** `PricingMode` still has only three values. The intake brain can detect this fourth mode, but there is no place to persist or act on it.
-3. **`installLaborFamily` is not authorable.** The column exists on `catalog_items`, the type has the field, the matcher uses a hard-coded in-code registry — but `Catalog.tsx` has **no UI field** to edit it, and there is no admin path to populate the column for real catalog items.
-4. **The install-family fallback has a silent gap.** `buildInstallFamilyFallback` only fires when there is no catalog match. If a catalog match exists but has **zero labor minutes**, the catalog's `installLaborFamily` is not used to substitute default minutes.
-5. **Auth is a prototype.** `AuthContext` accepts any non-empty password, stores the email in `localStorage`, never talks to the server. `@supabase/ssr` is installed but not wired.
-6. **`estimator.db` is a single-file local SQLite.** This is fine for one estimator on one machine. It is a hard ceiling for multi-user, multi-device, or cloud deploys. Files are stored as **base64 in the DB**, which will balloon the file and make backups painful.
-7. **Proposal export is a client-side DOM snapshot.** `jspdf` + `jspdf-autotable` are in `package.json` but have **zero imports** anywhere. The Print/Export path is a best-effort HTML download, not a real PDF pipeline.
-8. **No route, repo, or client tests.** 20 server tests, all concentrated in intake. Zero coverage on Express routes, repos, the estimate engine edge cases, proposal math, or any UI. The `verify-lewis-clark-intake.ts` harness uses an absolute Windows path.
-9. **A layer of dead code.** `src/components/project/*`, `ImportParsePanel`, `RightDetailDrawer`, `WorkflowTabs`, `ExceptionList`, `PricingRulesDrawer`, `Layout.tsx`, `src/server/sheets.ts`, and the `global_bundles` / `global_addins` tables are all unimported or operationally inert. `/admin/div10-brain` is routed but not linked from the sidebar.
+1. **Dashboard is still not a “control center”.** It loads and lists, but does not consistently surface “what needs attention next” per project (warnings, exceptions, integration health).
+2. **Settings and integrations UX is brittle.** A single request failure can leave the user without a retry path or clear “configured vs unhealthy” readout.
+3. **Crude editing patterns remain.** `window.prompt` is still used in a few admin-ish places (notably Catalog modifiers/bundles, some room/phase prompts) and should be replaced with real forms.
+4. **Auth is a prototype.** `AuthContext` accepts any non-empty password, stores the email in `localStorage`, never talks to the server. `@supabase/ssr` is installed but not wired.
+5. **Single-file SQLite is still a ceiling for shared use.** It’s great for local dev; production requires a deliberate multi-user data plan (and file storage cannot remain base64-in-row at scale).
+6. **Testing posture is too thin for “platform” expectations.** Server/unit coverage exists but is not yet a backbone: route smoke tests, repo round-trips, and proposal/fixture tests are the highest-leverage next additions.
+7. **Discoverability/admin cleanup.** `/admin/div10-brain` is routed but not linked; there is likely remaining dead/legacy code that should be cleaned only after verifying it is unused.
 
-The workspace overhaul described in the brief/spec cannot land credibly until items 1–4 are closed. The rest are important but sequenceable.
+The workspace overhaul is now “in the repo”. The work that remains is to make it feel dependable and production-leaning without undoing the formatting/token system.
 
 ---
 
@@ -41,16 +43,16 @@ Legend: **●** solid · **◐** partial / brittle · **○** stub or unused.
 | Surface | Status | Notes |
 |---|---|---|
 | Sign in | ● client-only | Any password accepts; storage is `localStorage`/`sessionStorage`. `@supabase/ssr` installed but not used. |
-| Dashboard | ◐ | Loads projects, renders lists and quick actions. Load failures are `console.error` only; no retry/empty state. |
+| Dashboard | ◐ | Loads projects + quick actions, but still needs “control center” value: warnings, next actions, and integration health visibility. |
 | Projects list | ● | Search, filter, sort, permanent delete. |
 | Intake wizard | ● | Five steps: start type → source → basics → estimate setup → review. Parse, peer defaults, catalog/bundle match, training capture, finalize. |
 | Intake review panel | ● | Bid split banner, install-family banner, tier-based bulk accept, modifier and catalog editing inline, reasoning/evidence on demand. Strongest UI in the app. |
 | Scope Review | ◐ | Exceptions-first queue exists. Bid-bucket sub-grouping done in intake review is **not repeated here**. |
 | Project Overview | ◐ | Read-only snapshot + files. Limited control-center value today. |
 | Project Setup | ● | Editable project + job conditions + scope categories + distance hints. |
-| Estimate workspace | ◐ | Grid, toolbar, room list, cost drivers banner, footer stats, modifiers modal, item/bundle pickers are all wired. **No bid-bucket column, no `laborOrigin` column, no install-family chip, no labor plan region.** |
-| Proposal | ◐ | Section editor + settings rail + preview + AI draft + install-review email. Export is a DOM snapshot. **No bid-split grouping.** |
-| Catalog | ◐ | Items/modifiers/bundles CRUD + sync + inventory. **Modifier edits use `window.prompt`. `installLaborFamily` is not editable.** |
+| Estimate workspace | ● | Grid, toolbar, cost drivers, modifiers flows, item/bundle pickers. Bid-bucket / labor-origin / install-family transparency is visible in the grid. |
+| Proposal | ◐ | Section editor + settings rail + preview + AI draft + install-review email. Export is a DOM snapshot; bid-bucket grouping and polish can be improved. |
+| Catalog | ◐ | Items/modifiers/bundles CRUD + sync + inventory. **Modifier/bundle edits still use `window.prompt`** and should be upgraded to forms. Item editor supports `installLaborFamily`. |
 | Settings | ◐ | Company + labor + proposal text + sync admin. Initial load has no `.catch`; a single failure can freeze the page. |
 | Div 10 Brain admin | ◐ | Routed at `/admin/div10-brain`. Not linked from the sidebar — discoverable only by URL. |
 | Help | ● | Static. |
@@ -212,81 +214,36 @@ This is the single largest regression the workspace overhaul has to close before
 
 ---
 
-## 4. Roadmap (ordered)
+## 4. Roadmap (ordered, current priorities)
 
-This plan **dovetails with** the existing phase numbering in `estimating-workspace-implementation-spec.md`. It does not restart the overhaul; it fills the gaps that make the overhaul credible.
+This roadmap assumes the overhaul + formatting system already exist, and focuses on hardening without rewriting the intake pipeline or changing estimate math casually.
 
-### Phase 0 — Data-integrity foundation (must precede all UI work)
+### Phase 4 — UX hygiene, polish, and repo truth (start here)
 
-Small, testable, no visual regression.
+1. **Bring docs into alignment with current repo reality.**
+   - Keep README honest about what exists today.
+   - Mark completed work as complete; do not “promise” features that aren’t in the tree.
+2. **Dashboard → control center.**
+   - Per-project “what needs attention” warnings (exceptions, due soon, missing fields, integration health).
+   - Clear next actions (Scope Review / Estimate / Proposal) based on project state.
+3. **Settings reliability.**
+   - Add retry/error surfaces; avoid freeze-prone loading behavior.
+   - Show configured vs unhealthy integration state (Sheets, Gemini, Supabase/Div10Brain).
+4. **Replace prompt-based editing patterns with real forms.**
+   - Catalog modifiers/bundles first; any remaining prompt-based flows next.
+5. **Admin discoverability and cleanup.**
+   - Link or intentionally hide `/admin/div10-brain` based on configuration.
+   - Remove stale/unused paths only after verifying they are truly unused.
 
-1. **Carry `installLaborFamily` through persistence.**
-   - Add `install_labor_family` column to `takeoff_lines_v1`; write it from finalize + create-line paths; type it on `TakeoffLineRecord`.
-2. **Close the zero-labor fallback gap.**
-   - `buildInstallFamilyFallback` (or its caller) should fall back when catalog match exists but labor minutes are 0 and line is installable; prefer the catalog item's `installLaborFamily` before the in-code registry.
-3. **Add `material_with_optional_install_quote` pricing mode.**
-   - Extend the v1 `PricingMode` enum; update `ProjectIntake.tsx` setup step; update `calculateEstimateSummary` branches; copy through proposal.
-4. **Authoring UI for `installLaborFamily` on catalog items.**
-   - Dropdown in `Catalog.tsx` item editor from the registry; persist via existing update endpoint.
-5. **Kill the legacy duplicate project type.**
-   - Decide v1 is canonical; migrate any residual consumers of `src/types.ts` `Project` / `Scope` to `ProjectRecord` / `TakeoffLineRecord`; remove the shape or keep only shared leaf types.
+### Phase 5 — Production direction and platform hardening
 
-**Acceptance.** Re-run `scripts/verify-lewis-clark-intake.ts` and assert (a) install family key round-trips to the DB, (b) a catalog match with zero labor produces install-family minutes, (c) the fourth pricing mode is selectable and persists.
+1. **Repo abstraction for a multi-user DB** while preserving SQLite local dev.
+2. **Real auth** (server-backed sessions) replacing the prototype.
+3. **File storage migration** away from base64-in-row storage.
+4. **Integration health visibility in-app** (Sheets, Gemini/AI, Supabase/Div10Brain).
+5. **Structured logging / diagnostics**.
 
-### Phase 1 — Estimate workspace parity with intake (the "data survives finalize" phase)
-
-Depends on Phase 0.
-
-1. Add bid-bucket **column or group header** to `EstimateGrid`. Mirror intake's bid-split banner as a compact strip in the estimate toolbar; allow the user to toggle bucket inclusion from the workspace, not just intake.
-2. Add `laborOrigin` + install-family **row chips** with tooltip ("Generated from default labor family: `partition_hdpe_compartment`, 12 min per compartment").
-3. Inline modifier lane in place of the modifier modal (or persistent right-rail drawer); show `$` and `minutes` impact per applied modifier.
-4. Row-level "why this labor" inspector: catalog labor vs generated minutes, install family, modifier contributions, rate applied.
-5. Scope review page: sub-group by `sourceBidBucket` for parity with intake review.
-
-**Acceptance.** A user finalizing Lewis & Clark sees the same bid-split split inside the estimate workspace and proposal preview as they did in intake review, with no manual steps.
-
-### Phase 2 — Labor / crew credibility (Phase 4 of the brief)
-
-Purely presentation-first.
-
-1. New **Labor Plan** surface (sidebar panel or top-of-grid region) showing crew count, duration, hours/day, major drivers, condition assumptions.
-2. Guardrail copy when duration implies a single installer for implausible calendar span; suggest split crew when logic supports it; otherwise label "single-crew sequential" explicitly.
-3. No formula changes without explicit sign-off per the brief's §8.
-
-### Phase 3 — Proposal polish (Phase 5 of the brief, expanded)
-
-**Scope decision (2026-04-16):** server-side PDF is **deferred**. Existing HTML export / browser-print path stays. `jspdf` / `jspdf-autotable` remain in deps but will be wired after the Supabase migration so the PDF endpoint runs in the same deploy target.
-
-1. Proposal bid-bucket sections — base and alternates as visibly distinct areas with their own subtotals.
-2. Labor-origin transparency footnote per project (toggleable in proposal settings).
-3. Print CSS pass: margins, page breaks, typography, company block, overhead-at-zero hiding.
-4. **Deferred:** server-side PDF route. Revisit after Phase 5.
-
-### Phase 4 — UX hygiene and dead-code cleanup
-
-1. Dashboard as a real control center (project state, warnings, next action, current total).
-2. Inline modifier catalog editor (replace `window.prompt`).
-3. Standardize `{ isLoading, error, retry }` UI pattern on Dashboard + Settings.
-4. Link or hide `/admin/div10-brain` based on admin secret presence.
-5. Delete the orphan list in §3.5 in a single PR behind a red/green CI run.
-
-### Phase 5 — Supabase migration and operational hardening
-
-**Direction decision (2026-04-16):** the app is moving to **Supabase** as the primary data platform. SQLite stays as the local-dev fallback only. Core tables (`projects_v1`, `rooms_v1`, `takeoff_lines_v1`, `settings_v1`, `modifiers_v1`, `bundles_v1`, `bundle_items_v1`, `line_modifiers_v1`, `catalog_sync_status_v1`, `catalog_sync_runs_v1`, `project_files_v1`, `intake_catalog_memory_v1`, `catalog_items`) move to Postgres.
-
-Sequencing inside the phase:
-
-1. **Repo abstraction.** Introduce a thin driver boundary in `src/server/repos/**` (SQLite now, Postgres later) so route code is unchanged. Keep the existing `better-sqlite3` driver as the default for local dev.
-2. **Schema in Supabase.** Port `schema.ts` to a Postgres migration (one file, idempotent). Move file storage to **Supabase Storage** instead of base64-in-row for `project_files_v1`.
-3. **Auth via `@supabase/ssr`.** Replace the prototype `AuthContext`; add server-side session verification middleware; expose `req.user` to route handlers. Projects become tenant-scoped by `owner_id` or `org_id`.
-4. **Cutover plan.** Dual-write period is optional; simpler to take a single downtime window, snapshot SQLite, import into Supabase, flip an env var.
-5. **Integration health** page under Settings reading the env-readiness checks as `scripts/intake-env-smoke.ts` plus last catalog-sync timestamps and last Supabase heartbeat.
-6. **Migration runner.** A named `schema_migrations` table, managed by a single migration command (`npm run db:migrate`) against Postgres. SQLite keeps its defensive `PRAGMA` branches as belt-and-braces for local dev.
-7. **Sentry** (or equivalent) server DSN + per-request ID middleware.
-
-Non-goals for this phase: multi-region, read replicas, row-level security hardening beyond basic tenant isolation. Those come after the cutover is stable.
-
-### Phase 6 — Testing backbone (parallelizable with any of the above)
+### Phase 6 — Testing backbone (parallel with any phase)
 
 1. **Route smoke tests** for every `/api/v1/*` endpoint (happy path + 400/404 + auth). Use the existing `tsx --test` harness.
 2. **Repo tests** covering the migration branches and the field round-trip on `takeoff_lines_v1`.

@@ -2,7 +2,19 @@
 
 Brighten Install is a full-stack estimating platform for commercial specialty scope workflows (Division 10 first, expandable by design). The app includes a React frontend and a Node/Express backend with SQLite persistence.
 
-This repository is currently in a structured rebuild. Phase 1 establishes normalized backend persistence and connected API routes for projects, rooms, takeoff lines, and settings.
+This repository contains a working v1 end-to-end workflow: intake → scope review → estimate workspace → proposal, backed by a v1 API (`/api/v1/*`) and a local SQLite database for development. A recent UI formatting pass standardized design tokens (surfaces, spacing, focus rings) to keep the app cohesive as it hardens toward production readiness.
+
+## What exists today (high level)
+
+- **Dashboard**: project snapshot + quick actions
+- **Projects**: search/filter/sort with deep links into a project workspace
+- **Project workspace**: Overview, Setup, Scope Review, Estimate, Proposal
+- **Intake**: upload + parsing + review + finalize into a project (with catalog-first matching and Div 10 reasoning)
+- **Estimate workspace**: grid-first pricing workflow with Div 10 transparency (bid bucket / labor origin / install family) and modifier flows
+- **Proposal**: editable copy + preview + print/export path
+- **Catalog**: items/modifiers/bundles + Google Sheets sync + inventory status
+- **Settings**: company profile + proposal defaults + catalog sync administration
+- **Admin**: Div 10 Brain admin route exists (currently URL-only; see docs)
 
 ## Tech Stack
 
@@ -59,11 +71,15 @@ Upload parsing variables:
 - `INTAKE_GEMINI_MODEL`
 	Existing model override used by chunk-level normalization helpers when Gemini is enabled
 
+## UI / formatting system
+
+The UI uses role-based CSS variables (design tokens) and shared `ui-*` primitives to avoid one-off styling. When changing screens, prefer using existing primitives (surfaces, inputs, chips, buttons) and the spacing scale rather than introducing new ad hoc colors or spacing.
+
 ## Current API Surfaces
 
 Legacy API remains available under `/api/*` while rebuild proceeds.
 
-New rebuild API (Phase 1) is available under `/api/v1/*`:
+v1 API is available under `/api/v1/*`:
 
 - `/api/v1/health`
 - `/api/v1/projects`
@@ -71,6 +87,8 @@ New rebuild API (Phase 1) is available under `/api/v1/*`:
 - `/api/v1/takeoff/lines`
 - `/api/v1/takeoff/summary/:projectId`
 - `/api/v1/settings`
+- Intake templates:
+  - `/api/v1/intake/templates/preferred-import.xlsx`
 
 ## Upload Parsing Architecture
 
@@ -125,18 +143,13 @@ Spreadsheet: `GOOGLE_SHEETS_SPREADSHEET_ID` (or legacy `GOOGLE_SHEETS_ID`). Tab 
 
 This repo includes a Dockerfile suitable as a baseline for container deployment (for example Cloud Run) and will be refined as later phases complete.
 
-## Rebuild Status
+## Documentation & current priorities
 
-Completed in this pass:
+- **Execution brief**: `docs/app-audit-and-roadmap.md` (honest snapshot + ordered next work)
+- **Deployment notes**: `docs/DEPLOY.md`
 
-- Phase 1 backend architecture scaffold
-- normalized schema for projects/rooms/takeoff/settings
-- modular repositories and v1 route modules
-- initial estimate summary service
+Current focus is stabilization and polish:
 
-Next:
-
-- connect frontend workspace to v1 API
-- catalog CRUD normalization and add-from-catalog flow
-- bundles/modifiers/variants in normalized schema
-- parser review/finalization workflow and proposal reconciliation
+- Phase 4: UX hygiene + repo truth (docs aligned, Dashboard as control center, Settings reliability, remove prompt-based edits, improve discoverability)
+- Phase 5: production direction + platform hardening (auth, storage, repo abstraction for Postgres/Supabase while keeping local SQLite dev)
+- Phase 6: testing backbone (route/repo/engine/proposal fixtures)
