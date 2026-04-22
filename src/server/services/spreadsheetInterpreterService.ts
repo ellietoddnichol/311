@@ -157,54 +157,44 @@ function findColumn(headers: string[], aliases: string[]): number | null {
   return null;
 }
 
-const TEMPLATE_V1_HEADERS = [
-  'project name',
-  'project number',
-  'client',
-  'address',
-  'bid date',
-  'room',
-  'category',
+const PREFERRED_TEMPLATE_V2_HEADERS = [
   'item code',
-  'item name',
-  'description',
   'quantity',
-  'unit',
-  'labor included',
-  'material included',
-  'manufacturer',
+  'room',
   'bid bucket',
-  'section header',
+  'description only if item code is blank',
   'notes',
 ] as const;
 
-function looksLikePreferredImportTemplate(headers: string[]): boolean {
-  if (headers.length < TEMPLATE_V1_HEADERS.length) return false;
-  const head = headers.slice(0, TEMPLATE_V1_HEADERS.length);
-  return TEMPLATE_V1_HEADERS.every((h, i) => head[i] === h);
+function looksLikePreferredImportTemplateV2(headers: string[]): boolean {
+  if (headers.length < PREFERRED_TEMPLATE_V2_HEADERS.length) return false;
+  const head = headers.slice(0, PREFERRED_TEMPLATE_V2_HEADERS.length);
+  return PREFERRED_TEMPLATE_V2_HEADERS.every((h, i) => head[i] === h);
 }
 
 function detectSpreadsheetColumns(headers: string[]) {
-  if (looksLikePreferredImportTemplate(headers)) {
+  if (looksLikePreferredImportTemplateV2(headers)) {
     return {
-      project: 0,
-      projectNumber: 1,
-      client: 2,
-      address: 3,
-      bidDate: 4,
-      room: 5,
-      category: 6,
-      itemCode: 7,
-      item: 8,
-      description: 9,
-      qty: 10,
-      unit: 11,
-      laborIncluded: 12,
-      materialIncluded: 13,
-      manufacturer: 14,
-      bidBucket: 15,
-      sectionHeader: 16,
-      notes: 17,
+      // Single-project template has a metadata header block above. We still parse the table normally;
+      // metadata is extracted from the prelude text by metadataExtractorService.
+      project: null,
+      projectNumber: null,
+      client: null,
+      address: null,
+      bidDate: null,
+      room: 2,
+      category: null,
+      itemCode: 0,
+      item: null,
+      description: 4,
+      qty: 1,
+      unit: null,
+      laborIncluded: null,
+      materialIncluded: null,
+      manufacturer: null,
+      bidBucket: 3,
+      sectionHeader: null,
+      notes: 5,
     };
   }
   return {

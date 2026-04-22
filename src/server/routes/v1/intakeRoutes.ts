@@ -3,6 +3,7 @@ import { Router } from 'express';
 import * as xlsx from 'xlsx';
 import { extractIntakeFromGemini } from '../../services/geminiIntakeExtraction.ts';
 import { parseUploadedIntake } from '../../services/parseRouterService.ts';
+import { listCatalogItemsForApi } from '../../repos/catalogRepo.ts';
 import { readDiv10BrainEnv } from '../../div10Brain/env.ts';
 import { getSupabaseAdmin } from '../../div10Brain/supabaseAdmin.ts';
 import { getErrorMessage } from '../../../shared/utils/errorMessage.ts';
@@ -10,50 +11,40 @@ import { getErrorMessage } from '../../../shared/utils/errorMessage.ts';
 export const intakeRouter = Router();
 
 intakeRouter.get('/templates/preferred-import.xlsx', (_req, res) => {
-  const headers = [
-    'Project Name',
-    'Project Number',
-    'Client',
-    'Address',
-    'Bid Date',
-    'Room',
-    'Category',
-    'Item Code',
-    'Item Name',
-    'Description',
-    'Quantity',
-    'Unit',
-    'Labor Included',
-    'Material Included',
-    'Manufacturer',
-    'Bid Bucket',
-    'Section Header',
-    'Notes',
-  ];
-  const sample = [
-    'Example Project',
-    'JOB-123',
-    'Example GC',
-    '123 Main St City ST 12345',
-    '2026-04-21',
-    'Restroom A',
-    'Toilet Partitions',
-    'PT-HDPE-36',
-    'HDPE Partition 36"',
-    'Install HDPE toilet partitions',
-    2,
-    'EA',
-    'Yes',
-    'Yes',
-    'Scranton',
-    'Base Bid',
-    'Scranton - Toilet Partitions - Base Bid',
-    'Replace with your notes',
+  const wb = xlsx.utils.book_new();
+
+  // Single-project template: metadata block + item table.
+  const importAoa: Array<Array<string | number>> = [
+    ['Preferred Import Template (Single Project)'],
+    [],
+    ['Project Name', ''],
+    ['Project Number', ''],
+    ['Client', ''],
+    ['Address', ''],
+    ['Bid Date', ''],
+    [],
+    ['Items (minimum per row: Item Code + Quantity)'],
+    [],
+    // NOTE: Header text here is intentionally exact — the server parser detects this template by these headers.
+    ['Item Code', 'Quantity', 'Room', 'Bid Bucket', 'Description (only if Item Code is blank)', 'Notes'],
+    ['PT-HDPE-36', 2, 'Restroom A', 'Base Bid', '', 'Replace with your notes'],
+    ['', 1, '', '', 'Manual item description (when SKU is unknown)', ''],
   ];
 
-  const wb = xlsx.utils.book_new();
-  const ws = xlsx.utils.aoa_to_sheet([headers, sample]);
-  xlsx.utils.book_append_sheet(wb, ws, 'Import');
+  const wsImport = xlsx.utils.aoa_to_sheet(importAoa);
+  wsImport['!cols'] = [{ wch: 18 }, { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 42 }, { wch: 28 }];
+  xlsx.utils.book_append_sheet(wb, wsImport, 'Import');
+
+  // Catalog helper sheet (active items) so users can copy/paste valid SKUs.
+  const catalog = listCatalogItemsForApi(false);
+  const catalogAoa: Array<Array<string | number>> = [
+    ['Item Code', 'Description', 'Category', 'Manufacturer', 'Unit'],
+    ...catalog.map((i) => [i.sku || '', i.description || '', i.category || '', i.manufacturer || '', i.uom || 'EA']),
+  ];
+  const wsCatalog = xlsx.utils.aoa_to_sheet(catalogAoa);
+  wsCatalog['!cols'] = [{ wch: 18 }, { wch: 54 }, { wch: 22 }, { wch: 18 }, { wch: 8 }];
+  xlsx.utils.book_append_sheet(wb, wsCatalog, 'Catalog');
+
   const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
