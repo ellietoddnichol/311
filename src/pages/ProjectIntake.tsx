@@ -1142,6 +1142,8 @@ export function ProjectIntake() {
   const [takeoffUploadMessage, setTakeoffUploadMessage] = useState('');
   const [takeoffDragOver, setTakeoffDragOver] = useState(false);
   const [takeoffImportText, setTakeoffImportText] = useState('');
+  const [blankQuickAddText, setBlankQuickAddText] = useState('');
+  const [blankQuickAddDragOver, setBlankQuickAddDragOver] = useState(false);
   const [uploadedDocumentFile, setUploadedDocumentFile] = useState<File | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [uploadedText, setUploadedText] = useState('');
@@ -2440,6 +2442,222 @@ export function ProjectIntake() {
       ...prev,
       projectName: prev.projectName || 'New Project'
     }));
+    setBlankQuickAddText('');
+  }
+
+  function parseBlankQuickAddLines(text: string): ParsedImportLine[] {
+    const lines = String(text || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 260);
+
+    return lines.map((line) => {
+      // Supported formats:
+      // - "SKU qty" or "qty x SKU"
+      // - "Room, SKU, qty" (CSV-ish)
+      // - "SKU" (qty defaults to 1)
+      const csvParts = line.split(',').map((p) => p.trim()).filter(Boolean);
+      if (csvParts.length >= 2) {
+        const [a, b, c] = csvParts;
+        const aQty = Number(String(a).replace(/,/g, ''));
+        const bQty = Number(String(b).replace(/,/g, ''));
+        const cQty = Number(String(c || '').replace(/,/g, ''));
+        const looksQty = (n: number) => Number.isFinite(n) && n > 0;
+
+        // If first cell is qty -> treat as qty, sku
+        if (looksQty(aQty)) {
+          return {
+            projectName: '',
+            category: '',
+            itemCode: b || '',
+            itemName: b || '',
+            description: b || '',
+            qty: aQty,
+            unit: 'EA',
+            laborIncluded: null,
+            materialIncluded: null,
+            notes: c || '',
+            roomName: '',
+            sourceReference: 'Blank quick add',
+          };
+        }
+
+        // If second cell is qty -> treat as sku, qty
+        if (looksQty(bQty)) {
+          return {
+            projectName: '',
+            category: '',
+            itemCode: a || '',
+            itemName: a || '',
+            description: a || '',
+            qty: bQty,
+            unit: 'EA',
+            laborIncluded: null,
+            materialIncluded: null,
+            notes: c || '',
+            roomName: '',
+            sourceReference: 'Blank quick add',
+          };
+        }
+
+        // If 3 cells and third is qty -> treat as room, sku, qty
+        if (csvParts.length >= 3 && looksQty(cQty)) {
+          return {
+            projectName: '',
+            category: '',
+            itemCode: b || '',
+            itemName: b || '',
+            description: b || '',
+            qty: cQty,
+            unit: 'EA',
+            laborIncluded: null,
+            materialIncluded: null,
+            notes: '',
+            roomName: a || '',
+            sourceReference: 'Blank quick add',
+          };
+        }
+      }
+
+      // Fallback: reuse the existing raw text parser (qty defaults to 1).
+      return parseRawTextLinesToRows([line], 'Blank quick add')[0]!;
+    });
+  }
+
+  function applyBlankQuickAddRows(input: {
+    rows: ParsedImportLine[];
+    metadata?: Partial<ProjectRecord> | null;
+  }) {
+    const parsed = input.rows;
+    if (parsed.length === 0) return;
+
+    if (input.metadata) {
+      setProjectDraft((prev) => ({
+        ...prev,
+        projectName: prev.projectName || input.metadata?.projectName || prev.projectName,
+        projectNumber: prev.projectNumber || (input.metadata as any)?.projectNumber || prev.projectNumber,
+        clientName: prev.clientName || (input.metadata as any)?.clientName || prev.clientName,
+        address: prev.address || input.metadata?.address || prev.address,
+        bidDate: prev.bidDate || (input.metadata as any)?.bidDate || prev.bidDate,
+      }));
+    }
+
+    const nextRooms = new Set(roomSuggestions.map((r) => normalizeRoomName(r.roomName)));
+    const seededRoom = blankUsesRooms ? (roomSuggestions.find((r) => r.include)?.roomName || 'Room 101') : 'Project Scope';
+
+    const added = parsed.map((row) => {
+      const raw = `${row.itemCode || ''} ${row.description || row.itemName || ''}`.trim();
+      const match = suggestCatalogMatch(
+        { itemName: row.itemName, description: row.description, rawText: raw },
+        catalog
+      );
+      const resolvedRoom = normalizeRoomName(row.roomName || seededRoom || 'General Scope');
+      if (resolvedRoom && !nextRooms.has(resolvedRoom)) {
+        nextRooms.add(resolvedRoom);
+      }
+      return {
+        id: makeId('line-suggest'),
+        include: true,
+        roomName: resolvedRoom,
+        rawText: raw,
+        itemName: match?.description || row.itemName || row.description || row.itemCode || raw,
+        description: match?.description || row.description || row.itemName || row.itemCode || raw,
+        qty: Number.isFinite(Number(row.qty)) && Number(row.qty) > 0 ? Number(row.qty) : 1,
+        unit: match?.uom || row.unit || 'EA',
+        category: match?.category || null,
+        sourceReference: row.sourceReference || 'Blank quick add',
+        sku: match?.sku || (row.itemCode ? String(row.itemCode).trim() : null),
+        catalogItemId: match?.id || null,
+        materialCost: match?.baseMaterialCost || 0,
+        laborMinutes: match?.baseLaborMinutes || 0,
+        notes: row.notes || '',
+        bidBucket: (row as any).bidBucket || null,
+        laborIncluded: null,
+        materialIncluded: null,
+        matched: !!match,
+      } as LineSuggestion;
+    });
+
+    if (blankUsesRooms) {
+      const existing = new Set(roomSuggestions.map((r) => normalizeRoomName(r.roomName)));
+      const newRoomSuggestions = Array.from(nextRooms)
+        .filter((roomName) => roomName && !existing.has(roomName))
+        .map((roomName) => ({ id: makeId('room-suggest'), include: true, roomName }));
+      if (newRoomSuggestions.length > 0) {
+        setRoomSuggestions((prev) => [...prev, ...newRoomSuggestions]);
+      }
+    }
+
+    setLineSuggestions((prev) => clampSuggestionCategories(dedupeSuggestions([...prev, ...added]), catalog));
+    setBlankQuickAddText('');
+  }
+
+  function applyBlankQuickAdd() {
+    const parsed = parseBlankQuickAddLines(blankQuickAddText);
+    applyBlankQuickAddRows({ rows: parsed, metadata: null });
+  }
+
+  async function parsePreferredXlsxTemplate(file: File): Promise<{ rows: ParsedImportLine[]; metadata: Partial<ProjectRecord> }> {
+    const xlsx = await import('xlsx');
+    const buffer = await file.arrayBuffer();
+    const workbook = xlsx.read(buffer, { type: 'array' });
+    const sheet = workbook.Sheets['Import'] || workbook.Sheets[workbook.SheetNames[0]];
+    const rawRows = xlsx.utils.sheet_to_json<Array<string | number | null | undefined>>(sheet, { header: 1, raw: false, defval: '' });
+    const rows = (rawRows || []).map((r) => (r || []).map((c) => String(c ?? '').trim()));
+
+    const metadata: Partial<ProjectRecord> = {};
+    const getMeta = (label: string): string => {
+      const row = rows.find((r) => String(r[0] || '').trim().toLowerCase() === label.toLowerCase());
+      return row ? String(row[1] || '').trim() : '';
+    };
+    const projectName = getMeta('Project Name');
+    const projectNumber = getMeta('Project Number');
+    const clientName = getMeta('Client');
+    const address = getMeta('Address');
+    const bidDate = getMeta('Bid Date');
+    if (projectName) metadata.projectName = projectName;
+    if (address) metadata.address = address;
+    // ProjectIntake draft uses these fields; keep them as (any) so we don't fight type unions here.
+    (metadata as any).projectNumber = projectNumber || '';
+    (metadata as any).clientName = clientName || '';
+    (metadata as any).bidDate = bidDate || '';
+
+    const headerNeedle = ['item code', 'quantity', 'room', 'bid bucket', 'description (only if item code is blank)', 'notes'];
+    const headerRowIndex = rows.findIndex((r) => headerNeedle.every((h, idx) => String(r[idx] || '').trim().toLowerCase() === h));
+    if (headerRowIndex < 0) {
+      return { rows: [], metadata };
+    }
+
+    const out: ParsedImportLine[] = [];
+    for (let i = headerRowIndex + 1; i < rows.length; i += 1) {
+      const r = rows[i] || [];
+      const itemCode = String(r[0] || '').trim();
+      const qtyRaw = String(r[1] || '').trim();
+      const roomName = String(r[2] || '').trim();
+      const bidBucket = String(r[3] || '').trim();
+      const descriptionFallback = String(r[4] || '').trim();
+      const notes = String(r[5] || '').trim();
+      if (!itemCode && !descriptionFallback && !qtyRaw && !roomName && !notes) continue;
+      const qty = Number(String(qtyRaw).replace(/,/g, '')) || 1;
+      out.push({
+        projectName: '',
+        category: '',
+        itemCode,
+        itemName: itemCode || descriptionFallback,
+        description: descriptionFallback || itemCode,
+        qty: qty > 0 ? qty : 1,
+        unit: 'EA',
+        laborIncluded: null,
+        materialIncluded: null,
+        notes,
+        roomName,
+        sourceReference: file.name,
+        // extra (not on ParsedImportLine type used elsewhere, but consumed by applyBlankQuickAddRows via any)
+        ...(bidBucket ? ({ bidBucket } as any) : null),
+      } as any);
+    }
+    return { rows: out, metadata };
   }
 
   function loadTemplateDefaults() {
@@ -2803,7 +3021,7 @@ export function ProjectIntake() {
       </div>
 
       {step === 1 && (
-        <section className="mx-auto w-full max-w-[1600px] rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-4">
+        <section className="ui-surface mx-auto w-full max-w-[1600px] space-y-4 p-5">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Step 1</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">How do you want to start?</h2>
@@ -2845,7 +3063,7 @@ export function ProjectIntake() {
       )}
 
       {step === 2 && (
-        <section className="mx-auto w-full max-w-[1600px] rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm space-y-5">
+        <section className="ui-surface mx-auto w-full max-w-[1600px] space-y-5 p-5">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Step 2</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Source details</h2>
@@ -2868,7 +3086,7 @@ export function ProjectIntake() {
                     const file = e.dataTransfer.files?.[0];
                     if (file) void handleTakeoffFileUpload(file);
                   }}
-                  className={`border-2 border-dashed rounded-lg p-5 bg-slate-50 ${takeoffDragOver ? 'border-blue-400 bg-blue-50' : 'border-slate-300'}`}
+                  className={`ui-dashed-card p-5 ${takeoffDragOver ? 'ring-2 ring-blue-500/25' : ''}`}
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <Upload className="w-4 h-4 text-slate-500" />
@@ -2979,7 +3197,7 @@ export function ProjectIntake() {
 
           {mode === 'blank' && (
             <div className="space-y-4">
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+              <div className="ui-panel-muted space-y-3 p-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Rooms / Areas</p>
                   <h3 className="text-sm font-semibold text-slate-900 mt-1">Choose how to organize this project.</h3>
@@ -2996,13 +3214,77 @@ export function ProjectIntake() {
                       value={blankRoomNames}
                       onChange={(e) => setBlankRoomNames(e.target.value)}
                       placeholder={'Lobby\nMain Restroom\nBreak Room'}
-                      className="mt-1 w-full rounded border border-slate-300 px-2 py-2 text-sm"
+                      className="ui-textarea mt-1"
                     />
                     <span className="block text-[11px] text-slate-500">One room per line. Leave blank to auto-create one room.</span>
                   </label>
                 ) : (
                   <p className="text-xs text-slate-500">Project starts with one project-wide scope bucket.</p>
                 )}
+              </div>
+
+              <div className="ui-panel space-y-3 p-4">
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Quick add items</p>
+                    <h3 className="text-sm font-semibold text-slate-900 mt-1">Paste or drag/drop SKUs</h3>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Fast path for blank projects. Each line can be <span className="font-medium text-slate-700">SKU qty</span> (or <span className="font-medium text-slate-700">qty x SKU</span>), or <span className="font-medium text-slate-700">Room, SKU, qty</span>.
+                      Room is optional. SKUs are matched against your catalog first.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="ui-btn-secondary h-9 px-3 text-xs font-semibold disabled:opacity-50"
+                    onClick={applyBlankQuickAdd}
+                    disabled={!blankQuickAddText.trim()}
+                  >
+                    Add to draft
+                  </button>
+                </div>
+
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setBlankQuickAddDragOver(true);
+                  }}
+                  onDragLeave={() => setBlankQuickAddDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setBlankQuickAddDragOver(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) {
+                      const name = file.name.toLowerCase();
+                      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+                        void parsePreferredXlsxTemplate(file).then(({ rows, metadata }) => {
+                          if (rows.length === 0) {
+                            void file.text().then((t) => setBlankQuickAddText((prev) => (prev ? `${prev}\n${t}` : t)));
+                            return;
+                          }
+                          applyBlankQuickAddRows({ rows, metadata });
+                        });
+                        return;
+                      }
+                      void file.text().then((t) => setBlankQuickAddText((prev) => (prev ? `${prev}\n${t}` : t)));
+                      return;
+                    }
+                    const text = e.dataTransfer.getData('text/plain');
+                    if (text) setBlankQuickAddText((prev) => (prev ? `${prev}\n${text}` : text));
+                  }}
+                  className={`ui-dashed-card p-3 ${blankQuickAddDragOver ? 'ring-2 ring-blue-500/25' : ''}`}
+                >
+                  <textarea
+                    rows={5}
+                    value={blankQuickAddText}
+                    onChange={(e) => setBlankQuickAddText(e.target.value)}
+                    placeholder={'PT-HDPE-36 2\n1 x GRAB-36\nRestroom A, MIRROR-1836, 1'}
+                    className="ui-textarea w-full resize-y"
+                  />
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                    <span>Tip: you can drop a `.txt` or `.csv` file here.</span>
+                    <span>{blankQuickAddText.trim() ? `${blankQuickAddText.trim().split(/\r?\n/).filter(Boolean).length} line(s)` : '0 lines'}</span>
+                  </div>
+                </div>
               </div>
             </div>
           )}

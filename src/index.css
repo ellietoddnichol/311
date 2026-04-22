@@ -9,34 +9,62 @@
 
 @layer base {
   :root {
-    /* Canvas behind the main shell — slightly darker so white panels read as elevated. */
-    --bg-canvas: #e2e8f0;
+    /**
+     * Design tokens (Procore-inspired)
+     * Role-based (surface/text/brand/intent) so components don't hardcode colors.
+     */
+
+    /* Spacing scale (8pt rhythm) */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
+
+    /* Neutrals */
+    --bg-canvas: #f6f8fb;
     --bg-app: #ffffff;
     --surface: #ffffff;
     --surface-soft: #f8fafc;
-    --surface-tint: #f2f6fb;
-    --line: #d8dee8;
-    --line-soft: #e7ecf3;
-    --text: #0e1726;
-    --text-muted: #60708a;
-    --text-subtle: #7b889d;
-    --brand: #0b3d91;
-    --brand-strong: #072f73;
-    --brand-soft: #e7efff;
-    --brand-deep: #0a224d;
+    --surface-tint: #f1f5f9;
+    --line: #cbd5e1;
+    --line-soft: #e2e8f0;
+    --text: #0b1220;
+    --text-muted: #475569;
+    --text-subtle: #64748b;
+
+    /* Brand */
+    --brand: #1d4ed8;
+    --brand-strong: #1e40af;
+    --brand-soft: #eff6ff;
+    --brand-deep: #0b2a6f;
+
+    /* Accents (kept for charts/callouts, not primary UI) */
     --accent-teal: #0f766e;
-    --accent-teal-soft: #e4f5f2;
-    --accent-gold: #b7791f;
-    --accent-gold-soft: #fff5dd;
+    --accent-teal-soft: #e6fffb;
+    --accent-gold: #b45309;
+    --accent-gold-soft: #fffbeb;
+
+    /* Intents */
     --success: #166534;
-    --success-soft: #ecfdf3;
+    --success-soft: #ecfdf5;
     --warn: #9a3412;
     --warn-soft: #fff7ed;
     --danger: #b91c1c;
     --danger-soft: #fef2f2;
-    /** Neutral callouts (reviews, hints) — same hue family as UI */
-    --callout-bg: #f1f4f9;
-    --callout-border: #d5dde8;
+
+    /* Focus ring */
+    --focus-ring: rgba(29, 78, 216, 0.18);
+    --focus-border: rgba(29, 78, 216, 0.55);
+
+    /** Neutral callouts (reviews, hints) */
+    --callout-bg: #f1f5f9;
+    --callout-border: #d6deea;
   }
 
   * {
@@ -54,15 +82,15 @@
      * with content — just a subtle engineering / blueprint backdrop.
      */
     background-image:
-      linear-gradient(to right, rgba(15, 23, 42, 0.045) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(15, 23, 42, 0.045) 1px, transparent 1px);
+      linear-gradient(to right, rgba(15, 23, 42, 0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(15, 23, 42, 0.03) 1px, transparent 1px);
     background-size: 24px 24px;
     background-position: -1px -1px;
     color: var(--text);
   }
 
   ::selection {
-    background: rgba(11, 61, 145, 0.14);
+    background: rgba(29, 78, 216, 0.16);
     color: var(--text);
   }
 
@@ -95,14 +123,14 @@
 
   .ui-surface {
     background: var(--surface);
-    border: 1px solid rgba(203, 213, 225, 0.95);
+    border: 1px solid color-mix(in srgb, var(--line) 85%, white);
     box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
     @apply rounded-xl;
   }
 
   .ui-surface-soft {
-    background: linear-gradient(180deg, #fbfcfe 0%, var(--surface-soft) 100%);
-    border: 1px solid rgba(231, 236, 243, 0.85);
+    background: linear-gradient(180deg, #ffffff 0%, var(--surface-soft) 100%);
+    border: 1px solid color-mix(in srgb, var(--line-soft) 88%, white);
     @apply rounded-lg;
   }
 
@@ -149,13 +177,13 @@
   /** Card / panel: less flat white-on-white */
   .ui-panel {
     background: var(--surface);
-    border: 1px solid rgba(216, 222, 232, 0.95);
+    border: 1px solid color-mix(in srgb, var(--line) 80%, white);
     @apply rounded-xl shadow-sm;
   }
 
   .ui-panel-muted {
     background: var(--surface-soft);
-    border: 1px solid rgba(216, 222, 232, 0.85);
+    border: 1px solid color-mix(in srgb, var(--line-soft) 82%, white);
     @apply rounded-xl;
   }
 
@@ -174,15 +202,15 @@
   }
 
   .ui-input {
-    background: #fff;
+    background: var(--surface);
     border: 1px solid var(--line);
     color: var(--text);
     @apply h-9 w-full rounded-md px-3 text-sm outline-none transition;
   }
 
   .ui-input:focus {
-    border-color: #8faee9;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+    border-color: var(--focus-border);
+    box-shadow: 0 0 0 3px var(--focus-ring);
   }
 
   /**
@@ -201,15 +229,15 @@
   }
 
   .ui-textarea {
-    background: #fff;
+    background: var(--surface);
     border: 1px solid var(--line);
     color: var(--text);
     @apply w-full rounded-md px-3 py-2 text-sm outline-none transition;
   }
 
   .ui-textarea:focus {
-    border-color: #8faee9;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+    border-color: var(--focus-border);
+    box-shadow: 0 0 0 3px var(--focus-ring);
   }
 
   .ui-btn-primary {
@@ -224,20 +252,20 @@
   }
 
   .ui-btn-secondary {
-    background: #fff;
+    background: var(--surface);
     border: 1px solid var(--line);
-    color: #2b3648;
+    color: var(--text);
     @apply h-9 rounded-md px-3 text-sm font-medium transition;
     box-shadow: none;
   }
 
   .ui-btn-secondary:hover {
-    background: #f8fafc;
+    background: var(--surface-soft);
   }
 
   .ui-btn-secondary:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 0 3px var(--focus-ring);
   }
 
   .ui-wtab {
@@ -293,8 +321,8 @@
   }
 
   .ui-chip-soft {
-    background: #fff;
-    border: 1px solid rgba(216, 222, 232, 0.8);
+    background: var(--surface);
+    border: 1px solid color-mix(in srgb, var(--line) 78%, white);
     color: var(--text-muted);
     @apply inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium;
   }
@@ -302,17 +330,17 @@
   .ui-ghost-btn {
     background: transparent;
     color: var(--text-muted);
-    @apply h-9 rounded-full px-3 text-sm font-medium transition;
+    @apply h-10 rounded-full px-4 text-sm font-medium transition;
   }
 
   .ui-ghost-btn:hover {
-    background: rgba(231, 239, 255, 0.7);
+    background: var(--brand-soft);
     color: var(--brand);
   }
 
   .ui-ghost-btn:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+    box-shadow: 0 0 0 3px var(--focus-ring);
   }
 
   .ui-divider {
@@ -355,7 +383,7 @@
   }
 
   .ui-table-action {
-    @apply inline-flex h-7 min-h-[1.75rem] shrink-0 items-center justify-center gap-1 rounded-md border px-2.5 text-xs font-medium transition-colors;
+    @apply inline-flex min-h-9 shrink-0 items-center justify-center gap-1 rounded-md border px-2.5 text-xs font-medium transition-colors;
   }
 
   /** Wrapper + table: scroll wide grids instead of crushing columns; crisp row rules. */

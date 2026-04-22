@@ -1464,7 +1464,7 @@ export function ProjectWorkspace() {
   }
 
   return (
-    <div className="min-h-full bg-slate-50">
+    <div className="min-h-full">
       <ProjectHeader
         project={project}
         baseBidTotal={summary?.baseBidTotal || 0}
@@ -2077,14 +2077,14 @@ export function ProjectWorkspace() {
               </section>
 
               <div className="space-y-3 xl:sticky xl:top-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-white/95 px-3 py-2.5 shadow-sm backdrop-blur-sm">
+                <div className="ui-panel flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Live preview</p>
                     <p className="text-xs font-medium text-slate-700">What the client sees</p>
                   </div>
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600">Print / export</span>
                 </div>
-                <div className="max-h-[calc(100vh-220px)] overflow-auto rounded-2xl bg-slate-100/60 p-3 ring-1 ring-slate-200/80">
+                <div className="ui-panel-muted max-h-[calc(100vh-220px)] overflow-auto p-3">
                   <ProposalPreview
                     project={project}
                     settings={settings}
