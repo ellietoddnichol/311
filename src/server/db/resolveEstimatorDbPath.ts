@@ -9,7 +9,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  */
 export function resolveEstimatorDbPath(): string {
   const raw = process.env.DATABASE_PATH?.trim() || process.env.DATABASE_URL?.trim();
-  const defaultPath = path.join(__dirname, '../../../estimator.db');
+  const isProd = process.env.NODE_ENV === 'production';
+  // In container deployments (e.g. Cloud Run), the image filesystem is ephemeral across revisions.
+  // Default to a data directory path that can be mounted/backed up.
+  const defaultPath = isProd ? '/data/estimator.db' : path.join(__dirname, '../../../estimator.db');
   if (!raw) return defaultPath;
   if (path.isAbsolute(raw)) return raw;
   return path.resolve(process.cwd(), raw);

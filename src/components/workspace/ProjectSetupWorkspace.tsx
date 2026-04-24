@@ -164,11 +164,29 @@ export function ProjectSetupWorkspace({
               </label>
               <label className="text-[11px] font-medium text-slate-700">
                 Client
-                <input className="ui-input mt-1 h-9 w-full" value={project.clientName || ''} onChange={(e) => setProject({ ...project, clientName: e.target.value || null })} />
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    className="ui-input h-9 w-full"
+                    value={project.clientName || ''}
+                    onChange={(e) => setProject({ ...project, clientName: e.target.value || null, clientNameSource: 'manual' })}
+                  />
+                  {project.clientName && project.clientNameSource === 'auto' ? (
+                    <span className="ui-mono-chip ui-mono-chip--mute whitespace-nowrap">Auto</span>
+                  ) : null}
+                </div>
               </label>
               <label className="text-[11px] font-medium text-slate-700">
                 Project #
-                <input className="ui-input mt-1 h-9 w-full" value={project.projectNumber || ''} onChange={(e) => setProject({ ...project, projectNumber: e.target.value || null })} />
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    className="ui-input h-9 w-full"
+                    value={project.projectNumber || ''}
+                    onChange={(e) => setProject({ ...project, projectNumber: e.target.value || null, projectNumberSource: 'manual' })}
+                  />
+                  {project.projectNumber && project.projectNumberSource === 'auto' ? (
+                    <span className="ui-mono-chip ui-mono-chip--mute whitespace-nowrap">Auto</span>
+                  ) : null}
+                </div>
               </label>
               <label className="text-[11px] font-medium text-slate-700">
                 Estimator
@@ -176,7 +194,16 @@ export function ProjectSetupWorkspace({
               </label>
               <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
                 Address
-                <input className="ui-input mt-1 h-9 w-full" value={project.address || ''} onChange={(e) => setProject({ ...project, address: e.target.value || null })} />
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  className="ui-input h-9 w-full"
+                  value={project.address || ''}
+                  onChange={(e) => setProject({ ...project, address: e.target.value || null, addressSource: 'manual' })}
+                />
+                {project.address && project.addressSource === 'auto' ? (
+                  <span className="ui-mono-chip ui-mono-chip--mute whitespace-nowrap">Auto</span>
+                ) : null}
+              </div>
               </label>
             </div>
           </div>
@@ -269,12 +296,17 @@ export function ProjectSetupWorkspace({
                 Location / region
                 <FieldBadge kind="optional" />
               </span>
-              <input
-                className="ui-input mt-1.5 h-10"
-                value={jobConditions.locationLabel}
-                onChange={(e) => patchJobConditions({ locationLabel: e.target.value })}
-                placeholder="e.g. Austin metro"
-              />
+              <div className="mt-1.5 flex items-center gap-2">
+                <input
+                  className="ui-input h-10 w-full"
+                  value={jobConditions.locationLabel}
+                  onChange={(e) => patchJobConditions({ locationLabel: e.target.value, locationLabelSource: 'manual' })}
+                  placeholder="e.g. Austin metro"
+                />
+                {jobConditions.locationLabel && jobConditions.locationLabelSource === 'auto' ? (
+                  <span className="ui-mono-chip ui-mono-chip--mute whitespace-nowrap">Auto</span>
+                ) : null}
+              </div>
             </label>
           </div>
 

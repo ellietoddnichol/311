@@ -15,6 +15,8 @@ interface SyncCounts {
   modifiersSynced: number;
   bundlesSynced: number;
   bundleItemsSynced: number;
+  aliasesSynced: number;
+  attributesSynced: number;
 }
 
 /** Partial row read before updating sync status (counts may be reused on failure paths). */
@@ -23,6 +25,8 @@ type CatalogSyncStatusDbRow = {
   modifiers_synced?: number | null;
   bundles_synced?: number | null;
   bundle_items_synced?: number | null;
+  aliases_synced?: number | null;
+  attributes_synced?: number | null;
 };
 
 export interface CatalogSyncResult extends SyncCounts {
@@ -51,6 +55,8 @@ interface SpreadsheetConfig {
   itemsTab: string;
   modifiersTab: string;
   bundlesTab: string;
+  aliasesTab: string;
+  attributesTab: string;
 }
 
 function normalizeHeader(input: string): string {
@@ -114,6 +120,23 @@ function canonicalKey(input: unknown): string {
   return String(input ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+function normalizeAliasType(input: unknown): string {
+  return String(input ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+function normalizeAttributeType(input: unknown): string {
+  return String(input ?? '').trim().toLowerCase();
+}
+
+function normalizeDeltaType(input: unknown): string | null {
+  const t = String(input ?? '').trim().toLowerCase();
+  if (!t) return null;
+  if (t === 'absolute' || t === '$' || t === 'dollars' || t === 'usd') return 'absolute';
+  if (t === 'percent' || t === '%' || t === 'pct') return 'percent';
+  if (t === 'minutes' || t === 'min' || t === 'minute') return 'minutes';
+  return t;
+}
+
 function columnIndex(headers: string[], aliases: string[]): number | null {
   for (let i = 0; i < headers.length; i += 1) {
     const header = headers[i];
@@ -135,6 +158,179 @@ function keyFromParts(...parts: string[]): string {
   return createHash('sha1').update(joined || randomUUID()).digest('hex').slice(0, 20);
 }
 
+async function fetchTabOrNull(params: { sheets: ReturnType<typeof google.sheets>; spreadsheetId: string; tabName: string }): Promise<string[][] | null> {
+  try {
+    const res = await params.sheets.spreadsheets.values.get({ spreadsheetId: params.spreadsheetId, range: `${params.tabName}!A:ZZ` });
+    const rows = (res.data.values || []) as string[][];
+    return rows && rows.length > 0 ? validateSheetRows(rows, params.tabName) : null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Missing tab / invalid range is common; treat as optional.
+    if (/Unable to parse range|Requested entity was not found|Invalid range|not found/i.test(msg)) return null;
+    throw err;
+  }
+}
+
+function resolveCatalogItemIdFromCanonicalSku(canonicalSku: string): string | null {
+  const sku = canonicalSku.trim();
+  if (!sku) return null;
+  const row = getEstimatorDb()
+    .prepare(
+      `SELECT id
+       FROM catalog_items
+       WHERE lower(sku) = lower(?)
+          OR lower(canonical_sku) = lower(?)
+       LIMIT 1`
+    )
+    .get(sku, sku) as { id: string } | undefined;
+  return row?.id || null;
+}
+
+export function upsertAliases(rows: string[][], warnings: string[]): { aliasesSynced: number } {
+  if (!rows || rows.length < 2) return { aliasesSynced: 0 };
+  const headersRaw = rows[0].map((v) => String(v ?? '').trim());
+  const headers = headersRaw.map(normalizeHeader);
+
+  const canonCol = columnIndex(headers, ['canonical_sku', 'canonical sku', 'sku']);
+  const typeCol = columnIndex(headers, ['aliastype', 'alias type', 'type']);
+  const valueCol = columnIndex(headers, ['aliasvalue', 'alias value', 'value']);
+  const activeCol = columnIndex(headers, ['active', 'enabled', 'is active']);
+
+  if (canonCol == null || typeCol == null || valueCol == null) {
+    warnings.push('ALIASES tab missing required headers (Canonical_SKU, AliasType, AliasValue). Skipping aliases sync.');
+    return { aliasesSynced: 0 };
+  }
+
+  const db = getEstimatorDb();
+  const now = new Date().toISOString();
+  const upsert = db.prepare(`
+    INSERT INTO catalog_item_aliases (id, catalog_item_id, alias_type, alias_value, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(catalog_item_id, alias_type, alias_value)
+    DO UPDATE SET updated_at = excluded.updated_at
+  `);
+
+  let aliasesSynced = 0;
+  for (let i = 1; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+    const canonicalSku = String(row[canonCol] ?? '').trim();
+    const aliasType = normalizeAliasType(row[typeCol]);
+    const aliasValue = String(row[valueCol] ?? '').trim();
+    const active = activeCol == null ? true : parseBoolean(row[activeCol], true);
+    if (!canonicalSku || !aliasType || !aliasValue) continue;
+    if (!active) continue; // non-destructive: skip inactive rows; do not delete existing DB rows.
+
+    const catalogItemId = resolveCatalogItemIdFromCanonicalSku(canonicalSku);
+    if (!catalogItemId) {
+      warnings.push(`ALIASES: could not resolve Canonical_SKU "${canonicalSku}" to a catalog item id; row skipped.`);
+      continue;
+    }
+
+    const id = `sheet-alias-${keyFromParts(catalogItemId, aliasType, aliasValue)}`;
+    upsert.run(id, catalogItemId, aliasType, aliasValue, now, now);
+    aliasesSynced += 1;
+  }
+
+  return { aliasesSynced };
+}
+
+export function upsertAttributes(rows: string[][], warnings: string[]): { attributesSynced: number } {
+  if (!rows || rows.length < 2) return { attributesSynced: 0 };
+  const headersRaw = rows[0].map((v) => String(v ?? '').trim());
+  const headers = headersRaw.map(normalizeHeader);
+
+  const canonCol = columnIndex(headers, ['canonical_sku', 'canonical sku', 'sku']);
+  const typeCol = columnIndex(headers, ['attributetype', 'attribute type', 'type']);
+  const valueCol = columnIndex(headers, ['attributevalue', 'attribute value', 'value']);
+  const matTypeCol = columnIndex(headers, ['materialdeltatype', 'material delta type']);
+  const matValCol = columnIndex(headers, ['materialdeltavalue', 'material delta value']);
+  const laborTypeCol = columnIndex(headers, ['labordeltatype', 'labor delta type']);
+  const laborValCol = columnIndex(headers, ['labordeltavalue', 'labor delta value']);
+  const activeCol = columnIndex(headers, ['active', 'enabled', 'is active']);
+  const sortCol = columnIndex(headers, ['sortorder', 'sort order', 'order']);
+
+  if (canonCol == null || typeCol == null || valueCol == null) {
+    warnings.push('ATTRIBUTES tab missing required headers (Canonical_SKU, AttributeType, AttributeValue). Skipping attributes sync.');
+    return { attributesSynced: 0 };
+  }
+
+  const db = getEstimatorDb();
+  const now = new Date().toISOString();
+  const upsert = db.prepare(`
+    INSERT INTO catalog_item_attributes (
+      id, catalog_item_id, attribute_type, attribute_value,
+      material_delta_type, material_delta_value,
+      labor_delta_type, labor_delta_value,
+      active, sort_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(catalog_item_id, attribute_type, attribute_value)
+    DO UPDATE SET
+      material_delta_type = excluded.material_delta_type,
+      material_delta_value = excluded.material_delta_value,
+      labor_delta_type = excluded.labor_delta_type,
+      labor_delta_value = excluded.labor_delta_value,
+      active = excluded.active,
+      sort_order = excluded.sort_order,
+      updated_at = excluded.updated_at
+  `);
+
+  let attributesSynced = 0;
+  for (let i = 1; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+    const canonicalSku = String(row[canonCol] ?? '').trim();
+    const attributeType = normalizeAttributeType(row[typeCol]);
+    const attributeValue = String(row[valueCol] ?? '').trim();
+    if (!canonicalSku || !attributeType || !attributeValue) continue;
+
+    const catalogItemId = resolveCatalogItemIdFromCanonicalSku(canonicalSku);
+    if (!catalogItemId) {
+      warnings.push(`ATTRIBUTES: could not resolve Canonical_SKU "${canonicalSku}" to a catalog item id; row skipped.`);
+      continue;
+    }
+
+    const materialDeltaType = matTypeCol == null ? null : normalizeDeltaType(row[matTypeCol]);
+    let materialDeltaValue = matValCol == null ? null : parseNumber(row[matValCol], 0);
+    const laborDeltaType = laborTypeCol == null ? null : normalizeDeltaType(row[laborTypeCol]);
+    let laborDeltaValue = laborValCol == null ? null : parseNumber(row[laborValCol], 0);
+
+    // Normalize percent ambiguity (back-compat): if sheet gives 0.1, treat as 10 percent points but warn.
+    const normalizePercentPoints = (raw: number, label: string) => {
+      if (!Number.isFinite(raw) || raw === 0) return raw;
+      if (Math.abs(raw) > 0 && Math.abs(raw) < 1) {
+        warnings.push(`ATTRIBUTES: ${label} percent value "${raw}" looked like a decimal; normalized to "${raw * 100}". Use percent points (10 = 10%).`);
+        return raw * 100;
+      }
+      return raw;
+    };
+    if (materialDeltaType === 'percent' && materialDeltaValue != null) materialDeltaValue = normalizePercentPoints(materialDeltaValue, 'material');
+    if (laborDeltaType === 'percent' && laborDeltaValue != null) laborDeltaValue = normalizePercentPoints(laborDeltaValue, 'labor');
+
+    const active = activeCol == null ? 1 : parseBoolean(row[activeCol], true) ? 1 : 0;
+    const sortOrder = sortCol == null ? 0 : Math.max(0, Math.floor(parseNumber(row[sortCol], 0)));
+
+    const id = `sheet-attr-${keyFromParts(catalogItemId, attributeType, attributeValue)}`;
+    upsert.run(
+      id,
+      catalogItemId,
+      attributeType,
+      attributeValue,
+      materialDeltaType,
+      materialDeltaType ? materialDeltaValue : null,
+      laborDeltaType,
+      laborDeltaType ? laborDeltaValue : null,
+      active,
+      sortOrder,
+      now,
+      now
+    );
+    attributesSynced += 1;
+  }
+
+  return { attributesSynced };
+}
+
 function updateSyncStatus(params: {
   status: 'running' | 'success' | 'failed';
   message: string | null;
@@ -148,6 +344,8 @@ function updateSyncStatus(params: {
     modifiersSynced: current?.modifiers_synced || 0,
     bundlesSynced: current?.bundles_synced || 0,
     bundleItemsSynced: current?.bundle_items_synced || 0,
+    aliasesSynced: current?.aliases_synced || 0,
+    attributesSynced: current?.attributes_synced || 0,
   };
 
   getEstimatorDb().prepare(`
@@ -161,6 +359,8 @@ function updateSyncStatus(params: {
       modifiers_synced = ?,
       bundles_synced = ?,
       bundle_items_synced = ?,
+      aliases_synced = ?,
+      attributes_synced = ?,
       warnings_json = ?
     WHERE id = 'catalog'
   `).run(
@@ -173,6 +373,8 @@ function updateSyncStatus(params: {
     counts.modifiersSynced,
     counts.bundlesSynced,
     counts.bundleItemsSynced,
+    counts.aliasesSynced,
+    counts.attributesSynced,
     JSON.stringify(params.warnings || [])
   );
 }
@@ -185,8 +387,10 @@ function insertSyncRun(params: {
 }) {
   getEstimatorDb().prepare(`
     INSERT INTO catalog_sync_runs_v1 (
-      id, attempted_at, status, message, items_synced, modifiers_synced, bundles_synced, bundle_items_synced, warnings_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, attempted_at, status, message, items_synced, modifiers_synced, bundles_synced, bundle_items_synced,
+      aliases_synced, attributes_synced,
+      warnings_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     randomUUID(),
     new Date().toISOString(),
@@ -196,6 +400,8 @@ function insertSyncRun(params: {
     params.counts.modifiersSynced,
     params.counts.bundlesSynced,
     params.counts.bundleItemsSynced,
+    params.counts.aliasesSynced,
+    params.counts.attributesSynced,
     JSON.stringify(params.warnings || [])
   );
 }
@@ -470,15 +676,17 @@ function buildAuth(): JWT {
 
 function getSpreadsheetConfig(): SpreadsheetConfig {
   const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.GOOGLE_SHEETS_ID || '1QWCGCssWtAQ8Pjx9_-7LDs4lraRbptURd8D04bNvnEg';
-  const itemsTab = process.env.GOOGLE_SHEETS_TAB_ITEMS || 'ITEMS';
+  const itemsTab = process.env.GOOGLE_SHEETS_TAB_ITEMS || 'CLEAN_ITEMS';
   const modifiersTab = process.env.GOOGLE_SHEETS_TAB_MODIFIERS || 'MODIFIERS';
   const bundlesTab = process.env.GOOGLE_SHEETS_TAB_BUNDLES || 'BUNDLES';
+  const aliasesTab = process.env.GOOGLE_SHEETS_TAB_ALIASES || 'ALIASES';
+  const attributesTab = process.env.GOOGLE_SHEETS_TAB_ATTRIBUTES || 'ATTRIBUTES';
 
   if (!spreadsheetId) {
     throw new Error('Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID or GOOGLE_SHEETS_ID.');
   }
 
-  return { spreadsheetId, itemsTab, modifiersTab, bundlesTab };
+  return { spreadsheetId, itemsTab, modifiersTab, bundlesTab, aliasesTab, attributesTab };
 }
 
 function toA1Column(index: number): string {
@@ -656,6 +864,8 @@ export async function backfillTakeoffRegistryToGoogleSheets(): Promise<TakeoffRe
       modifiersSynced: 0,
       bundlesSynced: 0,
       bundleItemsSynced: 0,
+      aliasesSynced: 0,
+      attributesSynced: 0,
     };
 
     updateSyncStatus({
@@ -686,6 +896,8 @@ export async function backfillTakeoffRegistryToGoogleSheets(): Promise<TakeoffRe
       modifiersSynced: 0,
       bundlesSynced: 0,
       bundleItemsSynced: 0,
+      aliasesSynced: 0,
+      attributesSynced: 0,
     };
 
     const baseMsg = error instanceof Error ? error.message : String(error);
@@ -1253,14 +1465,7 @@ function upsertBundles(rows: string[][], warnings: string[], replaceMode: boolea
 }
 
 export async function syncCatalogFromGoogleSheets(): Promise<CatalogSyncResult> {
-  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.GOOGLE_SHEETS_ID || '1QWCGCssWtAQ8Pjx9_-7LDs4lraRbptURd8D04bNvnEg';
-  const itemsTab = process.env.GOOGLE_SHEETS_TAB_ITEMS || 'ITEMS';
-  const modifiersTab = process.env.GOOGLE_SHEETS_TAB_MODIFIERS || 'MODIFIERS';
-  const bundlesTab = process.env.GOOGLE_SHEETS_TAB_BUNDLES || 'BUNDLES';
-
-  if (!spreadsheetId) {
-    throw new Error('Missing spreadsheet ID. Set GOOGLE_SHEETS_SPREADSHEET_ID or GOOGLE_SHEETS_ID.');
-  }
+  const cfg = getSpreadsheetConfig();
 
   const warnings: string[] = [];
   updateSyncStatus({ status: 'running', message: 'Catalog sync in progress...' });
@@ -1269,15 +1474,17 @@ export async function syncCatalogFromGoogleSheets(): Promise<CatalogSyncResult> 
     const auth = buildAuth();
     const sheets = google.sheets({ version: 'v4', auth });
 
-    const [itemsRes, modifiersRes, bundlesRes] = await Promise.all([
-      sheets.spreadsheets.values.get({ spreadsheetId, range: `${itemsTab}!A:ZZ` }),
-      sheets.spreadsheets.values.get({ spreadsheetId, range: `${modifiersTab}!A:ZZ` }),
-      sheets.spreadsheets.values.get({ spreadsheetId, range: `${bundlesTab}!A:ZZ` }),
+    const [itemRows, modifierRows, bundleRows, aliasRows, attributeRows] = await Promise.all([
+      fetchTabOrNull({ sheets, spreadsheetId: cfg.spreadsheetId, tabName: cfg.itemsTab }),
+      fetchTabOrNull({ sheets, spreadsheetId: cfg.spreadsheetId, tabName: cfg.modifiersTab }),
+      fetchTabOrNull({ sheets, spreadsheetId: cfg.spreadsheetId, tabName: cfg.bundlesTab }),
+      fetchTabOrNull({ sheets, spreadsheetId: cfg.spreadsheetId, tabName: cfg.aliasesTab }),
+      fetchTabOrNull({ sheets, spreadsheetId: cfg.spreadsheetId, tabName: cfg.attributesTab }),
     ]);
 
-    const itemRows = validateSheetRows((itemsRes.data.values || []) as string[][], itemsTab);
-    const modifierRows = validateSheetRows((modifiersRes.data.values || []) as string[][], modifiersTab);
-    const bundleRows = validateSheetRows((bundlesRes.data.values || []) as string[][], bundlesTab);
+    if (!itemRows) throw new Error(`Missing required tab "${cfg.itemsTab}".`);
+    if (!modifierRows) throw new Error(`Missing required tab "${cfg.modifiersTab}".`);
+    if (!bundleRows) throw new Error(`Missing required tab "${cfg.bundlesTab}".`);
 
     const replaceMode = isReplaceCatalogSyncMode();
 
@@ -1285,18 +1492,27 @@ export async function syncCatalogFromGoogleSheets(): Promise<CatalogSyncResult> 
       const itemsSynced = upsertItems(itemRows, warnings, replaceMode);
       const modifiersSynced = upsertModifiers(modifierRows, warnings, replaceMode);
       const bundleData = upsertBundles(bundleRows, warnings, replaceMode);
+      const aliasData = aliasRows ? upsertAliases(aliasRows, warnings) : { aliasesSynced: 0 };
+      const attributeData = attributeRows ? upsertAttributes(attributeRows, warnings) : { attributesSynced: 0 };
+
+      if (!aliasRows) warnings.push(`ALIASES tab "${cfg.aliasesTab}" not found; skipping alias sync.`);
+      if (!attributeRows) warnings.push(`ATTRIBUTES tab "${cfg.attributesTab}" not found; skipping attributes sync.`);
       return {
         itemsSynced,
         modifiersSynced,
         bundlesSynced: bundleData.bundlesSynced,
         bundleItemsSynced: bundleData.bundleItemsSynced,
+        aliasesSynced: aliasData.aliasesSynced,
+        attributesSynced: attributeData.attributesSynced,
       };
     });
 
     const counts = tx();
     const uniqueWarnings = Array.from(new Set(warnings));
     const syncedAt = new Date().toISOString();
-    const message = `Catalog sync complete: ${counts.itemsSynced} items, ${counts.modifiersSynced} modifiers, ${counts.bundlesSynced} bundles.`;
+    const message =
+      `Catalog sync complete: ${counts.itemsSynced} items, ${counts.modifiersSynced} modifiers, ${counts.bundlesSynced} bundles, ` +
+      `${counts.aliasesSynced} aliases, ${counts.attributesSynced} attributes.`;
 
     updateSyncStatus({
       status: 'success',
@@ -1315,11 +1531,11 @@ export async function syncCatalogFromGoogleSheets(): Promise<CatalogSyncResult> 
     return {
       ...counts,
       message,
-      spreadsheetId,
+      spreadsheetId: cfg.spreadsheetId,
       tabs: {
-        items: itemsTab,
-        modifiers: modifiersTab,
-        bundles: bundlesTab,
+        items: cfg.itemsTab,
+        modifiers: cfg.modifiersTab,
+        bundles: cfg.bundlesTab,
       },
       warnings: uniqueWarnings,
       syncedAt,
@@ -1330,6 +1546,8 @@ export async function syncCatalogFromGoogleSheets(): Promise<CatalogSyncResult> 
       modifiersSynced: 0,
       bundlesSynced: 0,
       bundleItemsSynced: 0,
+      aliasesSynced: 0,
+      attributesSynced: 0,
     };
 
     const baseMsg = error instanceof Error ? error.message : String(error);

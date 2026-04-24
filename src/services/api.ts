@@ -1,6 +1,6 @@
 
-import { CatalogItem } from '../types';
-import { BundleRecord, CatalogSyncStatusRecord, EstimateSummary, InstallReviewEmailDraft, ModifierRecord, PeerIntakeDefaultsResponse, ProjectFileRecord, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
+import { CatalogAliasType, CatalogAttributeType, CatalogDeltaType, CatalogItem, CatalogItemAlias, CatalogItemAttribute } from '../types';
+import { BundleRecord, CatalogPostCutoverHealthRecord, CatalogSyncStatusRecord, DbPersistenceStatusRecord, EstimateSummary, InstallReviewEmailDraft, ModifierRecord, PeerIntakeDefaultsResponse, ProjectFileRecord, ProjectRecord, RoomRecord, SettingsRecord, TakeoffLineRecord } from '../shared/types/estimator';
 import { IntakeParseRequest, IntakeParseResult } from '../shared/types/intake';
 
 const API_BASE = '/api';
@@ -190,9 +190,27 @@ export const api = {
     const payload = await handleResponse<{ data: TakeoffLineRecord }>(res);
     return payload.data;
   },
+  async bulkMoveV1TakeoffLines(input: { lineIds: string[]; roomId: string }): Promise<TakeoffLineRecord[]> {
+    const res = await apiFetch(`${API_BASE}/v1/takeoff/lines/bulk-move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lineIds: input.lineIds, roomId: input.roomId }),
+    });
+    const payload = await handleResponse<{ data: TakeoffLineRecord[] }>(res);
+    return payload.data;
+  },
   async deleteV1TakeoffLine(lineId: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/v1/takeoff/lines/${lineId}`, { method: 'DELETE' });
     await handleResponse<{ data: { deleted: boolean } }>(res);
+  },
+  async duplicateV1TakeoffLine(lineId: string, input: { roomId: string }): Promise<TakeoffLineRecord> {
+    const res = await apiFetch(`${API_BASE}/v1/takeoff/lines/${encodeURIComponent(lineId)}/duplicate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId: input.roomId }),
+    });
+    const payload = await handleResponse<{ data: TakeoffLineRecord }>(res);
+    return payload.data;
   },
   async getV1Summary(projectId: string): Promise<EstimateSummary> {
     const res = await apiFetch(`${API_BASE}/v1/takeoff/summary/${projectId}`);
@@ -345,6 +363,11 @@ export const api = {
     const payload = await handleResponse<{ data: CatalogSyncStatusRecord }>(res);
     return payload.data;
   },
+  async getV1CatalogPostCutoverHealth(): Promise<CatalogPostCutoverHealthRecord> {
+    const res = await apiFetch(`${API_BASE}/v1/settings/catalog-post-cutover-health`);
+    const payload = await handleResponse<{ data: CatalogPostCutoverHealthRecord }>(res);
+    return payload.data;
+  },
   async getCatalogSyncRuns(limit = 10): Promise<Array<{
     id: string;
     attemptedAt: string;
@@ -354,6 +377,8 @@ export const api = {
     modifiersSynced: number;
     bundlesSynced: number;
     bundleItemsSynced: number;
+    aliasesSynced: number;
+    attributesSynced: number;
     warnings: string[];
   }>> {
     const res = await apiFetch(`${API_BASE}/v1/settings/catalog-sync-runs?limit=${encodeURIComponent(String(limit))}`);
@@ -366,8 +391,23 @@ export const api = {
       modifiersSynced: number;
       bundlesSynced: number;
       bundleItemsSynced: number;
+      aliasesSynced: number;
+      attributesSynced: number;
       warnings: string[];
     }> }>(res);
+    return payload.data;
+  },
+  async getV1PersistenceStatus(): Promise<DbPersistenceStatusRecord & { gcsObjectMeta?: any }> {
+    const res = await apiFetch(`${API_BASE}/v1/settings/persistence-status`);
+    const payload = await handleResponse<{ data: DbPersistenceStatusRecord & { gcsObjectMeta?: any } }>(res);
+    return payload.data;
+  },
+  async backupV1PersistenceNow(): Promise<{ ok: boolean; message: string; status: DbPersistenceStatusRecord & { gcsObjectMeta?: any } }> {
+    const res = await apiFetch(`${API_BASE}/v1/settings/persistence-backup-now`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const payload = await handleResponse<{ data: { ok: boolean; message: string; status: DbPersistenceStatusRecord & { gcsObjectMeta?: any } } }>(res);
     return payload.data;
   },
   async syncV1Catalog(): Promise<{
@@ -378,6 +418,8 @@ export const api = {
     modifiersSynced: number;
     bundlesSynced: number;
     bundleItemsSynced: number;
+    aliasesSynced: number;
+    attributesSynced: number;
     warnings: string[];
     syncedAt: string;
   }> {
@@ -390,6 +432,8 @@ export const api = {
       modifiersSynced: number;
       bundlesSynced: number;
       bundleItemsSynced: number;
+      aliasesSynced: number;
+      attributesSynced: number;
       warnings: string[];
       syncedAt: string;
     } }>(res);
@@ -491,6 +535,15 @@ export const api = {
     const payload = await handleResponse<{ data: { ok: boolean; deduped?: boolean } }>(res);
     return payload.data;
   },
+  async postV1IntakeReviewOverride(body: { reviewLineFingerprint: string; status: 'ignored' }): Promise<{ ok: boolean }> {
+    const res = await apiFetch(`${API_BASE}/v1/intake/review-override`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const payload = await handleResponse<{ data: { ok: boolean } }>(res);
+    return payload.data;
+  },
   async getCatalog(options?: { includeInactive?: boolean }): Promise<CatalogItem[]> {
     const q =
       options?.includeInactive === true
@@ -559,6 +612,79 @@ export const api = {
   },
   async deleteCatalogBundle(id: string): Promise<void> {
     const res = await apiFetch(`${API_BASE}/catalog/bundles/${id}`, { method: 'DELETE' });
+    await handleResponse<void>(res);
+  },
+
+  async listCatalogItemAliases(catalogItemId: string): Promise<CatalogItemAlias[]> {
+    const res = await apiFetch(`${API_BASE}/catalog/items/${encodeURIComponent(catalogItemId)}/aliases`);
+    return handleResponse<CatalogItemAlias[]>(res);
+  },
+
+  async createCatalogItemAlias(input: { catalogItemId: string; aliasType: CatalogAliasType; aliasValue: string }): Promise<CatalogItemAlias> {
+    const res = await apiFetch(`${API_BASE}/catalog/items/${encodeURIComponent(input.catalogItemId)}/aliases`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aliasType: input.aliasType, aliasValue: input.aliasValue }),
+    });
+    return handleResponse<CatalogItemAlias>(res);
+  },
+
+  async deleteCatalogItemAlias(aliasId: string): Promise<void> {
+    const res = await apiFetch(`${API_BASE}/catalog/item-aliases/${encodeURIComponent(aliasId)}`, { method: 'DELETE' });
+    await handleResponse<void>(res);
+  },
+
+  async searchCatalogItems(input: {
+    query: string;
+    category?: string;
+    includeInactive?: boolean;
+    includeDeprecated?: boolean;
+    includeNonCanonical?: boolean;
+  }): Promise<CatalogItem[]> {
+    const params = new URLSearchParams();
+    params.set('q', input.query);
+    if (input.category) params.set('category', input.category);
+    if (input.includeInactive) params.set('includeInactive', '1');
+    if (input.includeDeprecated) params.set('includeDeprecated', '1');
+    if (input.includeNonCanonical) params.set('includeNonCanonical', '1');
+    const res = await apiFetch(`${API_BASE}/catalog/search?${params.toString()}`);
+    return handleResponse<CatalogItem[]>(res);
+  },
+
+  async listCatalogItemAttributes(catalogItemId: string, options?: { includeInactive?: boolean }): Promise<CatalogItemAttribute[]> {
+    const q = options?.includeInactive ? '?includeInactive=1' : '';
+    const res = await apiFetch(`${API_BASE}/catalog/items/${encodeURIComponent(catalogItemId)}/attributes${q}`);
+    return handleResponse<CatalogItemAttribute[]>(res);
+  },
+
+  async createCatalogItemAttribute(input: {
+    catalogItemId: string;
+    attributeType: CatalogAttributeType;
+    attributeValue: string;
+    materialDeltaType?: CatalogDeltaType | null;
+    materialDeltaValue?: number | null;
+    laborDeltaType?: CatalogDeltaType | null;
+    laborDeltaValue?: number | null;
+    sortOrder?: number;
+  }): Promise<CatalogItemAttribute> {
+    const res = await apiFetch(`${API_BASE}/catalog/items/${encodeURIComponent(input.catalogItemId)}/attributes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        attributeType: input.attributeType,
+        attributeValue: input.attributeValue,
+        materialDeltaType: input.materialDeltaType ?? null,
+        materialDeltaValue: input.materialDeltaValue ?? null,
+        laborDeltaType: input.laborDeltaType ?? null,
+        laborDeltaValue: input.laborDeltaValue ?? null,
+        sortOrder: input.sortOrder ?? 0,
+      }),
+    });
+    return handleResponse<CatalogItemAttribute>(res);
+  },
+
+  async deleteCatalogItemAttribute(attributeId: string): Promise<void> {
+    const res = await apiFetch(`${API_BASE}/catalog/item-attributes/${encodeURIComponent(attributeId)}`, { method: 'DELETE' });
     await handleResponse<void>(res);
   },
 };

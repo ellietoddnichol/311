@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
-import { CatalogSyncStatusRecord, IntakeCatalogAutoApplyMode, SettingsRecord } from '../shared/types/estimator';
+import { CatalogPostCutoverHealthRecord, CatalogSyncStatusRecord, DbPersistenceStatusRecord, IntakeCatalogAutoApplyMode, SettingsRecord } from '../shared/types/estimator';
 import { ensureProposalDefaults } from '../shared/utils/proposalDefaults';
 import { getErrorMessage } from '../shared/utils/errorMessage';
 
 export function Settings() {
   const [settings, setSettings] = useState<SettingsRecord | null>(null);
   const [syncStatus, setSyncStatus] = useState<CatalogSyncStatusRecord | null>(null);
+  const [persistenceStatus, setPersistenceStatus] = useState<(DbPersistenceStatusRecord & { gcsObjectMeta?: any }) | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [syncRuns, setSyncRuns] = useState<Array<{
     id: string;
     attemptedAt: string;
@@ -21,9 +24,29 @@ export function Settings() {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [backfillingRegistry, setBackfillingRegistry] = useState(false);
+  const [backingUpDb, setBackingUpDb] = useState(false);
+  const [postCutoverHealth, setPostCutoverHealth] = useState<CatalogPostCutoverHealthRecord | null>(null);
 
   useEffect(() => {
-    void Promise.all([api.getV1Settings(), api.getCatalogSyncStatus(), api.getCatalogSyncRuns(8)]).then(([data, status, runs]) => {
+    void loadAll();
+  }, []);
+
+  async function loadAll() {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [data, status, runs, dbStatus] = await Promise.all([
+        api.getV1Settings(),
+        api.getCatalogSyncStatus(),
+        api.getCatalogSyncRuns(8),
+        api.getV1PersistenceStatus(),
+      ]);
+      let cutoverHealth: CatalogPostCutoverHealthRecord | null = null;
+      try {
+        cutoverHealth = await api.getV1CatalogPostCutoverHealth();
+      } catch {
+        cutoverHealth = null;
+      }
       const next = ensureProposalDefaults({ ...data });
       if (!next.companyName) next.companyName = 'Brighten Builders, LLC';
       if (!next.companyAddress) next.companyAddress = '512 S. 70th Street, Kansas City, KS 66611';
@@ -31,8 +54,26 @@ export function Settings() {
       setSettings(next);
       setSyncStatus(status);
       setSyncRuns(runs);
-    });
-  }, []);
+      setPersistenceStatus(dbStatus);
+    } catch (error: unknown) {
+      setLoadError(getErrorMessage(error, 'Failed to load settings.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function backupDbNow() {
+    setBackingUpDb(true);
+    try {
+      const result = await api.backupV1PersistenceNow();
+      setPersistenceStatus(result.status);
+      alert(result.ok ? `Backup complete: ${result.message}` : `Backup failed: ${result.message}`);
+    } catch (error: unknown) {
+      alert(`Backup failed: ${getErrorMessage(error, 'Unknown error')}`);
+    } finally {
+      setBackingUpDb(false);
+    }
+  }
 
   async function saveSettings() {
     if (!settings) return;
@@ -55,7 +96,10 @@ export function Settings() {
       const [refreshedStatus, refreshedRuns] = await Promise.all([api.getCatalogSyncStatus(), api.getCatalogSyncRuns(8)]);
       setSyncStatus(refreshedStatus);
       setSyncRuns(refreshedRuns);
-      alert(`Google Sheets sync complete: ${result.itemsSynced} items, ${result.modifiersSynced} modifiers, ${result.bundlesSynced} bundles.`);
+      alert(
+        `Google Sheets sync complete: ${result.itemsSynced} items, ${result.modifiersSynced} modifiers, ${result.bundlesSynced} bundles, ` +
+          `${(result as any).aliasesSynced ?? 0} aliases, ${(result as any).attributesSynced ?? 0} attributes.`
+      );
     } catch (error: unknown) {
       alert(`Google Sheets sync failed: ${getErrorMessage(error, 'Unknown error')}`);
       try {
@@ -109,7 +153,24 @@ export function Settings() {
     reader.readAsDataURL(file);
   }
 
-  if (!settings) return <div className="flex min-h-[40vh] items-center justify-center p-8 text-sm text-slate-500">Loading settings…</div>;
+  if (loading) {
+    return <div className="flex min-h-[40vh] items-center justify-center p-8 text-sm text-slate-500">Loading settings…</div>;
+  }
+
+  if (loadError || !settings) {
+    return (
+      <div className="ui-page-narrow space-y-4">
+        <div className="ui-panel p-4">
+          <p className="ui-mono-kicker">Settings</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900">Could not load settings</p>
+          <p className="mt-1 text-xs text-slate-500">{loadError || 'Unknown error'}</p>
+          <button type="button" onClick={() => void loadAll()} className="ui-btn-secondary mt-4">
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="ui-page-narrow space-y-5">
@@ -127,6 +188,9 @@ export function Settings() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void loadAll()} disabled={saving || syncing || backfillingRegistry} className="ui-btn-secondary disabled:opacity-50">
+            Refresh
+          </button>
           <button type="button" onClick={() => void backfillTakeoffRegistry()} disabled={backfillingRegistry || syncing} className="ui-btn-secondary disabled:opacity-50">
             {backfillingRegistry ? 'Backfilling...' : 'Backfill Takeoff Registry'}
           </button>
@@ -138,6 +202,92 @@ export function Settings() {
           </button>
         </div>
       </div>
+
+      <section className="ui-accent-card p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="ui-mono-kicker">Module 00 / Project Durability</p>
+            <h2 className="mt-1 text-sm font-semibold text-slate-900">SQLite persistence status</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Shows where the server is writing the SQLite DB, whether a restore occurred, and the latest backup health.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void backupDbNow()}
+            disabled={backingUpDb || saving || syncing || backfillingRegistry}
+            className="ui-btn-secondary disabled:opacity-50"
+            title="Run a backup immediately (GCS mode only)"
+          >
+            {backingUpDb ? 'Backing up…' : 'Backup now'}
+          </button>
+        </div>
+
+        {persistenceStatus ? (
+          <>
+            {(persistenceStatus.mode === 'ephemeral_gcs' || persistenceStatus.mode === 'ephemeral') ? (
+              <div className="ui-callout-warn">
+                <p className="ui-label mb-1 !normal-case tracking-normal text-[var(--warn)]">Durability warning</p>
+                <p className="text-xs text-slate-700">
+                  This deployment is using an <span className="font-semibold">ephemeral filesystem</span>. If running with GCS backups, recent edits can be lost between backup intervals.
+                  A <span className="font-semibold">persistent volume</span> (or a database service) is the preferred long-term setup.
+                </p>
+              </div>
+            ) : null}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+              <div className="ui-surface-soft p-2">
+                <p className="ui-mono-kicker">DB Path</p>
+                <p className="mt-1 font-mono text-[11px] font-semibold text-slate-900 break-all">{persistenceStatus.dbPath || '—'}</p>
+              </div>
+              <div className="ui-surface-soft p-2">
+                <p className="ui-mono-kicker">Mode</p>
+                <p className="mt-1 font-mono text-[12px] font-semibold tabular-nums text-slate-900">{persistenceStatus.mode}</p>
+              </div>
+              <div className="ui-surface-soft p-2">
+                <p className="ui-mono-kicker">Restore</p>
+                <p className="mt-1 font-mono text-[12px] font-semibold tabular-nums text-slate-900">
+                  {persistenceStatus.restoreStatus || '—'}
+                </p>
+                {persistenceStatus.restoreMessage ? <p className="mt-1 text-[10px] text-slate-600">{persistenceStatus.restoreMessage}</p> : null}
+              </div>
+              <div className="ui-surface-soft p-2">
+                <p className="ui-mono-kicker">Last Backup</p>
+                <p className="mt-1 font-mono text-[12px] font-semibold tabular-nums text-slate-900">
+                  {formatDate(persistenceStatus.lastBackupSuccessAt || null)}
+                </p>
+                {persistenceStatus.lastBackupFailureAt ? (
+                  <p className="mt-1 text-[10px] text-rose-700">
+                    Last failure: {formatDate(persistenceStatus.lastBackupFailureAt)}{persistenceStatus.lastBackupError ? ` · ${persistenceStatus.lastBackupError}` : ''}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            {persistenceStatus.gcsObjectMeta ? (
+              <div className="ui-panel-muted p-3 text-xs text-[var(--text)]">
+                <p className="font-semibold text-slate-800">GCS object</p>
+                <p className="mt-1 font-mono text-[11px] break-all">
+                  {(persistenceStatus.gcsBucket && persistenceStatus.gcsObject)
+                    ? `gs://${persistenceStatus.gcsBucket}/${persistenceStatus.gcsObject}`
+                    : 'Not configured'}
+                </p>
+                {persistenceStatus.gcsObjectMeta?.ok ? (
+                  <p className="mt-1 text-[11px] text-slate-700">
+                    Updated: {String(persistenceStatus.gcsObjectMeta.updated || '—')} · Size: {persistenceStatus.gcsObjectMeta.sizeBytes ?? '—'} bytes
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[11px] text-slate-600">
+                    {String(persistenceStatus.gcsObjectMeta.message || 'No metadata available.')}
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <p className="text-xs text-slate-500">No persistence status available.</p>
+        )}
+      </section>
 
       <section className="ui-accent-card p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
@@ -160,7 +310,10 @@ export function Settings() {
           </div>
           <div className="ui-surface-soft p-2">
             <p className="ui-mono-kicker">Synced Counts</p>
-            <p className="mt-1 font-mono text-[12px] font-semibold tabular-nums text-slate-900">{syncStatus?.itemsSynced || 0}I · {syncStatus?.modifiersSynced || 0}M · {syncStatus?.bundlesSynced || 0}B</p>
+            <p className="mt-1 font-mono text-[12px] font-semibold tabular-nums text-slate-900">
+              {syncStatus?.itemsSynced || 0}I · {syncStatus?.modifiersSynced || 0}M · {syncStatus?.bundlesSynced || 0}B · {syncStatus?.aliasesSynced || 0}A ·{' '}
+              {syncStatus?.attributesSynced || 0}AT
+            </p>
           </div>
           <div className="ui-surface-soft p-2">
             <p className="ui-mono-kicker">Bundle Items</p>
@@ -184,6 +337,80 @@ export function Settings() {
           </div>
         )}
       </section>
+
+      {postCutoverHealth ? (
+        <section className="ui-accent-card p-4 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="ui-mono-kicker">Post-cutover catalog health</p>
+              <h2 className="mt-1 text-sm font-semibold text-slate-900">SQLite vs last sync (forward-facing)</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Items tab: <span className="font-mono text-[11px]">{postCutoverHealth.itemsSourceTab}</span>. Compare last sync item count to your CLEAN_ITEMS META audit; DB totals include seed/registry rows
+                and inactive sheet SKUs still present in SQLite.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+            <div className="ui-surface-soft p-2">
+              <p className="ui-mono-kicker">Last sync items</p>
+              <p className="mt-1 font-mono text-[12px] font-semibold tabular-nums text-slate-900">{postCutoverHealth.lastCatalogSync.itemsSynced}</p>
+            </div>
+            <div className="ui-surface-soft p-2">
+              <p className="ui-mono-kicker">Forward-facing rows</p>
+              <p className="mt-1 font-mono text-[12px] font-semibold tabular-nums text-slate-900">{postCutoverHealth.forwardFacing.count}</p>
+            </div>
+            <div className="ui-surface-soft p-2">
+              <p className="ui-mono-kicker">Missing ImageURL</p>
+              <p className="mt-1 font-mono text-[12px] font-semibold tabular-nums text-slate-900">{postCutoverHealth.forwardFacing.missingImageUrl}</p>
+              <p className="mt-1 text-[10px] text-slate-500">
+                Mfr-backed gaps: {postCutoverHealth.forwardFacing.missingImageManufacturerBacked}
+              </p>
+            </div>
+            <div className="ui-surface-soft p-2">
+              <p className="ui-mono-kicker">Items w/ attributes</p>
+              <p className="mt-1 font-mono text-[12px] font-semibold tabular-nums text-slate-900">
+                {postCutoverHealth.forwardFacing.distinctItemsWithAttributes}
+              </p>
+            </div>
+          </div>
+          {postCutoverHealth.topCategoriesByMissingImage.length > 0 ? (
+            <div className="overflow-x-auto">
+              <p className="text-[11px] font-medium text-slate-700">Top categories by missing image (forward-facing)</p>
+              <table className="mt-2 w-full text-xs">
+                <thead className="border-b border-slate-200 bg-white/90">
+                  <tr>
+                    <th className="py-2 pr-2 text-left">Category</th>
+                    <th className="py-2 pr-2 text-right">Active FWD</th>
+                    <th className="py-2 pr-2 text-right">Missing img</th>
+                    <th className="py-2 text-right">Gap %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {postCutoverHealth.topCategoriesByMissingImage.map((row) => (
+                    <tr key={row.category} className="border-b border-slate-100">
+                      <td className="py-2 pr-2 text-slate-800">{row.category}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums text-slate-700">{row.forwardFacingActive}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums text-slate-700">{row.missingImageUrl}</td>
+                      <td className="py-2 text-right tabular-nums text-slate-700">{row.pctMissingImage}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">No forward-facing image gaps detected in SQLite (or catalog empty).</p>
+          )}
+          {postCutoverHealth.validationNotes.length > 0 ? (
+            <div className="ui-panel-muted p-3 text-[11px] text-slate-600">
+              <ul className="list-disc space-y-1 pl-4">
+                {postCutoverHealth.validationNotes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="ui-accent-card p-4 space-y-3">
         <div>
@@ -213,7 +440,7 @@ export function Settings() {
                       </span>
                     </td>
                     <td className="py-2 pr-2 text-slate-700">
-                      {run.itemsSynced}I / {run.modifiersSynced}M / {run.bundlesSynced}B / {run.bundleItemsSynced}BI
+                      {run.itemsSynced}I / {run.modifiersSynced}M / {run.bundlesSynced}B / {run.bundleItemsSynced}BI / {run.aliasesSynced}A / {run.attributesSynced}AT
                     </td>
                     <td className="py-2 text-slate-700">
                       {run.message || 'No message'}

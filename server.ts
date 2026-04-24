@@ -7,6 +7,7 @@ import { syncCatalogFromGoogleSheets } from './src/server/services/googleSheetsC
 import { v1Router } from './src/server/routes/v1/index.ts';
 import { legacyRouter } from './src/server/routes/legacyRouter.ts';
 import { expressErrorHandler } from './src/server/http/jsonErrors.ts';
+import { prepareEstimatorDbForServer } from './src/server/db/connection.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,6 +19,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 });
 
 async function startServer() {
+  // Ensure SQLite persistence is prepared before any requests hit the repos.
+  await prepareEstimatorDbForServer();
+
   const app = express();
   const rawPort = process.env.PORT?.trim();
   const PORT = rawPort

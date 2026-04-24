@@ -53,6 +53,7 @@ export interface GlobalModifierImpact {
 
 export interface ProjectJobConditions {
   locationLabel: string;
+  locationLabelSource?: 'manual' | 'auto';
   travelDistanceMiles: number | null;
   installerCount: number;
   locationTaxPercent: number | null;
@@ -125,14 +126,17 @@ export interface PeerIntakeDefaultsResponse {
 export interface ProjectRecord {
   id: string;
   projectNumber: string | null;
+  projectNumberSource?: 'manual' | 'auto';
   projectName: string;
   clientName: string | null;
+  clientNameSource?: 'manual' | 'auto';
   generalContractor: string | null;
   estimator: string | null;
   bidDate: string | null;
   proposalDate: string | null;
   dueDate: string | null;
   address: string | null;
+  addressSource?: 'manual' | 'auto';
   projectType: string | null;
   projectSize: string | null;
   floorLevel: string | null;
@@ -243,6 +247,44 @@ export interface TakeoffLineRecord {
   modifierNames?: string[];
   /** Count + additive impacts from line_modifiers_v1 (percents flagged separately). */
   lineModifierRollup?: TakeoffLineModifierRollup;
+
+  /**
+   * Snapshot of selected or inferred catalog attributes for forward flows.
+   * Stored on the takeoff line so historical jobs remain stable even as catalog
+   * variants evolve. Not retroactively written for existing lines.
+   */
+  catalogAttributeSnapshot?: Array<{
+    attributeType: 'finish' | 'coating' | 'grip' | 'mounting' | 'assembly';
+    attributeValue: string;
+    source: 'user' | 'inferred';
+  }> | null;
+
+  /**
+   * Snapshotted catalog base values used when applying attribute deltas.
+   * Written for new lines only; older lines may be null/undefined.
+   */
+  baseMaterialCostSnapshot?: number | null;
+  baseLaborMinutesSnapshot?: number | null;
+  /** Per-attribute material delta snapshot, as applied at line creation time. */
+  attributeDeltaMaterialSnapshot?: Array<{
+    attributeType: 'finish' | 'coating' | 'grip' | 'mounting' | 'assembly';
+    attributeValue: string;
+    deltaType: 'absolute' | 'percent';
+    /** Stored value from catalog_item_attributes (percent is percent points). */
+    deltaValue: number;
+    /** Applied $ amount at creation (already resolved from base for %). */
+    appliedAmount: number;
+  }> | null;
+  /** Per-attribute labor delta snapshot, as applied at line creation time. */
+  attributeDeltaLaborSnapshot?: Array<{
+    attributeType: 'finish' | 'coating' | 'grip' | 'mounting' | 'assembly';
+    attributeValue: string;
+    deltaType: 'minutes' | 'absolute' | 'percent';
+    /** Stored value from catalog_item_attributes (percent is percent points). */
+    deltaValue: number;
+    /** Applied minutes amount at creation (already resolved from base for %). */
+    appliedAmount: number;
+  }> | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -383,6 +425,23 @@ export interface InstallReviewEmailDraft {
   };
 }
 
+export interface DbPersistenceStatusRecord {
+  id: 'db';
+  /** Effective resolved DB path on the server. */
+  dbPath: string;
+  /** Persistence mode inferred by server startup. */
+  mode: 'local' | 'volume' | 'ephemeral_gcs' | 'ephemeral';
+  gcsBucket: string | null;
+  gcsObject: string | null;
+  restoreAttemptedAt: string | null;
+  restoreStatus: 'not_configured' | 'skipped_existing_db' | 'no_snapshot' | 'restored' | 'failed';
+  restoreMessage: string | null;
+  lastBackupSuccessAt: string | null;
+  lastBackupFailureAt: string | null;
+  lastBackupError: string | null;
+  updatedAt: string;
+}
+
 export interface CatalogSyncStatusRecord {
   id: string;
   lastAttemptAt: string | null;
@@ -393,7 +452,31 @@ export interface CatalogSyncStatusRecord {
   modifiersSynced: number;
   bundlesSynced: number;
   bundleItemsSynced: number;
+  aliasesSynced: number;
+  attributesSynced: number;
   warnings: string[];
+}
+
+/** DB-side snapshot for post–CLEAN_ITEMS cutover validation + image-gap triage. */
+export interface CatalogCategoryImageGapRow {
+  category: string;
+  forwardFacingActive: number;
+  missingImageUrl: number;
+  pctMissingImage: number;
+}
+
+export interface CatalogPostCutoverHealthRecord {
+  itemsSourceTab: string;
+  inventory: { total: number; active: number; inactive: number };
+  forwardFacing: {
+    count: number;
+    missingImageUrl: number;
+    missingImageManufacturerBacked: number;
+    distinctItemsWithAttributes: number;
+  };
+  topCategoriesByMissingImage: CatalogCategoryImageGapRow[];
+  validationNotes: string[];
+  lastCatalogSync: CatalogSyncStatusRecord;
 }
 
 export interface ProjectFileRecord {

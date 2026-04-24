@@ -110,6 +110,12 @@ interface LineSuggestion {
   suggestedBundleName?: string | null;
   /** Stable key from server parse; links to estimate draft rows. */
   reviewLineFingerprint?: string;
+  catalogAttributeSnapshot?: Array<{
+    attributeType: 'finish' | 'coating' | 'grip' | 'mounting' | 'assembly';
+    attributeValue: string;
+    source: 'user' | 'inferred';
+    reason?: string;
+  }> | null;
 }
 
 type SourceKind =
@@ -829,6 +835,7 @@ function geminiLinesToParsedRows(lines: GeminiIntakeLine[], sourceReference: str
 }
 
 function suggestCatalogMatch(input: { itemName?: string; category?: string | null; description?: string; rawText?: string }, catalog: CatalogItem[]): CatalogItem | null {
+  const canonicalCatalog = catalog.filter((c) => !c.deprecated && c.isCanonical !== false);
   const itemName = String(input.itemName || '').trim();
   const category = String(input.category || '').trim();
   const description = String(input.description || '').trim();
@@ -837,7 +844,7 @@ function suggestCatalogMatch(input: { itemName?: string; category?: string | nul
 
   if (!normalized) return null;
 
-  const bySku = catalog.find((candidate) => {
+  const bySku = canonicalCatalog.find((candidate) => {
     const sku = normalizeComparableText(candidate.sku);
     return sku && normalized.includes(sku);
   });
@@ -846,7 +853,7 @@ function suggestCatalogMatch(input: { itemName?: string; category?: string | nul
   let best: CatalogItem | null = null;
   let bestScore = 0;
 
-  for (const candidate of catalog) {
+  for (const candidate of canonicalCatalog) {
     const candidateSearch = [
       candidate.sku,
       candidate.description,
@@ -1528,9 +1535,43 @@ export function ProjectIntake() {
   function applyIntakeParseToReview(result: IntakeParseResult, fallbackSource: string) {
     const allowed = uniqueSortedCatalogCategories(catalog);
     const raw = dedupeSuggestions(result.reviewLines.map((line) => buildIntakeLineSuggestion(line, fallbackSource)));
-    const suggestions = clampSuggestionCategories(raw, catalog);
-    setLineSuggestions(suggestions);
-    setRoomSuggestions(buildIntakeRoomSuggestions(result, suggestions));
+    const suggestionsBase = clampSuggestionCategories(raw, catalog);
+    const inferredByFingerprint = new Map<string, LineSuggestion['catalogAttributeSnapshot']>();
+    for (const row of result.estimateDraft?.lineSuggestions ?? []) {
+      if (!row.reviewLineFingerprint) continue;
+      if (!row.inferredCatalogAttributeSnapshot || row.inferredCatalogAttributeSnapshot.length === 0) continue;
+      inferredByFingerprint.set(
+        row.reviewLineFingerprint,
+        row.inferredCatalogAttributeSnapshot.map((a) => ({
+          attributeType: a.attributeType,
+          attributeValue: a.attributeValue,
+          source: 'inferred' as const,
+          reason: a.reason,
+        }))
+      );
+    }
+    const suggestions = suggestionsBase.map((line) => {
+      const fp = line.reviewLineFingerprint;
+      if (!fp) return line;
+      const snap = inferredByFingerprint.get(fp);
+      if (!snap) return line;
+      return { ...line, catalogAttributeSnapshot: snap };
+    });
+
+    const ignoredFps = new Set<string>(
+      (result.estimateDraft?.lineSuggestions ?? [])
+        .filter((s) => s.applicationStatus === 'ignored')
+        .map((s) => s.reviewLineFingerprint)
+        .filter(Boolean)
+    );
+    const suggestionsWithIgnore = ignoredFps.size
+      ? suggestions.map((line) =>
+          line.reviewLineFingerprint && ignoredFps.has(line.reviewLineFingerprint) ? { ...line, include: false } : line
+        )
+      : suggestions;
+
+    setLineSuggestions(suggestionsWithIgnore);
+    setRoomSuggestions(buildIntakeRoomSuggestions(result, suggestionsWithIgnore));
     setIntakeWarnings(buildIntakeWarnings(result));
     setParserReviewSummary(buildParserReviewSummary(result));
     setLastIntakeParse(result);
@@ -2084,6 +2125,7 @@ export function ProjectIntake() {
           materialIncluded: line.materialIncluded,
           matchConfidence: 'strong',
           matchReason,
+          catalogAttributeSnapshot: null,
         };
       })
     );
@@ -2181,6 +2223,7 @@ export function ProjectIntake() {
   function handleIgnoreEstimateLine(fingerprint: string) {
     patchEstimateReviewLine(fingerprint, { applicationStatus: 'ignored', selectedCatalogItemId: null });
     maybeCaptureDiv10Training(fingerprint, 'ignored', null);
+    void api.postV1IntakeReviewOverride({ reviewLineFingerprint: fingerprint, status: 'ignored' }).catch(() => {});
     const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === fingerprint)?.id;
     if (lineId) ignoreLine(lineId);
   }
@@ -2927,6 +2970,7 @@ export function ProjectIntake() {
             laborMinutes: line.laborMinutes,
             laborCost: 0,
             catalogItemId: line.catalogItemId,
+            catalogAttributeSnapshot: line.catalogAttributeSnapshot ?? null,
             notes: line.notes,
             intakeScopeBucket: intakeFields.intakeScopeBucket,
             intakeMatchConfidence: intakeFields.intakeMatchConfidence,
@@ -4323,6 +4367,11 @@ export function ProjectIntake() {
                               {line.matchConfidence === 'possible' ? 'Suggested Match' : 'Matched'}
                             </span>
                             {line.matchReason ? <span className="text-slate-500">{line.matchReason}</span> : null}
+                            {line.catalogAttributeSnapshot && line.catalogAttributeSnapshot.length > 0 ? (
+                              <span className="text-slate-500">
+                                Inferred options: {line.catalogAttributeSnapshot.map((a) => `${a.attributeType}:${a.attributeValue}`).join(', ')}
+                              </span>
+                            ) : null}
                             <span className="text-slate-500">{line.catalogItemId ? `Catalog ID ${line.catalogItemId}` : 'No catalog ID stored'}</span>
                             <span className="text-slate-500">Source {line.sourceReference || 'unknown'}</span>
                           </div>

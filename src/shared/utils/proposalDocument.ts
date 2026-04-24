@@ -143,10 +143,13 @@ function ensureFireExtinguisherWording(s: string): string {
  */
 export function formatClientProposalItemDisplay(
   rawDescription: string,
-  sku: string | null
+  sku: string | null,
+  catalogAttributeSnapshot?: TakeoffLineRecord['catalogAttributeSnapshot'] | null
 ): { title: string; subtitle: string | null } {
   let s = String(rawDescription || '').replace(/\s+/g, ' ').trim();
   if (!s) return { title: '', subtitle: null };
+
+  const snapshot = Array.isArray(catalogAttributeSnapshot) ? catalogAttributeSnapshot : null;
 
   const subtitleParts: string[] = [];
   const seen = new Set<string>();
@@ -196,8 +199,45 @@ export function formatClientProposalItemDisplay(
   s = ensureFireExtinguisherWording(s);
   s = toProposalItemTitleCase(s);
 
+  const optionLabels = (() => {
+    if (!snapshot || snapshot.length === 0) return [];
+
+    const byType = new Map<string, string>();
+    for (const a of snapshot) {
+      if (!a || !a.attributeType || !a.attributeValue) continue;
+      // One label per type keeps the proposal concise.
+      if (byType.has(a.attributeType)) continue;
+      const v = String(a.attributeValue).toUpperCase().trim();
+      const t = String(a.attributeType).toLowerCase().trim();
+
+      if (t === 'finish') {
+        if (v === 'MATTE_BLACK' || v === 'BLACK') byType.set(t, 'Matte Black');
+      } else if (t === 'mounting') {
+        if (v === 'RECESSED') byType.set(t, 'Recessed');
+        else if (v === 'SEMI_RECESSED' || v === 'SEMI-RECESSED') byType.set(t, 'Semi-recessed');
+        else if (v === 'SURFACE' || v === 'SURFACE_MOUNT' || v === 'SURFACE-MOUNT') byType.set(t, 'Surface Mount');
+      } else if (t === 'assembly') {
+        if (v === 'KD' || v === 'KNOCK_DOWN' || v === 'KNOCK-DOWN') byType.set(t, 'KD Assembly');
+      } else if (t === 'coating') {
+        if (v === 'ANTIMICROBIAL') byType.set(t, 'Antimicrobial');
+      } else if (t === 'grip') {
+        if (v === 'PEENED') byType.set(t, 'Peened');
+      }
+    }
+
+    const labels = Array.from(byType.values()).filter(Boolean);
+    if (labels.length === 0) return [];
+
+    const lowerTitle = s.toLowerCase();
+    return labels.filter((label) => !lowerTitle.includes(label.toLowerCase()));
+  })();
+
   const maxTitle = 88;
   let title = s;
+  if (optionLabels.length > 0) {
+    const appended = `${title}, ${optionLabels.join(', ')}`;
+    title = appended.length <= maxTitle ? appended : title;
+  }
   if (title.length > maxTitle) {
     title = `${title.slice(0, 85).trim()}…`;
   }
@@ -272,7 +312,7 @@ export function buildProposalLineItems(lines: TakeoffLineRecord[]): ProposalLine
     const unit = String(line.unit || 'EA').trim() || 'EA';
     if (!rawCompact) return;
 
-    const display = formatClientProposalItemDisplay(rawCompact, line.sku);
+    const display = formatClientProposalItemDisplay(rawCompact, line.sku, line.catalogAttributeSnapshot ?? null);
     if (!display.title) return;
 
     const key = [section, String(line.sku || '').trim().toLowerCase(), rawCompact.toLowerCase(), unit.toLowerCase()].join('|');
@@ -326,7 +366,7 @@ export function buildProposalScheduleSections(
     const unit = String(line.unit || 'EA').trim() || 'EA';
     if (!rawCompact) return;
 
-    const display = formatClientProposalItemDisplay(rawCompact, line.sku);
+    const display = formatClientProposalItemDisplay(rawCompact, line.sku, line.catalogAttributeSnapshot ?? null);
     if (!display.title) return;
 
     const rawCatalogImage = line.catalogItemId ? catalogImageById?.get(line.catalogItemId)?.trim() : '';

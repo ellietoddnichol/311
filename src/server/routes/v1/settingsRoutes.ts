@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   getCatalogInventoryCounts,
+  getCatalogPostCutoverHealth,
   reactivateAllCatalogItems,
 } from '../../repos/catalogRepo.ts';
 import { getCatalogSyncStatus, getSettings, listCatalogSyncRuns, updateSettings } from '../../repos/settingsRepo.ts';
@@ -9,6 +10,8 @@ import { recalculateAllLinePricing } from '../../repos/modifiersRepo.ts';
 import { backfillTakeoffRegistryToGoogleSheets, syncCatalogFromGoogleSheets } from '../../services/googleSheetsCatalogSync.ts';
 import { generateProposalDraftFromGemini } from '../../services/geminiProposalDraft.ts';
 import { getErrorMessage } from '../../../shared/utils/errorMessage.ts';
+import { getDbPersistenceStatusSnapshot, runDbBackupNow } from '../../db/connection.ts';
+import { getGcsBackupObjectMetadata } from '../../db/durableSqliteGcs.ts';
 
 export const settingsRouter = Router();
 
@@ -64,6 +67,13 @@ settingsRouter.get('/catalog-inventory', (_req, res) => {
   return res.json({ data: getCatalogInventoryCounts() });
 });
 
+/** Post–CLEAN_ITEMS cutover: DB forward-facing counts, image gaps, vs last sync (for manual comparison to sheet META audit). */
+settingsRouter.get('/catalog-post-cutover-health', (_req, res) => {
+  const itemsTab = process.env.GOOGLE_SHEETS_TAB_ITEMS || 'CLEAN_ITEMS';
+  const sync = getCatalogSyncStatus();
+  return res.json({ data: getCatalogPostCutoverHealth({ itemsSourceTab: itemsTab, lastCatalogSync: sync }) });
+});
+
 /** Sets every catalog row to active (e.g. after SQLite import). Sheet sync normally deactivates rows not in the sheet. */
 settingsRouter.post('/activate-all-catalog-items', (_req, res) => {
   const changed = reactivateAllCatalogItems();
@@ -88,4 +98,18 @@ settingsRouter.post('/backfill-takeoff-registry', async (_req, res) => {
     const status = /missing|not configured/i.test(message) ? 503 : 500;
     return res.status(status).json({ error: message });
   }
+});
+
+settingsRouter.get('/persistence-status', async (_req, res) => {
+  const status = getDbPersistenceStatusSnapshot();
+  const objectMeta = await getGcsBackupObjectMetadata();
+  return res.json({ data: { ...status, gcsObjectMeta: objectMeta } });
+});
+
+settingsRouter.post('/persistence-backup-now', async (_req, res) => {
+  const result = await runDbBackupNow();
+  const status = getDbPersistenceStatusSnapshot();
+  const objectMeta = await getGcsBackupObjectMetadata();
+  const code = result.ok ? 200 : 503;
+  return res.status(code).json({ data: { ok: result.ok, message: result.message, status: { ...status, gcsObjectMeta: objectMeta } } });
 });

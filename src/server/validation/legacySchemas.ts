@@ -35,6 +35,18 @@ export const legacyCatalogItemBodySchema = z.object({
   active: z.coerce.boolean(),
   /** Install-labor family key used when no catalog labor is present (Phase 0.1/0.2). */
   installLaborFamily: z.string().nullable().optional(),
+
+  // Transitional canonicalization fields.
+  canonicalSku: z.string().nullable().optional(),
+  isCanonical: z.coerce.boolean().optional(),
+  aliasOf: z.string().nullable().optional(),
+  laborBasis: z.string().nullable().optional(),
+  defaultMountingType: z.string().nullable().optional(),
+  finishGroup: z.string().nullable().optional(),
+  attributeGroup: z.string().nullable().optional(),
+  duplicateGroupKey: z.string().nullable().optional(),
+  deprecated: z.coerce.boolean().optional(),
+  deprecatedReason: z.string().nullable().optional(),
 });
 
 export type LegacyCatalogItemBody = z.infer<typeof legacyCatalogItemBodySchema>;

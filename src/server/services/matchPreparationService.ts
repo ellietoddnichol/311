@@ -130,7 +130,6 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
     }
 
     const reviewLineFingerprint = computeReviewLineFingerprint({
-      sourceReference: line.sourceReference,
       roomName: normalizeRoomName(line.roomName),
       itemCode: line.itemCode,
       itemName: line.itemName || description,

@@ -17,6 +17,8 @@ import {
   type CatalogMatchScore,
 } from './intakeCatalogMatching.ts';
 import { intakeAsText } from './metadataExtractorService.ts';
+import { getEstimatorDb } from '../db/connection.ts';
+import { getIntakeReviewOverridesByFingerprints } from '../repos/intakeReviewOverridesRepo.ts';
 
 const TOP_N = 3;
 const MFR_BOOST = 0.04;
@@ -102,6 +104,17 @@ function findLineClassification(
 
 function mapScopeBucket(cls: IntakeAiLineClassification | undefined, line: IntakeReviewLine): IntakeScopeBucket {
   const text = `${line.description} ${line.notes}`.toLowerCase();
+  const blob = `${line.itemCode} ${line.itemName} ${line.description} ${line.notes} ${line.sourceReference}`.toLowerCase();
+
+  const looksLikeAdminOrMetadata =
+    /\b(addendum|addenda|addendums?)\b/.test(blob) ||
+    (/\b(quantity|qty)\b/.test(blob) && /\b(material|labor|unit|uom|description|price)\b/.test(blob)) ||
+    /\b(source reference|source:|document:|doc:|page\s*\d+|chunk\s*\d+|sheet\s*\d+|row\s*\d+)\b/.test(blob) ||
+    /^\s*(addend(a|um|ums)|addendum|addenda)\s*[:\-]/i.test(String(line.description || line.itemName || '')) ||
+    /^\s*(quantity|qty)\s*[:\-]/i.test(String(line.description || line.itemName || ''));
+  if (looksLikeAdminOrMetadata && !/\b(grab bar|partition|locker|cabinet|mirror|dispenser|rail|door)\b/.test(blob)) {
+    return 'informational_only';
+  }
   if (line.semanticTags?.some((t) => /excluded|by.?others|ofci|\bnic\b/i.test(String(t).toLowerCase()))) {
     return 'excluded_by_others';
   }
@@ -152,6 +165,97 @@ function confidenceFromScore(score: number): IntakeMatchConfidence {
   return 'none';
 }
 
+function normalizeComparable(value: unknown): string {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function extractSkuLikeTokens(text: string): string[] {
+  const raw = String(text || '');
+  const out = new Set<string>();
+  raw
+    .split(/[\s,;|/()]+/g)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .forEach((t) => {
+      const cleaned = t.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+      if (!cleaned) return;
+      const hasDigit = /\d/.test(cleaned);
+      if (hasDigit && cleaned.length >= 4 && cleaned.length <= 24) out.add(cleaned);
+    });
+  return Array.from(out);
+}
+
+function findStrongAliasCatalogItemId(input: CatalogMatchInput): { catalogItemId: string; aliasType: string; aliasValue: string } | null {
+  const text = normalizeComparable([input.itemCode, input.itemName, input.description, input.notes].filter(Boolean).join(' '));
+  const skuTokens = extractSkuLikeTokens([input.itemCode, input.description].filter(Boolean).join(' '));
+
+  const db = getEstimatorDb();
+
+  for (const token of skuTokens) {
+    const row = db
+      .prepare(
+        `SELECT catalog_item_id, alias_type, alias_value
+         FROM catalog_item_aliases
+         WHERE lower(alias_value) = lower(?)
+           AND alias_type IN ('legacy_sku', 'vendor_sku')
+         LIMIT 1`
+      )
+      .get(token) as { catalog_item_id: string; alias_type: string; alias_value: string } | undefined;
+    if (row?.catalog_item_id) return { catalogItemId: row.catalog_item_id, aliasType: row.alias_type, aliasValue: row.alias_value };
+  }
+
+  if (text.length >= 8) {
+    const phraseRows = db
+      .prepare(
+        `SELECT catalog_item_id, alias_type, alias_value
+         FROM catalog_item_aliases
+         WHERE alias_type IN ('parser_phrase', 'search_key', 'generic_name')
+           AND length(trim(alias_value)) >= 6
+         LIMIT 5000`
+      )
+      .all() as Array<{ catalog_item_id: string; alias_type: string; alias_value: string }>;
+    for (const r of phraseRows) {
+      const phrase = normalizeComparable(r.alias_value);
+      if (!phrase) continue;
+      if (text.includes(phrase)) return { catalogItemId: r.catalog_item_id, aliasType: r.alias_type, aliasValue: r.alias_value };
+    }
+  }
+
+  return null;
+}
+
+function inferExplicitAttributesForItem(params: {
+  catalogItemId: string;
+  lineText: string;
+}): Array<{ attributeType: 'finish' | 'coating' | 'grip' | 'mounting' | 'assembly'; attributeValue: string; reason: string }> | null {
+  const t = String(params.lineText || '').toLowerCase();
+  const wanted: Array<{ attributeType: any; attributeValue: string; reason: string }> = [];
+  const push = (attributeType: any, attributeValue: string, reason: string) => wanted.push({ attributeType, attributeValue, reason });
+
+  if (t.includes('matte black')) push('finish', 'MATTE_BLACK', 'Explicit phrase: matte black');
+  else if (/\bblack\b/.test(t)) push('finish', 'MATTE_BLACK', 'Explicit phrase: black');
+  if (t.includes('antimicrobial') || t.includes('anti-microbial')) push('coating', 'ANTIMICROBIAL', 'Explicit phrase: antimicrobial');
+  if (t.includes('peened') || /\bpeen(ed)?\b/.test(t)) push('grip', 'PEENED', 'Explicit phrase: peened');
+  if (t.includes('semi-recess')) push('mounting', 'SEMI_RECESSED', 'Explicit phrase: semi-recessed');
+  else if (t.includes('recessed')) push('mounting', 'RECESSED', 'Explicit phrase: recessed');
+  if (t.includes('surface mount') || /\bsurface\b/.test(t)) push('mounting', 'SURFACE', 'Explicit phrase: surface');
+  if (/\bkd\b/.test(t) || t.includes('knock down') || t.includes('knock-down')) push('assembly', 'KD', 'Explicit phrase: KD/knock down');
+
+  if (wanted.length === 0) return null;
+
+  const active = getEstimatorDb()
+    .prepare(
+      `SELECT attribute_type, attribute_value
+       FROM catalog_item_attributes
+       WHERE catalog_item_id = ? AND active = 1`
+    )
+    .all(params.catalogItemId) as Array<{ attribute_type: string; attribute_value: string }>;
+  const allow = new Set(active.map((r) => `${String(r.attribute_type)}:${String(r.attribute_value)}`));
+
+  const out = wanted.filter((w) => allow.has(`${w.attributeType}:${w.attributeValue}`));
+  return out.length ? (out as any) : null;
+}
+
 function applyCrossLineBoost(
   ranked: CatalogMatchScore[],
   room: string,
@@ -197,7 +301,7 @@ export function buildIntakeEstimateDraft(params: {
   const { manufacturerCounts, categoryCounts } = extractRoomConsistencySignals(reviewLines, catalogById);
   const projectModIds = matchProjectModifierIdsFromHints(aiSuggestions?.suggestedProjectModifierHints ?? [], modifiers);
 
-  const lineSuggestions: IntakeLineEstimateSuggestion[] = reviewLines.map((line, lineIndex) => {
+  const rawLineSuggestions: IntakeLineEstimateSuggestion[] = reviewLines.map((line, lineIndex) => {
     const room = normRoom(line.roomName);
     const input: CatalogMatchInput = {
       itemCode: line.itemCode,
@@ -211,6 +315,26 @@ export function buildIntakeEstimateDraft(params: {
     const rankedBase = listCatalogMatchScores(input, catalog, { minScore: 0.28 });
     const boosted = applyCrossLineBoost(rankedBase, room, manufacturerCounts, categoryCounts).sort((a, b) => b.score - a.score);
     let topCatalogMatches: IntakeCatalogMatch[] = boosted.slice(0, TOP_N).map(catalogMatchScoreToIntake);
+
+    const aliasHit = findStrongAliasCatalogItemId(input);
+    if (aliasHit) {
+      const item = catalogById.get(aliasHit.catalogItemId);
+      if (item) {
+        const strong: IntakeCatalogMatch = {
+          catalogItemId: item.id,
+          sku: item.sku,
+          description: item.description,
+          category: item.category,
+          unit: item.uom,
+          materialCost: item.baseMaterialCost,
+          laborMinutes: item.baseLaborMinutes,
+          score: 1,
+          confidence: 'strong' as const,
+          reason: `Alias match (${aliasHit.aliasType}: ${aliasHit.aliasValue})`,
+        };
+        topCatalogMatches = [strong, ...topCatalogMatches.filter((c) => c.catalogItemId !== strong.catalogItemId)].slice(0, TOP_N);
+      }
+    }
 
     const cls = findLineClassification(line, lineIndex, aiSuggestions);
     const scopeBucket = mapScopeBucket(cls, line);
@@ -310,12 +434,37 @@ export function buildIntakeEstimateDraft(params: {
     if (boosted[0]?.reason.includes('Cross-line consistency')) {
       matcherSignals.push('cross_line_top_candidate');
     }
+    if (aliasHit && topCatalogMatches[0]?.catalogItemId === aliasHit.catalogItemId) {
+      matcherSignals.push(`alias_match:${aliasHit.aliasType}`);
+    }
+
+    const inferredAttrsRaw =
+      suggestedCatalogItemId
+        ? inferExplicitAttributesForItem({
+            catalogItemId: suggestedCatalogItemId,
+            lineText: `${line.itemCode || ''} ${line.itemName || ''} ${line.description || ''} ${line.notes || ''}`,
+          })
+        : null;
+    const inferredCatalogAttributeSnapshot =
+      inferredAttrsRaw && inferredAttrsRaw.length
+        ? inferredAttrsRaw.map((a) => ({ attributeType: a.attributeType, attributeValue: a.attributeValue, source: 'inferred' as const, reason: a.reason }))
+        : null;
+    if (inferredCatalogAttributeSnapshot && inferredCatalogAttributeSnapshot.length) {
+      matcherSignals.push('explicit_attribute_inference');
+    }
+
+    const baseStatus =
+      scopeBucket === 'informational_only'
+        ? ('ignored' as const)
+        : preAcceptedTierA
+          ? ('accepted' as const)
+          : ('suggested' as const);
 
     return {
       reviewLineFingerprint: line.reviewLineFingerprint,
       lineId: line.lineId,
       scopeBucket,
-      applicationStatus: preAcceptedTierA ? 'accepted' : 'suggested',
+      applicationStatus: baseStatus,
       catalogAutoApplyTier: tier,
       topCatalogCandidates: topCatalogMatches,
       suggestedCatalogItemId,
@@ -330,6 +479,25 @@ export function buildIntakeEstimateDraft(params: {
       sourceSectionHeader: line.sourceSectionHeader ?? null,
       isInstallableScope: line.isInstallableScope ?? null,
       installScopeType: line.installScopeType ?? null,
+      inferredCatalogAttributeSnapshot,
+    };
+  });
+
+  const overrideMap = getIntakeReviewOverridesByFingerprints(rawLineSuggestions.map((s) => s.reviewLineFingerprint));
+  const lineSuggestions = rawLineSuggestions.map((s) => {
+    const ov = overrideMap.get(s.reviewLineFingerprint);
+    if (!ov || ov.status !== 'ignored') return s;
+    return {
+      ...s,
+      applicationStatus: 'ignored' as const,
+      suggestedCatalogItemId: null,
+      topCatalogCandidates: [],
+      matcherSignals: Array.from(new Set([...(s.matcherSignals || []), 'review_override:ignored'])),
+      marketingNotes: Array.from(
+        new Set([...(s.marketingNotes || []), 'Ignored by estimator — kept suppressed unless the line materially changes.'])
+      ),
+      pricingPreview: null,
+      laborOrigin: null,
     };
   });
 

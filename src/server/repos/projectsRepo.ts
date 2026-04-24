@@ -3,6 +3,13 @@ import { getEstimatorDb } from '../db/connection.ts';
 import { PeerIntakeDefaultsResponse, ProjectRecord, ProjectStructuredAssumption } from '../../shared/types/estimator.ts';
 import { coerceSafeProjectName } from '../../shared/utils/intakeTextGuards.ts';
 import { createDefaultProjectJobConditions, normalizeProjectJobConditions } from '../../shared/utils/jobConditions.ts';
+import {
+  generateBidPackageNumber,
+  inferDefaultClientName,
+  inferDefaultLocationFromProjectTitle,
+  logProjectAutofill,
+  titleStringForInference,
+} from '../services/projectDefaults.ts';
 
 function coerceProposalFormat(raw: unknown): ProjectRecord['proposalFormat'] {
   const s = String(raw || '').trim();
@@ -71,14 +78,17 @@ function mapProjectRow(row: any): ProjectRecord {
   return {
     id: row.id,
     projectNumber: row.project_number,
+    projectNumberSource: (row.project_number_source === 'auto' ? 'auto' : 'manual'),
     projectName: coerceSafeProjectName(String(row.project_name || ''), 'Untitled Project'),
     clientName: row.client_name,
+    clientNameSource: (row.client_name_source === 'auto' ? 'auto' : 'manual'),
     generalContractor: row.general_contractor,
     estimator: row.estimator,
     bidDate: row.bid_date,
     proposalDate: row.proposal_date,
     dueDate: row.due_date,
     address: row.address,
+    addressSource: (row.address_source === 'auto' ? 'auto' : 'manual'),
     projectType: row.project_type,
     projectSize: row.project_size,
     floorLevel: row.floor_level,
@@ -96,7 +106,7 @@ function mapProjectRow(row: any): ProjectRecord {
     taxPercent: row.tax_percent,
     pricingMode: row.pricing_mode || 'labor_and_material',
     selectedScopeCategories,
-    jobConditions: parsedJobConditions,
+    jobConditions: { ...parsedJobConditions, locationLabelSource: (row.location_label_source === 'auto' ? 'auto' : 'manual') },
     status: row.status,
     notes: row.notes,
     specialNotes: row.special_notes,
@@ -185,17 +195,48 @@ export function suggestPeerIntakeDefaults(input: {
 export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
   const now = new Date().toISOString();
   const structuredAssumptions = normalizeStructuredAssumptionsInput(input.structuredAssumptions ?? []);
+  const rawTitle = titleStringForInference(String(input.projectName ?? ''));
+  const projectName = coerceSafeProjectName(String(input.projectName ?? ''), 'Untitled Project');
+  const projectId = input.id ?? randomUUID();
+  const titleForDefaults = rawTitle || projectName;
+
+  const projectNumberRaw = String(input.projectNumber ?? '').trim();
+  const clientNameRaw = String(input.clientName ?? '').trim();
+  const addressRaw = String(input.address ?? '').trim();
+
+  logProjectAutofill('create.begin', {
+    rawTitleLen: rawTitle.length,
+    coercedName: projectName,
+    projectNumberBlank: !projectNumberRaw,
+    clientBlank: !clientNameRaw,
+    addressBlank: !addressRaw,
+  });
+
+  const projectNumberAuto = projectNumberRaw ? null : generateBidPackageNumber({ projectId, projectName });
+  const clientAuto = clientNameRaw ? null : inferDefaultClientName({ projectName: titleForDefaults });
+  const locationAuto = addressRaw ? null : inferDefaultLocationFromProjectTitle({ projectName: titleForDefaults });
+
+  logProjectAutofill('create.inferred', {
+    bidPackageGenerated: Boolean(projectNumberAuto),
+    clientInferred: Boolean(clientAuto),
+    locationMatched: Boolean(locationAuto),
+    locationReason: locationAuto?.reason ?? null,
+  });
+
   const project: ProjectRecord = {
-    id: input.id ?? randomUUID(),
-    projectNumber: input.projectNumber ?? null,
-    projectName: coerceSafeProjectName(String(input.projectName ?? ''), 'Untitled Project'),
-    clientName: input.clientName ?? null,
+    id: projectId,
+    projectNumber: projectNumberRaw || projectNumberAuto,
+    projectNumberSource: projectNumberRaw ? 'manual' : 'auto',
+    projectName,
+    clientName: clientNameRaw || (clientAuto ? clientAuto.clientName : null),
+    clientNameSource: clientNameRaw ? 'manual' : clientAuto ? 'auto' : 'manual',
     generalContractor: input.generalContractor ?? null,
     estimator: input.estimator ?? null,
     bidDate: input.bidDate ?? null,
     proposalDate: input.proposalDate ?? null,
     dueDate: input.dueDate ?? null,
-    address: input.address ?? null,
+    address: addressRaw || (locationAuto ? locationAuto.address : null),
+    addressSource: addressRaw ? 'manual' : locationAuto ? 'auto' : 'manual',
     projectType: input.projectType ?? null,
     projectSize: input.projectSize ?? null,
     floorLevel: input.floorLevel ?? null,
@@ -215,7 +256,10 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
     selectedScopeCategories: Array.isArray(input.selectedScopeCategories)
       ? input.selectedScopeCategories.map((entry) => String(entry || '').trim()).filter(Boolean)
       : [],
-    jobConditions: normalizeProjectJobConditions(input.jobConditions),
+    jobConditions: normalizeProjectJobConditions({
+      ...(input.jobConditions || {}),
+      locationLabel: (input.jobConditions as any)?.locationLabel || (locationAuto ? locationAuto.locationLabel : ''),
+    }),
     status: input.status ?? 'Draft',
     notes: input.notes ?? null,
     specialNotes: input.specialNotes ?? null,
@@ -229,24 +273,30 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
 
   getEstimatorDb().prepare(`
     INSERT INTO projects_v1 (
-      id, project_number, project_name, client_name, general_contractor, estimator, bid_date, proposal_date, due_date, address, project_type,
+      id, project_number, project_number_source, project_name, client_name, client_name_source, general_contractor, estimator, bid_date, proposal_date, due_date,
+      address, address_source, location_label_source,
+      project_type,
       project_size, floor_level, access_difficulty, install_height, material_handling, wall_substrate,
       labor_burden_percent, overhead_percent, profit_percent, labor_overhead_percent, labor_profit_percent,
       sub_labor_management_fee_enabled, sub_labor_management_fee_percent,
       tax_percent, pricing_mode, scope_categories_json, job_conditions_json, status, notes, special_notes, proposal_include_special_notes, proposal_include_catalog_images, proposal_format,
       structured_assumptions_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     project.id,
     project.projectNumber,
+    project.projectNumberSource || 'manual',
     project.projectName,
     project.clientName,
+    project.clientNameSource || 'manual',
     project.generalContractor,
     project.estimator,
     project.bidDate,
     project.proposalDate,
     project.dueDate,
     project.address,
+    project.addressSource || 'manual',
+    project.jobConditions.locationLabelSource || (locationAuto ? 'auto' : 'manual'),
     project.projectType,
     project.projectSize,
     project.floorLevel,
@@ -283,6 +333,27 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
   const existing = getProject(projectId);
   if (!existing) return null;
 
+  const hasIncomingProjectNumber = Object.prototype.hasOwnProperty.call(input, 'projectNumber');
+  const incomingProjectNumber = hasIncomingProjectNumber ? String(input.projectNumber ?? '').trim() : null;
+
+  const hasIncomingClientName = Object.prototype.hasOwnProperty.call(input, 'clientName');
+  const incomingClientName = hasIncomingClientName ? String(input.clientName ?? '').trim() : null;
+
+  const hasIncomingAddress = Object.prototype.hasOwnProperty.call(input, 'address');
+  const incomingAddress = hasIncomingAddress ? String(input.address ?? '').trim() : null;
+
+  const hasIncomingLocationLabel =
+    input.jobConditions != null &&
+    Object.prototype.hasOwnProperty.call(input.jobConditions, 'locationLabel');
+  const incomingLocationLabel = hasIncomingLocationLabel
+    ? String((input.jobConditions as any).locationLabel ?? '').trim()
+    : null;
+
+  const mergedJobConditionsForNormalize = normalizeProjectJobConditions({
+    ...existing.jobConditions,
+    ...(input.jobConditions || {}),
+  });
+
   const next: ProjectRecord = {
     ...existing,
     ...input,
@@ -290,7 +361,7 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
     selectedScopeCategories: Array.isArray(input.selectedScopeCategories)
       ? input.selectedScopeCategories.map((entry) => String(entry || '').trim()).filter(Boolean)
       : existing.selectedScopeCategories,
-    jobConditions: normalizeProjectJobConditions(input.jobConditions ?? existing.jobConditions),
+    jobConditions: mergedJobConditionsForNormalize,
     structuredAssumptions: Array.isArray(input.structuredAssumptions)
       ? normalizeStructuredAssumptionsInput(input.structuredAssumptions)
       : existing.structuredAssumptions,
@@ -298,12 +369,108 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
     updatedAt: new Date().toISOString(),
   };
 
+  const rawTitle = titleStringForInference(
+    input.projectName !== undefined ? String(input.projectName) : existing.projectName
+  );
   next.projectName = coerceSafeProjectName(next.projectName, 'Untitled Project');
+  const titleForDefaults = rawTitle || next.projectName;
+
+  logProjectAutofill('update.begin', {
+    projectId,
+    hasIncomingProjectNumber,
+    hasIncomingAddress,
+    hasIncomingLocationLabel,
+    existingProjectNumberBlank: !String(existing.projectNumber || '').trim(),
+    existingAddressBlank: !String(existing.address || '').trim(),
+    titleForDefaultsSample: titleForDefaults.slice(0, 80),
+  });
+
+  // Default only when blank, and never regenerate on unrelated edits.
+  if (!String(existing.projectNumber || '').trim() && (incomingProjectNumber === null || incomingProjectNumber === '')) {
+    next.projectNumber = generateBidPackageNumber({ projectId, projectName: next.projectName });
+    next.projectNumberSource = 'auto';
+    logProjectAutofill('update.filled.projectNumber', { source: 'generateBidPackageNumber' });
+  } else if (hasIncomingProjectNumber) {
+    if (incomingProjectNumber === '' && String(existing.projectNumber || '').trim()) {
+      // Full PUT often serializes empty optional fields as "" / null — do not wipe a stored value.
+      next.projectNumber = existing.projectNumber;
+      next.projectNumberSource = existing.projectNumberSource;
+      logProjectAutofill('update.preserved.projectNumber', { reason: 'incoming_empty_kept_existing' });
+    } else {
+      next.projectNumber = incomingProjectNumber || null;
+      next.projectNumberSource = incomingProjectNumber ? 'manual' : existing.projectNumberSource;
+    }
+  }
+
+  if (!String(existing.clientName || '').trim() && (incomingClientName === null || incomingClientName === '')) {
+    const inferred = inferDefaultClientName({ projectName: titleForDefaults });
+    if (inferred) {
+      next.clientName = inferred.clientName;
+      next.clientNameSource = 'auto';
+      logProjectAutofill('update.filled.clientName', { reason: inferred.reason });
+    }
+  } else if (hasIncomingClientName) {
+    if (incomingClientName === '' && String(existing.clientName || '').trim()) {
+      next.clientName = existing.clientName;
+      next.clientNameSource = existing.clientNameSource;
+    } else {
+      next.clientName = incomingClientName || null;
+      next.clientNameSource = incomingClientName ? 'manual' : existing.clientNameSource;
+    }
+  }
+
+  if (!String(existing.address || '').trim() && (incomingAddress === null || incomingAddress === '')) {
+    const inferred = inferDefaultLocationFromProjectTitle({ projectName: titleForDefaults });
+    if (inferred) {
+      next.address = inferred.address;
+      next.addressSource = 'auto';
+      logProjectAutofill('update.filled.address', { reason: inferred.reason });
+    }
+  } else if (hasIncomingAddress) {
+    if (incomingAddress === '' && String(existing.address || '').trim()) {
+      next.address = existing.address;
+      next.addressSource = existing.addressSource;
+      logProjectAutofill('update.preserved.address', { reason: 'incoming_empty_kept_existing' });
+    } else {
+      next.address = incomingAddress || null;
+      next.addressSource = incomingAddress ? 'manual' : existing.addressSource;
+    }
+  }
+
+  const existingLoc = String(existing.jobConditions?.locationLabel || '').trim();
+  if (!existingLoc && (incomingLocationLabel === null || incomingLocationLabel === '')) {
+    const inferred = inferDefaultLocationFromProjectTitle({ projectName: titleForDefaults });
+    if (inferred) {
+      next.jobConditions = normalizeProjectJobConditions({
+        ...next.jobConditions,
+        locationLabel: inferred.locationLabel,
+        locationLabelSource: 'auto',
+      });
+      logProjectAutofill('update.filled.locationLabel', { reason: inferred.reason });
+    } else {
+      logProjectAutofill('update.skipped.locationLabel', { reason: 'no_title_match' });
+    }
+  } else if (hasIncomingLocationLabel) {
+    if (incomingLocationLabel === '' && String(existingLoc)) {
+      next.jobConditions = normalizeProjectJobConditions({
+        ...next.jobConditions,
+        locationLabel: existing.jobConditions?.locationLabel || '',
+        locationLabelSource: (existing.jobConditions as any)?.locationLabelSource,
+      });
+      logProjectAutofill('update.preserved.locationLabel', { reason: 'incoming_empty_kept_existing' });
+    } else {
+      next.jobConditions = normalizeProjectJobConditions({
+        ...next.jobConditions,
+        locationLabel: incomingLocationLabel,
+        locationLabelSource: incomingLocationLabel ? 'manual' : (existing.jobConditions as any)?.locationLabelSource,
+      });
+    }
+  }
 
   getEstimatorDb().prepare(`
     UPDATE projects_v1 SET
-      project_number = ?, project_name = ?, client_name = ?, general_contractor = ?, estimator = ?, bid_date = ?, proposal_date = ?, due_date = ?,
-      address = ?, project_type = ?, project_size = ?, floor_level = ?, access_difficulty = ?, install_height = ?,
+      project_number = ?, project_number_source = ?, project_name = ?, client_name = ?, client_name_source = ?, general_contractor = ?, estimator = ?, bid_date = ?, proposal_date = ?, due_date = ?,
+      address = ?, address_source = ?, location_label_source = ?, project_type = ?, project_size = ?, floor_level = ?, access_difficulty = ?, install_height = ?,
       material_handling = ?, wall_substrate = ?, labor_burden_percent = ?, overhead_percent = ?,
       profit_percent = ?, labor_overhead_percent = ?, labor_profit_percent = ?,
       sub_labor_management_fee_enabled = ?, sub_labor_management_fee_percent = ?,
@@ -312,14 +479,18 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
     WHERE id = ?
   `).run(
     next.projectNumber,
+    next.projectNumberSource || 'manual',
     next.projectName,
     next.clientName,
+    next.clientNameSource || 'manual',
     next.generalContractor,
     next.estimator,
     next.bidDate,
     next.proposalDate,
     next.dueDate,
     next.address,
+    next.addressSource || 'manual',
+    (next.jobConditions as any)?.locationLabelSource || 'manual',
     next.projectType,
     next.projectSize,
     next.floorLevel,

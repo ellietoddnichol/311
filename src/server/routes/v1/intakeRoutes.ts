@@ -7,6 +7,7 @@ import { listCatalogItemsForApi } from '../../repos/catalogRepo.ts';
 import { readDiv10BrainEnv } from '../../div10Brain/env.ts';
 import { getSupabaseAdmin } from '../../div10Brain/supabaseAdmin.ts';
 import { getErrorMessage } from '../../../shared/utils/errorMessage.ts';
+import { upsertIntakeReviewOverride } from '../../repos/intakeReviewOverridesRepo.ts';
 
 export const intakeRouter = Router();
 
@@ -131,6 +132,18 @@ intakeRouter.post('/div10-training-capture', async (req, res) => {
   } catch (error: unknown) {
     return res.status(500).json({ error: getErrorMessage(error, 'Training capture failed.') });
   }
+});
+
+/** Durable, local (SQLite) persistence for intake review decisions (e.g. ignored lines). */
+intakeRouter.post('/review-override', (req, res) => {
+  const body = req.body || {};
+  const fingerprint = String(body.reviewLineFingerprint || '').trim();
+  const status = String(body.status || '').trim();
+  if (!fingerprint || status !== 'ignored') {
+    return res.status(400).json({ error: 'reviewLineFingerprint and status=ignored are required.' });
+  }
+  upsertIntakeReviewOverride({ reviewLineFingerprint: fingerprint, status: 'ignored' });
+  return res.json({ data: { ok: true } });
 });
 
 intakeRouter.post('/extract', async (req, res) => {

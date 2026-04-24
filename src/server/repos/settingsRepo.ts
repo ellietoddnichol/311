@@ -156,6 +156,8 @@ export function getCatalogSyncStatus(): CatalogSyncStatusRecord {
     modifiersSynced: Number(row.modifiers_synced || 0),
     bundlesSynced: Number(row.bundles_synced || 0),
     bundleItemsSynced: Number(row.bundle_items_synced || 0),
+    aliasesSynced: Number((row as any).aliases_synced || 0),
+    attributesSynced: Number((row as any).attributes_synced || 0),
     warnings: row.warnings_json ? JSON.parse(row.warnings_json) : [],
   };
 }
@@ -169,6 +171,8 @@ export function listCatalogSyncRuns(limit = 10): Array<{
   modifiersSynced: number;
   bundlesSynced: number;
   bundleItemsSynced: number;
+  aliasesSynced: number;
+  attributesSynced: number;
   warnings: string[];
 }> {
   const rows = getEstimatorDb().prepare(`
@@ -187,6 +191,8 @@ export function listCatalogSyncRuns(limit = 10): Array<{
     modifiersSynced: Number(row.modifiers_synced || 0),
     bundlesSynced: Number(row.bundles_synced || 0),
     bundleItemsSynced: Number(row.bundle_items_synced || 0),
+    aliasesSynced: Number((row as any).aliases_synced || 0),
+    attributesSynced: Number((row as any).attributes_synced || 0),
     warnings: row.warnings_json ? JSON.parse(row.warnings_json) : [],
   }));
 }

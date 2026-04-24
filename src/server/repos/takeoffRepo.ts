@@ -3,6 +3,7 @@ import { getEstimatorDb } from '../db/connection.ts';
 import type { IntakeMatchConfidence, IntakeScopeBucket } from '../../shared/types/intake.ts';
 import { TakeoffLineModifierRollup, TakeoffLineRecord, TakeoffPricingSource } from '../../shared/types/estimator.ts';
 import { recordIntakeCatalogMemoryFromAcceptedMatch } from './intakeCatalogMemoryRepo.ts';
+import { getRoom } from './roomsRepo.ts';
 
 const DEFAULT_LABOR_RATE_PER_HOUR = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 100);
 
@@ -135,6 +136,38 @@ function mapTakeoffRow(row: any): TakeoffLineRecord {
     sourceMaterialCost: normalizeNullableNumber(row.source_material_cost),
     generatedLaborMinutes: normalizeNullableNumber(row.generated_labor_minutes),
     laborOrigin: parseLaborOrigin(row.labor_origin),
+    catalogAttributeSnapshot: (() => {
+      const raw = row.catalog_attribute_snapshot_json;
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(String(raw));
+        return Array.isArray(parsed) ? (parsed as TakeoffLineRecord['catalogAttributeSnapshot']) : null;
+      } catch {
+        return null;
+      }
+    })(),
+    baseMaterialCostSnapshot: normalizeNullableNumber(row.base_material_cost_snapshot),
+    baseLaborMinutesSnapshot: normalizeNullableNumber(row.base_labor_minutes_snapshot),
+    attributeDeltaMaterialSnapshot: (() => {
+      const raw = row.attribute_delta_material_snapshot_json;
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(String(raw));
+        return Array.isArray(parsed) ? (parsed as TakeoffLineRecord['attributeDeltaMaterialSnapshot']) : null;
+      } catch {
+        return null;
+      }
+    })(),
+    attributeDeltaLaborSnapshot: (() => {
+      const raw = row.attribute_delta_labor_snapshot_json;
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(String(raw));
+        return Array.isArray(parsed) ? (parsed as TakeoffLineRecord['attributeDeltaLaborSnapshot']) : null;
+      } catch {
+        return null;
+      }
+    })(),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -242,17 +275,146 @@ function computeLineTotal(
 }
 
 function resolveCatalogDefaults(input: Partial<TakeoffLineRecord>): {
+  baseMaterialCost?: number;
+  baseLaborMinutes?: number;
   materialCost?: number;
   laborMinutes?: number;
+  baseMaterialCostSnapshot?: number | null;
+  baseLaborMinutesSnapshot?: number | null;
+  attributeDeltaMaterialSnapshot?: TakeoffLineRecord['attributeDeltaMaterialSnapshot'] | null;
+  attributeDeltaLaborSnapshot?: TakeoffLineRecord['attributeDeltaLaborSnapshot'] | null;
 } {
+  const percentFactor = (value: number) => {
+    if (!Number.isFinite(value)) return 0;
+    // Accept either 10 (=10%) or 0.10 (=10%). Keeps authoring flexible.
+    return Math.abs(value) > 1 ? value / 100 : value;
+  };
+
+  const applyAttributeDeltas = (baseMaterialCost: number, baseLaborMinutes: number) => {
+    const catalogItemId = input.catalogItemId;
+    const snapshot = input.catalogAttributeSnapshot;
+    if (!catalogItemId || !snapshot || !Array.isArray(snapshot) || snapshot.length === 0) {
+      return {
+        materialCost: baseMaterialCost,
+        laborMinutes: baseLaborMinutes,
+        baseMaterialCostSnapshot: null,
+        baseLaborMinutesSnapshot: null,
+        attributeDeltaMaterialSnapshot: null,
+        attributeDeltaLaborSnapshot: null,
+      };
+    }
+
+    const selected = new Set(snapshot.map((a) => `${a.attributeType}:${a.attributeValue}`));
+    const rows = getEstimatorDb()
+      .prepare(
+        `SELECT attribute_type, attribute_value, material_delta_type, material_delta_value, labor_delta_type, labor_delta_value
+         FROM catalog_item_attributes
+         WHERE catalog_item_id = ? AND active = 1`
+      )
+      .all(catalogItemId) as Array<{
+      attribute_type: string;
+      attribute_value: string;
+      material_delta_type: string | null;
+      material_delta_value: number | null;
+      labor_delta_type: string | null;
+      labor_delta_value: number | null;
+    }>;
+
+    let materialCost = baseMaterialCost;
+    let laborMinutes = baseLaborMinutes;
+    const materialSnapshots: NonNullable<TakeoffLineRecord['attributeDeltaMaterialSnapshot']> = [];
+    const laborSnapshots: NonNullable<TakeoffLineRecord['attributeDeltaLaborSnapshot']> = [];
+
+    rows.forEach((row) => {
+      const key = `${String(row.attribute_type)}:${String(row.attribute_value)}`;
+      if (!selected.has(key)) return;
+
+      const mType = row.material_delta_type ? String(row.material_delta_type) : null;
+      const mVal = Number(row.material_delta_value ?? 0);
+      if (mType === 'absolute') {
+        materialCost += mVal;
+        if (mVal !== 0) {
+          materialSnapshots.push({
+            attributeType: String(row.attribute_type) as any,
+            attributeValue: String(row.attribute_value),
+            deltaType: 'absolute',
+            deltaValue: mVal,
+            appliedAmount: mVal,
+          });
+        }
+      }
+      if (mType === 'percent') {
+        const applied = baseMaterialCost * percentFactor(mVal);
+        materialCost += applied;
+        if (applied !== 0) {
+          materialSnapshots.push({
+            attributeType: String(row.attribute_type) as any,
+            attributeValue: String(row.attribute_value),
+            deltaType: 'percent',
+            deltaValue: mVal,
+            appliedAmount: Number(applied.toFixed(4)),
+          });
+        }
+      }
+
+      const lType = row.labor_delta_type ? String(row.labor_delta_type) : null;
+      const lVal = Number(row.labor_delta_value ?? 0);
+      if (lType === 'minutes' || lType === 'absolute') {
+        laborMinutes += lVal;
+        if (lVal !== 0) {
+          laborSnapshots.push({
+            attributeType: String(row.attribute_type) as any,
+            attributeValue: String(row.attribute_value),
+            deltaType: lType as any,
+            deltaValue: lVal,
+            appliedAmount: lVal,
+          });
+        }
+      }
+      if (lType === 'percent') {
+        const applied = baseLaborMinutes * percentFactor(lVal);
+        laborMinutes += applied;
+        if (applied !== 0) {
+          laborSnapshots.push({
+            attributeType: String(row.attribute_type) as any,
+            attributeValue: String(row.attribute_value),
+            deltaType: 'percent',
+            deltaValue: lVal,
+            appliedAmount: Number(applied.toFixed(4)),
+          });
+        }
+      }
+    });
+
+    return {
+      materialCost: Number(materialCost.toFixed(4)),
+      laborMinutes: Number(laborMinutes.toFixed(4)),
+      baseMaterialCostSnapshot: baseMaterialCost,
+      baseLaborMinutesSnapshot: baseLaborMinutes,
+      attributeDeltaMaterialSnapshot: materialSnapshots.length ? materialSnapshots : null,
+      attributeDeltaLaborSnapshot: laborSnapshots.length ? laborSnapshots : null,
+    };
+  };
+
   if (input.catalogItemId) {
-    const row = getEstimatorDb().prepare('SELECT base_material_cost, base_labor_minutes FROM catalog_items WHERE id = ? LIMIT 1').get(input.catalogItemId) as
+    const row = getEstimatorDb()
+      .prepare('SELECT base_material_cost, base_labor_minutes FROM catalog_items WHERE id = ? LIMIT 1')
+      .get(input.catalogItemId) as
       | { base_material_cost: number; base_labor_minutes: number }
       | undefined;
     if (row) {
+      const baseMaterialCost = Number(row.base_material_cost || 0);
+      const baseLaborMinutes = Number(row.base_labor_minutes || 0);
+      const adjusted = applyAttributeDeltas(baseMaterialCost, baseLaborMinutes);
       return {
-        materialCost: Number(row.base_material_cost || 0),
-        laborMinutes: Number(row.base_labor_minutes || 0),
+        baseMaterialCost,
+        baseLaborMinutes,
+        materialCost: adjusted.materialCost,
+        laborMinutes: adjusted.laborMinutes,
+        baseMaterialCostSnapshot: adjusted.baseMaterialCostSnapshot,
+        baseLaborMinutesSnapshot: adjusted.baseLaborMinutesSnapshot,
+        attributeDeltaMaterialSnapshot: adjusted.attributeDeltaMaterialSnapshot,
+        attributeDeltaLaborSnapshot: adjusted.attributeDeltaLaborSnapshot,
       };
     }
   }
@@ -262,9 +424,13 @@ function resolveCatalogDefaults(input: Partial<TakeoffLineRecord>): {
       | { base_material_cost: number; base_labor_minutes: number }
       | undefined;
     if (row) {
+      const baseMaterialCost = Number(row.base_material_cost || 0);
+      const baseLaborMinutes = Number(row.base_labor_minutes || 0);
       return {
-        materialCost: Number(row.base_material_cost || 0),
-        laborMinutes: Number(row.base_labor_minutes || 0),
+        baseMaterialCost,
+        baseLaborMinutes,
+        materialCost: baseMaterialCost,
+        laborMinutes: baseLaborMinutes,
       };
     }
   }
@@ -294,7 +460,8 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
         : generatedLaborMinutes !== null && generatedLaborMinutes > 0
           ? 'install_family'
           : null;
-  const baseMaterialCost = input.baseMaterialCost ?? materialCost;
+  const baseMaterialCost =
+    input.baseMaterialCost ?? (catalogDefaults.baseMaterialCost !== undefined ? catalogDefaults.baseMaterialCost : materialCost);
   const baseLaborCost = input.baseLaborCost !== undefined
     ? Number(input.baseLaborCost) || 0
     : resolveUnitLaborCostFromMinutes(laborMinutes, laborRatePerHour);
@@ -319,6 +486,22 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
   const isInstallableScope = normalizeNullableBool(input.isInstallableScope);
   const installScopeType = normalizeNullableString(input.installScopeType);
   const installLaborFamily = normalizeNullableString(input.installLaborFamily);
+  const catalogAttributeSnapshotJson =
+    input.catalogAttributeSnapshot && Array.isArray(input.catalogAttributeSnapshot) && input.catalogAttributeSnapshot.length > 0
+      ? JSON.stringify(input.catalogAttributeSnapshot)
+      : null;
+  const baseMaterialCostSnapshot = catalogDefaults.baseMaterialCostSnapshot ?? null;
+  const baseLaborMinutesSnapshot = catalogDefaults.baseLaborMinutesSnapshot ?? null;
+  const attributeDeltaMaterialSnapshot = catalogDefaults.attributeDeltaMaterialSnapshot ?? null;
+  const attributeDeltaLaborSnapshot = catalogDefaults.attributeDeltaLaborSnapshot ?? null;
+  const attributeDeltaMaterialSnapshotJson =
+    attributeDeltaMaterialSnapshot && Array.isArray(attributeDeltaMaterialSnapshot) && attributeDeltaMaterialSnapshot.length > 0
+      ? JSON.stringify(attributeDeltaMaterialSnapshot)
+      : null;
+  const attributeDeltaLaborSnapshotJson =
+    attributeDeltaLaborSnapshot && Array.isArray(attributeDeltaLaborSnapshot) && attributeDeltaLaborSnapshot.length > 0
+      ? JSON.stringify(attributeDeltaLaborSnapshot)
+      : null;
 
   const line: TakeoffLineRecord = {
     id: input.id ?? randomUUID(),
@@ -353,6 +536,11 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     isInstallableScope,
     installScopeType,
     installLaborFamily,
+    catalogAttributeSnapshot: input.catalogAttributeSnapshot ?? null,
+    baseMaterialCostSnapshot,
+    baseLaborMinutesSnapshot,
+    attributeDeltaMaterialSnapshot,
+    attributeDeltaLaborSnapshot,
     sourceMaterialCost,
     generatedLaborMinutes,
     laborOrigin,
@@ -367,8 +555,11 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
       variant_id, intake_scope_bucket, intake_match_confidence,
       source_manufacturer, source_bid_bucket, source_section_header,
       is_installable_scope, install_scope_type, install_labor_family, source_material_cost, generated_labor_minutes, labor_origin,
+      catalog_attribute_snapshot_json,
+      base_material_cost_snapshot, base_labor_minutes_snapshot,
+      attribute_delta_material_snapshot_json, attribute_delta_labor_snapshot_json,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     line.id,
     line.projectId,
@@ -405,6 +596,11 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     line.sourceMaterialCost,
     line.generatedLaborMinutes,
     line.laborOrigin,
+    catalogAttributeSnapshotJson,
+    line.baseMaterialCostSnapshot,
+    line.baseLaborMinutesSnapshot,
+    attributeDeltaMaterialSnapshotJson,
+    attributeDeltaLaborSnapshotJson,
     line.createdAt,
     line.updatedAt
   );
@@ -423,6 +619,13 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
 export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineRecord>): TakeoffLineRecord | null {
   const existing = getTakeoffLineCore(lineId);
   if (!existing) return null;
+
+  if (input.roomId !== undefined && input.roomId !== existing.roomId) {
+    const targetRoom = getRoom(String(input.roomId));
+    if (!targetRoom || targetRoom.projectId !== existing.projectId) {
+      return null;
+    }
+  }
 
   const sanitizedInput = { ...input };
   delete (sanitizedInput as Partial<{ modifierNames?: unknown }>).modifierNames;
@@ -487,6 +690,30 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
   const nextLaborOrigin = input.laborOrigin !== undefined
     ? parseLaborOrigin(input.laborOrigin)
     : existing.laborOrigin ?? null;
+  const nextCatalogAttributeSnapshot =
+    input.catalogAttributeSnapshot !== undefined
+      ? input.catalogAttributeSnapshot
+      : existing.catalogAttributeSnapshot ?? null;
+  const nextCatalogAttributeSnapshotJson =
+    nextCatalogAttributeSnapshot && Array.isArray(nextCatalogAttributeSnapshot) && nextCatalogAttributeSnapshot.length > 0
+      ? JSON.stringify(nextCatalogAttributeSnapshot)
+      : null;
+  const nextBaseMaterialCostSnapshot =
+    input.baseMaterialCostSnapshot !== undefined ? normalizeNullableNumber(input.baseMaterialCostSnapshot) : existing.baseMaterialCostSnapshot ?? null;
+  const nextBaseLaborMinutesSnapshot =
+    input.baseLaborMinutesSnapshot !== undefined ? normalizeNullableNumber(input.baseLaborMinutesSnapshot) : existing.baseLaborMinutesSnapshot ?? null;
+  const nextAttributeDeltaMaterialSnapshot =
+    input.attributeDeltaMaterialSnapshot !== undefined ? input.attributeDeltaMaterialSnapshot : existing.attributeDeltaMaterialSnapshot ?? null;
+  const nextAttributeDeltaLaborSnapshot =
+    input.attributeDeltaLaborSnapshot !== undefined ? input.attributeDeltaLaborSnapshot : existing.attributeDeltaLaborSnapshot ?? null;
+  const nextAttributeDeltaMaterialSnapshotJson =
+    nextAttributeDeltaMaterialSnapshot && Array.isArray(nextAttributeDeltaMaterialSnapshot) && nextAttributeDeltaMaterialSnapshot.length > 0
+      ? JSON.stringify(nextAttributeDeltaMaterialSnapshot)
+      : null;
+  const nextAttributeDeltaLaborSnapshotJson =
+    nextAttributeDeltaLaborSnapshot && Array.isArray(nextAttributeDeltaLaborSnapshot) && nextAttributeDeltaLaborSnapshot.length > 0
+      ? JSON.stringify(nextAttributeDeltaLaborSnapshot)
+      : null;
 
   const next: TakeoffLineRecord = {
     ...existing,
@@ -512,6 +739,11 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
     sourceMaterialCost: nextSourceMaterialCost,
     generatedLaborMinutes: nextGeneratedLaborMinutes,
     laborOrigin: nextLaborOrigin,
+    catalogAttributeSnapshot: nextCatalogAttributeSnapshot ?? null,
+    baseMaterialCostSnapshot: nextBaseMaterialCostSnapshot,
+    baseLaborMinutesSnapshot: nextBaseLaborMinutesSnapshot,
+    attributeDeltaMaterialSnapshot: nextAttributeDeltaMaterialSnapshot,
+    attributeDeltaLaborSnapshot: nextAttributeDeltaLaborSnapshot,
     updatedAt: new Date().toISOString()
   };
 
@@ -522,6 +754,9 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
       bundle_id = ?, catalog_item_id = ?, variant_id = ?, intake_scope_bucket = ?, intake_match_confidence = ?,
       source_manufacturer = ?, source_bid_bucket = ?, source_section_header = ?,
       is_installable_scope = ?, install_scope_type = ?, install_labor_family = ?, source_material_cost = ?, generated_labor_minutes = ?, labor_origin = ?,
+      catalog_attribute_snapshot_json = ?,
+      base_material_cost_snapshot = ?, base_labor_minutes_snapshot = ?,
+      attribute_delta_material_snapshot_json = ?, attribute_delta_labor_snapshot_json = ?,
       updated_at = ?
     WHERE id = ?
   `).run(
@@ -558,6 +793,11 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
     next.sourceMaterialCost,
     next.generatedLaborMinutes,
     next.laborOrigin,
+    nextCatalogAttributeSnapshotJson,
+    next.baseMaterialCostSnapshot,
+    next.baseLaborMinutesSnapshot,
+    nextAttributeDeltaMaterialSnapshotJson,
+    nextAttributeDeltaLaborSnapshotJson,
     next.updatedAt,
     lineId
   );
@@ -576,4 +816,125 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
 export function deleteTakeoffLine(lineId: string): boolean {
   const result = getEstimatorDb().prepare('DELETE FROM takeoff_lines_v1 WHERE id = ?').run(lineId);
   return result.changes > 0;
+}
+
+/** Move lines to a room in the same project. Validates all ids before updating any. */
+export function bulkMoveTakeoffLinesToRoom(
+  lineIds: string[],
+  targetRoomId: string
+): { lines: TakeoffLineRecord[] } | { error: string } {
+  const trimmedRoom = String(targetRoomId || '').trim();
+  if (!trimmedRoom) return { error: 'roomId is required' };
+
+  const room = getRoom(trimmedRoom);
+  if (!room) return { error: 'Room not found' };
+
+  const uniqueIds = Array.from(new Set(lineIds.map((id) => String(id || '').trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return { error: 'lineIds must include at least one line id' };
+
+  for (const id of uniqueIds) {
+    const core = getTakeoffLineCore(id);
+    if (!core) return { error: `Takeoff line not found: ${id}` };
+    if (core.projectId !== room.projectId) {
+      return { error: 'All lines must belong to the same project as the target room' };
+    }
+  }
+
+  const db = getEstimatorDb();
+  try {
+    const lines = db.transaction(() => {
+      const out: TakeoffLineRecord[] = [];
+      for (const id of uniqueIds) {
+        const updated = updateTakeoffLine(id, { roomId: trimmedRoom });
+        if (!updated) throw new Error(`update_failed:${id}`);
+        out.push(updated);
+      }
+      return out;
+    })();
+    return { lines };
+  } catch {
+    return { error: 'Failed to move one or more lines' };
+  }
+}
+
+/**
+ * Deep-clone a takeoff line into `targetRoomId` (must belong to the same project).
+ * Copies stored pricing, catalog link, attribute/delta snapshots, and line_modifiers rows.
+ * Does not write intake catalog memory (duplicate is not a new match event).
+ */
+export function duplicateTakeoffLine(sourceLineId: string, targetRoomId: string): TakeoffLineRecord | null {
+  const source = getTakeoffLineCore(sourceLineId);
+  if (!source) return null;
+  const room = getRoom(targetRoomId);
+  if (!room || room.projectId !== source.projectId) return null;
+
+  const newId = randomUUID();
+  const now = new Date().toISOString();
+  const db = getEstimatorDb();
+
+  const inserted = db
+    .prepare(
+      `
+    INSERT INTO takeoff_lines_v1 (
+      id, project_id, room_id, source_type, source_ref, description, sku, category, subcategory, base_type,
+      qty, unit, material_cost, base_material_cost, labor_minutes, labor_cost, base_labor_cost, pricing_source, unit_sell, line_total, notes, bundle_id, catalog_item_id,
+      variant_id, intake_scope_bucket, intake_match_confidence,
+      source_manufacturer, source_bid_bucket, source_section_header,
+      is_installable_scope, install_scope_type, install_labor_family, source_material_cost, generated_labor_minutes, labor_origin,
+      catalog_attribute_snapshot_json,
+      base_material_cost_snapshot, base_labor_minutes_snapshot,
+      attribute_delta_material_snapshot_json, attribute_delta_labor_snapshot_json,
+      created_at, updated_at
+    )
+    SELECT
+      ?, project_id, ?, source_type, source_ref, description, sku, category, subcategory, base_type,
+      qty, unit, material_cost, base_material_cost, labor_minutes, labor_cost, base_labor_cost, pricing_source, unit_sell, line_total, notes, bundle_id, catalog_item_id,
+      variant_id, intake_scope_bucket, intake_match_confidence,
+      source_manufacturer, source_bid_bucket, source_section_header,
+      is_installable_scope, install_scope_type, install_labor_family, source_material_cost, generated_labor_minutes, labor_origin,
+      catalog_attribute_snapshot_json,
+      base_material_cost_snapshot, base_labor_minutes_snapshot,
+      attribute_delta_material_snapshot_json, attribute_delta_labor_snapshot_json,
+      ?, ?
+    FROM takeoff_lines_v1 WHERE id = ?
+  `
+    )
+    .run(newId, targetRoomId, now, now, sourceLineId);
+
+  if (!inserted.changes) return null;
+
+  const modRows = db
+    .prepare(
+      `SELECT modifier_id, name, add_material_cost, add_labor_minutes, percent_material, percent_labor, created_at
+       FROM line_modifiers_v1 WHERE line_id = ? ORDER BY created_at`
+    )
+    .all(sourceLineId) as Array<{
+      modifier_id: string;
+      name: string;
+      add_material_cost: number;
+      add_labor_minutes: number;
+      percent_material: number;
+      percent_labor: number;
+      created_at: string;
+    }>;
+
+  const insMod = db.prepare(
+    `INSERT INTO line_modifiers_v1 (id, line_id, modifier_id, name, add_material_cost, add_labor_minutes, percent_material, percent_labor, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  for (const m of modRows) {
+    insMod.run(
+      randomUUID(),
+      newId,
+      m.modifier_id,
+      m.name,
+      m.add_material_cost,
+      m.add_labor_minutes,
+      m.percent_material,
+      m.percent_labor,
+      m.created_at
+    );
+  }
+
+  return getTakeoffLine(newId);
 }

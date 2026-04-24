@@ -4,7 +4,6 @@ import { computeReviewLineFingerprint } from './reviewLineFingerprint.ts';
 
 test('computeReviewLineFingerprint is stable for same canonical content', () => {
   const a = computeReviewLineFingerprint({
-    sourceReference: 'file.xlsx',
     roomName: '  Rest 1 ',
     itemCode: 'ABC',
     itemName: 'Partition',
@@ -13,7 +12,6 @@ test('computeReviewLineFingerprint is stable for same canonical content', () => 
     unit: 'EA',
   });
   const b = computeReviewLineFingerprint({
-    sourceReference: 'file.xlsx',
     roomName: 'rest 1',
     itemCode: 'abc',
     itemName: 'Partition',
@@ -27,7 +25,6 @@ test('computeReviewLineFingerprint is stable for same canonical content', () => 
 
 test('computeReviewLineFingerprint changes when quantity changes', () => {
   const base = {
-    sourceReference: 'f',
     roomName: 'G',
     itemCode: '',
     itemName: 'x',

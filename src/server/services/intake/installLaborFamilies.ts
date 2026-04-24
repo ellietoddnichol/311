@@ -15,7 +15,8 @@ export type InstallUnitBasis =
   | 'per_screen'
   | 'per_set'
   | 'per_pilaster'
-  | 'per_hardware_kit';
+  | 'per_hardware_kit'
+  | 'per_linear_foot';
 
 export interface InstallLaborFamily {
   key: string;
@@ -36,6 +37,46 @@ const REGISTRY: Record<string, InstallLaborFamily> = {
     canInstallWithoutExactSku: true,
     description: 'Assembly-level install for an HDPE / phenolic / stainless toilet partition compartment (door, panel, pilaster).',
   },
+  toilet_partition_hdpe: {
+    key: 'toilet_partition_hdpe',
+    label: 'Toilet partitions — HDPE / solid plastic',
+    defaultInstallMinutes: 95,
+    unitBasis: 'per_compartment',
+    canInstallWithoutExactSku: true,
+    description: 'Compartment-level install for HDPE/solid plastic toilet partitions.',
+  },
+  toilet_partition_phenolic: {
+    key: 'toilet_partition_phenolic',
+    label: 'Toilet partitions — Phenolic',
+    defaultInstallMinutes: 105,
+    unitBasis: 'per_compartment',
+    canInstallWithoutExactSku: true,
+    description: 'Compartment-level install for phenolic toilet partitions.',
+  },
+  toilet_partition_powder_coated_steel: {
+    key: 'toilet_partition_powder_coated_steel',
+    label: 'Toilet partitions — Powder coated steel',
+    defaultInstallMinutes: 90,
+    unitBasis: 'per_compartment',
+    canInstallWithoutExactSku: true,
+    description: 'Compartment-level install for powder coated steel toilet partitions.',
+  },
+  toilet_partition_hpl: {
+    key: 'toilet_partition_hpl',
+    label: 'Toilet partitions — Plastic laminate (HPL)',
+    defaultInstallMinutes: 95,
+    unitBasis: 'per_compartment',
+    canInstallWithoutExactSku: true,
+    description: 'Compartment-level install for plastic laminate (HPL) toilet partitions.',
+  },
+  toilet_partition_stainless: {
+    key: 'toilet_partition_stainless',
+    label: 'Toilet partitions — Stainless steel',
+    defaultInstallMinutes: 110,
+    unitBasis: 'per_compartment',
+    canInstallWithoutExactSku: true,
+    description: 'Compartment-level install for stainless steel toilet partitions.',
+  },
   urinal_screen: {
     key: 'urinal_screen',
     label: 'Urinal screen',
@@ -43,6 +84,22 @@ const REGISTRY: Record<string, InstallLaborFamily> = {
     unitBasis: 'per_screen',
     canInstallWithoutExactSku: true,
     description: 'Floor or wall mounted urinal screen install.',
+  },
+  urinal_screen_hdpe: {
+    key: 'urinal_screen_hdpe',
+    label: 'Urinal screen — HDPE / solid plastic',
+    defaultInstallMinutes: 35,
+    unitBasis: 'per_screen',
+    canInstallWithoutExactSku: true,
+    description: 'Floor or wall mounted HDPE/solid plastic urinal screen install.',
+  },
+  urinal_screen_steel: {
+    key: 'urinal_screen_steel',
+    label: 'Urinal screen — Steel',
+    defaultInstallMinutes: 35,
+    unitBasis: 'per_screen',
+    canInstallWithoutExactSku: true,
+    description: 'Floor or wall mounted steel urinal screen install.',
   },
   pilaster: {
     key: 'pilaster',
@@ -163,6 +220,38 @@ const REGISTRY: Record<string, InstallLaborFamily> = {
     unitBasis: 'per_each',
     canInstallWithoutExactSku: true,
     description: 'Semi-recessed / surface FE cabinet install.',
+  },
+  aed_cabinet: {
+    key: 'aed_cabinet',
+    label: 'AED cabinet',
+    defaultInstallMinutes: 30,
+    unitBasis: 'per_each',
+    canInstallWithoutExactSku: true,
+    description: 'AED cabinet install (surface or recessed).',
+  },
+  visual_display_board: {
+    key: 'visual_display_board',
+    label: 'Visual display board',
+    defaultInstallMinutes: 60,
+    unitBasis: 'per_each',
+    canInstallWithoutExactSku: true,
+    description: 'Markerboard/tackboard installation (blocking/patch/paint excluded).',
+  },
+  wall_protection: {
+    key: 'wall_protection',
+    label: 'Wall / corner protection',
+    defaultInstallMinutes: 8,
+    unitBasis: 'per_linear_foot',
+    canInstallWithoutExactSku: true,
+    description: 'Corner guards, chair rails, crash rails (install labor per LF; substrate/patch/paint excluded).',
+  },
+  postal_specialty: {
+    key: 'postal_specialty',
+    label: 'Postal specialty (mailboxes)',
+    defaultInstallMinutes: 180,
+    unitBasis: 'per_each',
+    canInstallWithoutExactSku: true,
+    description: '4C mailboxes / CBU units / parcel lockers (site conditions and pedestal anchoring can materially change labor).',
   },
   locker: {
     key: 'locker',

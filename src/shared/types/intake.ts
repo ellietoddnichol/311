@@ -555,6 +555,17 @@ export interface IntakeLineEstimateSuggestion {
   sourceSectionHeader?: string | null;
   isInstallableScope?: boolean | null;
   installScopeType?: string | null;
+  /**
+   * Strong explicit attribute inference (e.g. "matte black", "recessed", "KD") when the matched
+   * catalog item has the corresponding active attribute. Carried into takeoff-line snapshots for
+   * new work; older jobs are not rewritten.
+   */
+  inferredCatalogAttributeSnapshot?: Array<{
+    attributeType: 'finish' | 'coating' | 'grip' | 'mounting' | 'assembly';
+    attributeValue: string;
+    source: 'inferred';
+    reason: string;
+  }> | null;
   /** Optional Div 10 Brain layer (classify / retrieval / catalog assist / modifier assist). */
   div10Brain?: Div10LineBrainEvidence;
 }

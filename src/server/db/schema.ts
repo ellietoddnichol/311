@@ -80,6 +80,11 @@ export function initEstimatorSchema(db: Database) {
       bundle_id TEXT,
       catalog_item_id TEXT,
       variant_id TEXT,
+      catalog_attribute_snapshot_json TEXT,
+      base_material_cost_snapshot REAL,
+      base_labor_minutes_snapshot REAL,
+      attribute_delta_material_snapshot_json TEXT,
+      attribute_delta_labor_snapshot_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects_v1(id) ON DELETE CASCADE,
@@ -167,6 +172,8 @@ export function initEstimatorSchema(db: Database) {
       modifiers_synced INTEGER NOT NULL DEFAULT 0,
       bundles_synced INTEGER NOT NULL DEFAULT 0,
       bundle_items_synced INTEGER NOT NULL DEFAULT 0,
+      aliases_synced INTEGER NOT NULL DEFAULT 0,
+      attributes_synced INTEGER NOT NULL DEFAULT 0,
       warnings_json TEXT NOT NULL DEFAULT '[]'
     );
 
@@ -179,6 +186,8 @@ export function initEstimatorSchema(db: Database) {
       modifiers_synced INTEGER NOT NULL DEFAULT 0,
       bundles_synced INTEGER NOT NULL DEFAULT 0,
       bundle_items_synced INTEGER NOT NULL DEFAULT 0,
+      aliases_synced INTEGER NOT NULL DEFAULT 0,
+      attributes_synced INTEGER NOT NULL DEFAULT 0,
       warnings_json TEXT NOT NULL DEFAULT '[]'
     );
 
@@ -191,6 +200,21 @@ export function initEstimatorSchema(db: Database) {
       data_base64 TEXT NOT NULL,
       created_at TEXT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects_v1(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS db_persistence_status_v1 (
+      id TEXT PRIMARY KEY,
+      db_path TEXT NOT NULL,
+      mode TEXT NOT NULL, -- 'local' | 'volume' | 'ephemeral_gcs' | 'ephemeral'
+      gcs_bucket TEXT,
+      gcs_object TEXT,
+      restore_attempted_at TEXT,
+      restore_status TEXT, -- 'not_configured' | 'skipped_existing_db' | 'no_snapshot' | 'restored' | 'failed'
+      restore_message TEXT,
+      last_backup_success_at TEXT,
+      last_backup_failure_at TEXT,
+      last_backup_error TEXT,
+      updated_at TEXT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_rooms_v1_project ON rooms_v1(project_id);
@@ -206,6 +230,145 @@ export function initEstimatorSchema(db: Database) {
       hit_count INTEGER NOT NULL DEFAULT 1,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS intake_review_overrides_v1 (
+      review_line_fingerprint TEXT PRIMARY KEY,
+      status TEXT NOT NULL, -- 'ignored'
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  // db_persistence_status_v1 seed row (safe, idempotent).
+  try {
+    db.prepare(`
+      INSERT OR IGNORE INTO db_persistence_status_v1 (id, db_path, mode, updated_at)
+      VALUES ('db', '', 'local', datetime('now'))
+    `).run();
+  } catch {
+    // Best-effort only.
+  }
+
+  // Install-labor modifiers: governed install configuration deltas for configurable systems (e.g. partitions).
+  // Additive and safe: no existing reads depend on this table yet.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS install_labor_modifiers_v1 (
+      id TEXT PRIMARY KEY,
+      modifier_key TEXT NOT NULL,
+      applies_to_install_labor_family TEXT NOT NULL,
+      description TEXT NOT NULL,
+      labor_minutes_adder REAL,
+      labor_multiplier REAL,
+      material_adder REAL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_install_labor_modifiers_family ON install_labor_modifiers_v1(applies_to_install_labor_family);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_install_labor_modifiers_unique ON install_labor_modifiers_v1(modifier_key, applies_to_install_labor_family);
+  `);
+
+  // Seed partition/urinal modifiers (seed-only framework; selection/application can evolve without schema churn).
+  try {
+    const seed = db.prepare(`
+      INSERT OR IGNORE INTO install_labor_modifiers_v1 (
+        id, modifier_key, applies_to_install_labor_family, description,
+        labor_minutes_adder, labor_multiplier, material_adder, active, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now')
+      )
+    `);
+
+    const families = [
+      'toilet_partition_hdpe',
+      'toilet_partition_phenolic',
+      'toilet_partition_powder_coated_steel',
+      'toilet_partition_hpl',
+      'toilet_partition_stainless',
+      'urinal_screen_hdpe',
+      'urinal_screen_steel',
+    ];
+
+    const seedForAll = (modifierKey: string, description: string, input: { addMinutes?: number; multiplier?: number; materialAdder?: number }) => {
+      for (const fam of families) {
+        seed.run(
+          `ilm-${modifierKey}-${fam}`,
+          modifierKey,
+          fam,
+          description,
+          input.addMinutes ?? null,
+          input.multiplier ?? null,
+          input.materialAdder ?? null
+        );
+      }
+    };
+
+    seedForAll('ada_stall', 'ADA stall / compliant compartment (often more detailing and anchoring).', { addMinutes: 25 });
+    seedForAll('ambulatory_stall', 'Ambulatory stall (36" wide) compartment detailing.', { addMinutes: 15 });
+    seedForAll('full_height_privacy', 'Full-height / enhanced privacy configuration.', { addMinutes: 35 });
+    seedForAll('ceiling_hung', 'Ceiling-hung mounting (coordination and install complexity).', { addMinutes: 20 });
+    seedForAll('floor_anchored', 'Floor-anchored mounting.', { addMinutes: 10 });
+    seedForAll('overhead_braced', 'Overhead braced system.', { addMinutes: 10 });
+    seedForAll('masonry_anchoring', 'Masonry anchoring / drilling (productivity impact).', { multiplier: 1.15 });
+    seedForAll('uneven_floor', 'Uneven floor / shimming and layout rework.', { addMinutes: 20 });
+    seedForAll('demolition_existing', 'Demo/remove existing partitions and prep area.', { addMinutes: 45 });
+    seedForAll('occupied_renovation', 'Occupied renovation constraints (phasing, protection, slower logistics).', { multiplier: 1.15 });
+    seedForAll('multi_stall_layout', 'Multi-stall bank layout/coordination (alignment, scribing, sequencing).', { multiplier: 1.1 });
+    seedForAll('corner_condition', 'Corner conditions / returns (layout complexity).', { addMinutes: 15 });
+    seedForAll('end_panel_condition', 'End panels / wing walls beyond standard compartment.', { addMinutes: 15 });
+  } catch {
+    // Best-effort seeding only.
+  }
+
+  // Idempotent migration for new sync-count columns.
+  try {
+    const statusCols = db.prepare('PRAGMA table_info(catalog_sync_status_v1)').all() as Array<{ name: string }>;
+    const statusNames = new Set(statusCols.map((c) => c.name));
+    if (!statusNames.has('aliases_synced')) db.exec('ALTER TABLE catalog_sync_status_v1 ADD COLUMN aliases_synced INTEGER NOT NULL DEFAULT 0');
+    if (!statusNames.has('attributes_synced')) db.exec('ALTER TABLE catalog_sync_status_v1 ADD COLUMN attributes_synced INTEGER NOT NULL DEFAULT 0');
+  } catch {
+    // best-effort
+  }
+  try {
+    const runCols = db.prepare('PRAGMA table_info(catalog_sync_runs_v1)').all() as Array<{ name: string }>;
+    const runNames = new Set(runCols.map((c) => c.name));
+    if (!runNames.has('aliases_synced')) db.exec('ALTER TABLE catalog_sync_runs_v1 ADD COLUMN aliases_synced INTEGER NOT NULL DEFAULT 0');
+    if (!runNames.has('attributes_synced')) db.exec('ALTER TABLE catalog_sync_runs_v1 ADD COLUMN attributes_synced INTEGER NOT NULL DEFAULT 0');
+  } catch {
+    // best-effort
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS catalog_item_aliases (
+      id TEXT PRIMARY KEY,
+      catalog_item_id TEXT NOT NULL,
+      alias_type TEXT NOT NULL,
+      alias_value TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_catalog_item_aliases_item ON catalog_item_aliases(catalog_item_id);
+    CREATE INDEX IF NOT EXISTS idx_catalog_item_aliases_value ON catalog_item_aliases(alias_value);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_catalog_item_aliases_unique ON catalog_item_aliases(catalog_item_id, alias_type, alias_value);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS catalog_item_attributes (
+      id TEXT PRIMARY KEY,
+      catalog_item_id TEXT NOT NULL,
+      attribute_type TEXT NOT NULL,
+      attribute_value TEXT NOT NULL,
+      material_delta_type TEXT,
+      material_delta_value REAL,
+      labor_delta_type TEXT,
+      labor_delta_value REAL,
+      active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_catalog_item_attributes_item ON catalog_item_attributes(catalog_item_id);
+    CREATE INDEX IF NOT EXISTS idx_catalog_item_attributes_type ON catalog_item_attributes(attribute_type);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_catalog_item_attributes_unique ON catalog_item_attributes(catalog_item_id, attribute_type, attribute_value);
   `);
 
   const settingsExists = db.prepare('SELECT 1 FROM settings_v1 WHERE id = ?').get('global');
@@ -248,6 +411,11 @@ export function initEstimatorSchema(db: Database) {
   const takeoffColumns = db.prepare("PRAGMA table_info(takeoff_lines_v1)").all() as Array<{ name: string }>;
 
   const projectColumns = db.prepare("PRAGMA table_info(projects_v1)").all() as Array<{ name: string }>;
+  const ensureProjectColumn = (name: string, ddl: string) => {
+    if (!projectColumns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE projects_v1 ADD COLUMN ${ddl}`);
+    }
+  };
   const hasPricingMode = projectColumns.some((column) => column.name === 'pricing_mode');
   if (!hasPricingMode) {
     db.exec("ALTER TABLE projects_v1 ADD COLUMN pricing_mode TEXT NOT NULL DEFAULT 'labor_and_material'");
@@ -318,6 +486,16 @@ export function initEstimatorSchema(db: Database) {
   const projectCols2 = db.prepare('PRAGMA table_info(projects_v1)').all() as Array<{ name: string }>;
   if (!projectCols2.some((column) => column.name === 'structured_assumptions_json')) {
     db.exec("ALTER TABLE projects_v1 ADD COLUMN structured_assumptions_json TEXT NOT NULL DEFAULT '[]'");
+  }
+
+  // Defaulting sources (non-destructive; used to label auto-filled values in UI and keep them stable).
+  try {
+    ensureProjectColumn('project_number_source', "project_number_source TEXT NOT NULL DEFAULT 'manual'");
+    ensureProjectColumn('client_name_source', "client_name_source TEXT NOT NULL DEFAULT 'manual'");
+    ensureProjectColumn('address_source', "address_source TEXT NOT NULL DEFAULT 'manual'");
+    ensureProjectColumn('location_label_source', "location_label_source TEXT NOT NULL DEFAULT 'manual'");
+  } catch {
+    // Best-effort only; do not block boot.
   }
 
   db.exec("UPDATE projects_v1 SET job_conditions_json = '{}' WHERE job_conditions_json IS NULL OR trim(job_conditions_json) = ''");
@@ -430,6 +608,11 @@ export function initEstimatorSchema(db: Database) {
   ensureTakeoffColumn('generated_labor_minutes', 'generated_labor_minutes REAL');
   ensureTakeoffColumn('labor_origin', 'labor_origin TEXT');
   ensureTakeoffColumn('install_labor_family', 'install_labor_family TEXT');
+  ensureTakeoffColumn('catalog_attribute_snapshot_json', 'catalog_attribute_snapshot_json TEXT');
+  ensureTakeoffColumn('base_material_cost_snapshot', 'base_material_cost_snapshot REAL');
+  ensureTakeoffColumn('base_labor_minutes_snapshot', 'base_labor_minutes_snapshot REAL');
+  ensureTakeoffColumn('attribute_delta_material_snapshot_json', 'attribute_delta_material_snapshot_json TEXT');
+  ensureTakeoffColumn('attribute_delta_labor_snapshot_json', 'attribute_delta_labor_snapshot_json TEXT');
 
   const modifierColumns = db.prepare('PRAGMA table_info(modifiers_v1)').all() as Array<{ name: string }>;
   if (modifierColumns.length > 0 && !modifierColumns.some((c) => c.name === 'description')) {
@@ -450,6 +633,11 @@ export function initEstimatorSchema(db: Database) {
 
   const catalogItemColumns = db.prepare('PRAGMA table_info(catalog_items)').all() as Array<{ name: string }>;
   if (catalogItemColumns.length > 0) {
+    const ensureCatalogColumn = (name: string, ddl: string) => {
+      if (!catalogItemColumns.some((c) => c.name === name)) {
+        db.exec(`ALTER TABLE catalog_items ADD COLUMN ${ddl}`);
+      }
+    };
     if (!catalogItemColumns.some((c) => c.name === 'brand')) {
       db.exec('ALTER TABLE catalog_items ADD COLUMN brand TEXT');
     }
@@ -464,6 +652,613 @@ export function initEstimatorSchema(db: Database) {
     }
     if (!catalogItemColumns.some((c) => c.name === 'install_labor_family')) {
       db.exec('ALTER TABLE catalog_items ADD COLUMN install_labor_family TEXT');
+    }
+
+    // Transitional canonicalization fields (keep all existing reads working).
+    ensureCatalogColumn('canonical_sku', 'canonical_sku TEXT');
+    ensureCatalogColumn('is_canonical', 'is_canonical INTEGER NOT NULL DEFAULT 1');
+    ensureCatalogColumn('alias_of', 'alias_of TEXT');
+    ensureCatalogColumn('labor_basis', 'labor_basis TEXT');
+    ensureCatalogColumn('default_mounting_type', 'default_mounting_type TEXT');
+    ensureCatalogColumn('finish_group', 'finish_group TEXT');
+    ensureCatalogColumn('attribute_group', 'attribute_group TEXT');
+    ensureCatalogColumn('duplicate_group_key', 'duplicate_group_key TEXT');
+    ensureCatalogColumn('deprecated', 'deprecated INTEGER NOT NULL DEFAULT 0');
+    ensureCatalogColumn('deprecated_reason', 'deprecated_reason TEXT');
+
+    // Governed system/catalog metadata (additive; used heavily by configurable systems like toilet partitions).
+    ensureCatalogColumn('record_granularity', 'record_granularity TEXT');
+    ensureCatalogColumn('material_family', 'material_family TEXT');
+    ensureCatalogColumn('system_series', 'system_series TEXT');
+    ensureCatalogColumn('privacy_level', 'privacy_level TEXT');
+    ensureCatalogColumn('manufacturer_configured_item', 'manufacturer_configured_item INTEGER NOT NULL DEFAULT 0');
+    ensureCatalogColumn('canonical_match_anchor', 'canonical_match_anchor INTEGER NOT NULL DEFAULT 0');
+    ensureCatalogColumn('exact_component_sku', 'exact_component_sku INTEGER NOT NULL DEFAULT 0');
+    ensureCatalogColumn('requires_project_configuration', 'requires_project_configuration INTEGER NOT NULL DEFAULT 0');
+    ensureCatalogColumn('default_unit', 'default_unit TEXT');
+    ensureCatalogColumn('estimator_notes', 'estimator_notes TEXT');
+
+    // Backfill safe defaults so older rows behave as canonical rows by default.
+    db.exec(`UPDATE catalog_items SET canonical_sku = sku WHERE (canonical_sku IS NULL OR trim(canonical_sku) = '') AND sku IS NOT NULL`);
+    db.exec(`UPDATE catalog_items SET is_canonical = 1 WHERE is_canonical IS NULL`);
+    db.exec(`UPDATE catalog_items SET deprecated = 0 WHERE deprecated IS NULL`);
+
+    // Seed grouping helpers for a few high-value Div 10 categories without changing reads.
+    // Conservative heuristics: detect common finish suffixes on SKUs and derive canonical_sku + finish_group + duplicate_group_key.
+    try {
+      const seedCategories = new Set(['grab bars', 'washroom accessories', 'toilet partitions', 'toilet accessories', 'partitions']);
+      const rows = db
+        .prepare(
+          `SELECT id, sku, category
+           FROM catalog_items
+           WHERE sku IS NOT NULL
+             AND category IS NOT NULL
+             AND (finish_group IS NULL OR trim(finish_group) = '' OR duplicate_group_key IS NULL OR trim(duplicate_group_key) = '')
+          `
+        )
+        .all() as Array<{ id: string; sku: string; category: string }>;
+
+      const finishTokenRegex = /^(.*?)(?:[-_ ]?(SS|CH|PB|BN|ORB|PC))$/i;
+      const normalizeKey = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+
+      const update = db.prepare(
+        `UPDATE catalog_items
+         SET canonical_sku = COALESCE(?, canonical_sku),
+             finish_group = COALESCE(?, finish_group),
+             duplicate_group_key = COALESCE(?, duplicate_group_key)
+         WHERE id = ?`
+      );
+
+      for (const row of rows) {
+        const categoryKey = normalizeKey(row.category);
+        if (!seedCategories.has(categoryKey)) continue;
+
+        const skuRaw = String(row.sku || '').trim();
+        if (!skuRaw) continue;
+
+        const match = finishTokenRegex.exec(skuRaw);
+        if (!match) continue;
+
+        const baseSku = match[1]?.trim();
+        const finish = match[2]?.toUpperCase();
+        if (!baseSku || !finish) continue;
+
+        const dupKey = `${normalizeKey(categoryKey)}|${normalizeKey(baseSku)}`;
+        update.run(baseSku, finish, dupKey, row.id);
+      }
+    } catch {
+      // Best-effort backfill only; never block app boot.
+    }
+
+    // Backfill first-class aliases from seeded duplicate patterns (best-effort; no estimate math changes).
+    // For finish-suffixed SKUs, add a legacy_sku alias onto the canonical item record.
+    try {
+      db.exec(`
+        INSERT OR IGNORE INTO catalog_item_aliases (id, catalog_item_id, alias_type, alias_value, created_at, updated_at)
+        SELECT
+          'alias-' || lower(hex(randomblob(8))) AS id,
+          canon.id AS catalog_item_id,
+          'legacy_sku' AS alias_type,
+          dup.sku AS alias_value,
+          datetime('now') AS created_at,
+          datetime('now') AS updated_at
+        FROM catalog_items dup
+        JOIN catalog_items canon
+          ON canon.duplicate_group_key = dup.duplicate_group_key
+         AND canon.sku = canon.canonical_sku
+        WHERE dup.duplicate_group_key IS NOT NULL
+          AND trim(dup.duplicate_group_key) <> ''
+          AND dup.sku IS NOT NULL
+          AND trim(dup.sku) <> ''
+          AND canon.id IS NOT NULL
+          AND lower(dup.sku) <> lower(canon.sku);
+      `);
+    } catch {
+      // Best-effort only.
+    }
+
+    // Seed structured attributes from existing canonicalization hints (best-effort).
+    // - finish_group -> (finish)
+    // - default_mounting_type -> (mounting)
+    // - keyword heuristics from description/sku -> coating/grip/assembly/mounting
+    try {
+      const seedCategories = new Set([
+        'grab bars',
+        'washroom accessories',
+        'toilet partitions',
+        'toilet accessories',
+        'partitions',
+        'lockers',
+        'fire protection specialties',
+        'fire specialties',
+      ]);
+      const normalizeKey = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+
+      const rows = db
+        .prepare(
+          `SELECT id, sku, category, description, finish_group, default_mounting_type
+           FROM catalog_items
+           WHERE active = 1`
+        )
+        .all() as Array<{
+        id: string;
+        sku: string;
+        category: string;
+        description: string;
+        finish_group: string | null;
+        default_mounting_type: string | null;
+      }>;
+
+      const insert = db.prepare(`
+        INSERT OR IGNORE INTO catalog_item_attributes (
+          id, catalog_item_id, attribute_type, attribute_value,
+          material_delta_type, material_delta_value, labor_delta_type, labor_delta_value,
+          active, sort_order, created_at, updated_at
+        ) VALUES ('attr-' || lower(hex(randomblob(8))), ?, ?, ?, NULL, NULL, NULL, NULL, 1, 0, datetime('now'), datetime('now'))
+      `);
+
+      for (const row of rows) {
+        const categoryKey = normalizeKey(row.category || '');
+        if (!seedCategories.has(categoryKey)) continue;
+
+        const sku = String(row.sku || '').toLowerCase();
+        const desc = String(row.description || '').toLowerCase();
+        const text = `${sku} ${desc}`;
+
+        const finish = row.finish_group ? String(row.finish_group).trim() : '';
+        if (finish) insert.run(row.id, 'finish', finish);
+
+        const mounting = row.default_mounting_type ? String(row.default_mounting_type).trim() : '';
+        if (mounting) insert.run(row.id, 'mounting', mounting);
+
+        // Heuristics (conservative; adds attributes but does not alter costs yet).
+        if (text.includes('matte black') || text.includes('black') || sku.includes('-mb') || sku.includes('_mb')) {
+          insert.run(row.id, 'finish', 'MATTE_BLACK');
+        }
+        if (text.includes('antimicrobial') || text.includes('anti-microbial')) {
+          insert.run(row.id, 'coating', 'ANTIMICROBIAL');
+        }
+        if (text.includes('peened') || text.includes('peen')) {
+          insert.run(row.id, 'grip', 'PEENED');
+        }
+        if (text.includes('semi-recess') || text.includes('semi recess')) {
+          insert.run(row.id, 'mounting', 'SEMI_RECESSED');
+        } else if (text.includes('recess')) {
+          insert.run(row.id, 'mounting', 'RECESSED');
+        } else if (text.includes('surface')) {
+          insert.run(row.id, 'mounting', 'SURFACE');
+        }
+        if (text.includes('kd') || text.includes('knock down') || text.includes('knock-down')) {
+          insert.run(row.id, 'assembly', 'KD');
+        }
+      }
+    } catch {
+      // Best-effort only.
+    }
+
+    // Partition/urinal screen governed canonicals: seed strong alias phrases to support matching.
+    // Best-effort; never blocks boot. Uses canonical SKUs inserted via takeoff registry seeding.
+    try {
+      const db2 = db;
+      const ensureAliases = (canonicalSku: string, aliasValues: string[]) => {
+        const row = db2.prepare(`SELECT id FROM catalog_items WHERE lower(sku) = lower(?) LIMIT 1`).get(canonicalSku) as { id: string } | undefined;
+        if (!row?.id) return;
+        const insert = db2.prepare(
+          `INSERT OR IGNORE INTO catalog_item_aliases (id, catalog_item_id, alias_type, alias_value, created_at, updated_at)
+           VALUES ('alias-' || lower(hex(randomblob(8))), ?, 'parser_phrase', ?, datetime('now'), datetime('now'))`
+        );
+        for (const v of aliasValues) {
+          const trimmed = String(v || '').trim();
+          if (!trimmed) continue;
+          insert.run(row.id, trimmed);
+        }
+      };
+
+      ensureAliases('Scranton-Eclipse-HDPE', [
+        'eclipse hdpe partitions',
+        'scranton eclipse partitions',
+        'solid plastic toilet partitions',
+        'hdpe toilet partitions',
+        'partition compartment',
+        'toilet partition stall',
+      ]);
+      ensureAliases('ASI-Phenolic-UltimatePrivacy', [
+        'phenolic ultimate privacy',
+        'ultimate privacy phenolic',
+        'privacy enhanced phenolic partitions',
+        'full height privacy partitions',
+        'black core phenolic partitions',
+      ]);
+      ensureAliases('Hadrian-PowderCoated-Steel', [
+        'powder coated steel partitions',
+        'hadrian powder coated partitions',
+        'painted steel toilet partitions',
+      ]);
+      ensureAliases('ASI-HPL-PlasticLaminate', [
+        'plastic laminate partitions',
+        'hpl toilet partitions',
+        'laminate toilet partitions',
+      ]);
+      ensureAliases('Hadrian-Stainless', [
+        'hadrian stainless partitions',
+        'stainless steel toilet partitions',
+      ]);
+      ensureAliases('Scranton-UrinalScreen-HDPE', [
+        'urinal screen',
+        'privacy screen',
+        'divider screen',
+        'hdpe urinal screen',
+      ]);
+      ensureAliases('Hadrian-UrinalScreen-Steel', [
+        'powder coated urinal screen',
+        'steel urinal screen',
+      ]);
+    } catch {
+      // Best-effort only.
+    }
+
+    // Fire specialties: seed mounting + rating attributes as governed variants (no duplicate SKUs).
+    try {
+      const rows = db.prepare(`SELECT id, sku FROM catalog_items WHERE sku IN ('FE-CABINET','AED-CABINET')`).all() as Array<{ id: string; sku: string }>;
+      const bySku = new Map(rows.map((r) => [r.sku, r.id]));
+
+      const insertAttr = db.prepare(`
+        INSERT OR IGNORE INTO catalog_item_attributes (
+          id, catalog_item_id, attribute_type, attribute_value,
+          material_delta_type, material_delta_value, labor_delta_type, labor_delta_value,
+          active, sort_order, created_at, updated_at
+        ) VALUES ('attr-' || lower(hex(randomblob(8))), ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, datetime('now'), datetime('now'))
+      `);
+
+      const feId = bySku.get('FE-CABINET');
+      if (feId) {
+        insertAttr.run(feId, 'mounting', 'SURFACE', 0);
+        insertAttr.run(feId, 'mounting', 'SEMI_RECESSED', 1);
+        insertAttr.run(feId, 'mounting', 'RECESSED', 2);
+        // Use assembly for rating until a dedicated rating attribute type exists.
+        insertAttr.run(feId, 'assembly', 'FIRE_RATED', 3);
+      }
+
+      const aedId = bySku.get('AED-CABINET');
+      if (aedId) {
+        insertAttr.run(aedId, 'mounting', 'SURFACE', 0);
+        insertAttr.run(aedId, 'mounting', 'RECESSED', 1);
+      }
+    } catch {
+      // Best-effort only.
+    }
+
+    // Lockers: seed canonical anchors + assembly attributes (no duplicate rows for assembly wording).
+    try {
+      const rows = db
+        .prepare(
+          `SELECT id, sku
+           FROM catalog_items
+           WHERE sku IN (
+             'LOCKER-STEEL-1T','LOCKER-STEEL-2T','LOCKER-STEEL-3T','LOCKER-STEEL-6T',
+             'LOCKER-BENCH-48',
+             'ASI-LOCKER-TRADITIONAL-STEEL',
+             'Scranton-Tufftec-HDPE-1T','Scranton-Tufftec-HDPE-6T'
+           )`
+        )
+        .all() as Array<{ id: string; sku: string }>;
+      const bySku = new Map(rows.map((r) => [r.sku, r.id]));
+
+      const insertAttr = db.prepare(`
+        INSERT OR IGNORE INTO catalog_item_attributes (
+          id, catalog_item_id, attribute_type, attribute_value,
+          material_delta_type, material_delta_value, labor_delta_type, labor_delta_value,
+          active, sort_order, created_at, updated_at
+        ) VALUES ('attr-' || lower(hex(randomblob(8))), ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, datetime('now'), datetime('now'))
+      `);
+
+      const insertAlias = db.prepare(
+        `INSERT OR IGNORE INTO catalog_item_aliases (id, catalog_item_id, alias_type, alias_value, created_at, updated_at)
+         VALUES ('alias-' || lower(hex(randomblob(8))), ?, 'parser_phrase', ?, datetime('now'), datetime('now'))`
+      );
+
+      const lockerSkus = ['LOCKER-STEEL-1T', 'LOCKER-STEEL-2T', 'LOCKER-STEEL-3T', 'LOCKER-STEEL-6T'] as const;
+      for (const sku of lockerSkus) {
+        const id = bySku.get(sku);
+        if (!id) continue;
+        insertAttr.run(id, 'assembly', 'KD', 0);
+        insertAttr.run(id, 'assembly', 'WELDED', 1);
+        insertAttr.run(id, 'assembly', 'ASSEMBLED', 2);
+        insertAttr.run(id, 'assembly', 'SLOPE_TOP', 3);
+      }
+
+      const asiTraditional = bySku.get('ASI-LOCKER-TRADITIONAL-STEEL');
+      if (asiTraditional) {
+        insertAttr.run(asiTraditional, 'assembly', 'KD', 0);
+        insertAttr.run(asiTraditional, 'assembly', 'ASSEMBLED', 1);
+        insertAttr.run(asiTraditional, 'assembly', 'SLOPE_TOP', 2);
+        for (const v of ['steel lockers', 'asi lockers', 'traditional collection lockers']) insertAlias.run(asiTraditional, v);
+      }
+
+      const scranton1t = bySku.get('Scranton-Tufftec-HDPE-1T');
+      if (scranton1t) {
+        insertAttr.run(scranton1t, 'assembly', 'KD', 0);
+        insertAttr.run(scranton1t, 'assembly', 'ASSEMBLED', 1);
+        for (const v of ['plastic lockers', 'hdpe lockers', 'tufftec lockers', 'scranton lockers', 'solid plastic lockers']) insertAlias.run(scranton1t, v);
+      }
+      const scranton6t = bySku.get('Scranton-Tufftec-HDPE-6T');
+      if (scranton6t) {
+        insertAttr.run(scranton6t, 'assembly', 'KD', 0);
+        insertAttr.run(scranton6t, 'assembly', 'ASSEMBLED', 1);
+        for (const v of ['plastic box locker', 'hdpe box locker', 'six tier plastic locker', 'tufftec box locker']) insertAlias.run(scranton6t, v);
+      }
+
+      const oneT = bySku.get('LOCKER-STEEL-1T');
+      if (oneT) {
+        for (const v of ['single tier locker', '1 tier locker', 'one tier locker', 'full height locker']) insertAlias.run(oneT, v);
+      }
+      const twoT = bySku.get('LOCKER-STEEL-2T');
+      if (twoT) {
+        for (const v of ['double tier locker', '2 tier locker', 'two tier locker']) insertAlias.run(twoT, v);
+      }
+      const threeT = bySku.get('LOCKER-STEEL-3T');
+      if (threeT) {
+        for (const v of ['triple tier locker', '3 tier locker', 'three tier locker']) insertAlias.run(threeT, v);
+      }
+      const sixT = bySku.get('LOCKER-STEEL-6T');
+      if (sixT) {
+        for (const v of ['six tier locker', '6 tier locker', 'box locker']) insertAlias.run(sixT, v);
+      }
+
+      // Slope-top phrases: bias toward the 1T steel canonical unless tier is otherwise inferred upstream.
+      if (oneT) {
+        for (const v of ['slope top locker', 'sloped top locker', 'locker slope top']) insertAlias.run(oneT, v);
+      }
+
+      // KD / welded phrases as global-ish alias nudges (land on the tier canonical first).
+      if (oneT) {
+        for (const v of ['kd locker', 'knock down locker', 'knockdown locker', 'welded locker', 'fully welded locker', 'fully assembled locker']) {
+          insertAlias.run(oneT, v);
+        }
+      }
+
+      const benchId = bySku.get('LOCKER-BENCH-48');
+      if (benchId) {
+        for (const v of ['locker bench', 'bench', 'wood bench', 'changing room bench']) insertAlias.run(benchId, v);
+      }
+    } catch {
+      // Best-effort only.
+    }
+
+    // Visual display boards: seed aliases (avoid size/frame wording duplicates; land on canonicals).
+    try {
+      const rows = db
+        .prepare(
+          `SELECT id, sku
+           FROM catalog_items
+           WHERE sku IN ('VDB-MARKERBOARD','VDB-TACKBOARD','ASI-VDB-9800-PORC','ASI-VDB-9800-CORK')`
+        )
+        .all() as Array<{ id: string; sku: string }>;
+      const bySku = new Map(rows.map((r) => [r.sku, r.id]));
+
+      const insertAlias = db.prepare(
+        `INSERT OR IGNORE INTO catalog_item_aliases (id, catalog_item_id, alias_type, alias_value, created_at, updated_at)
+         VALUES ('alias-' || lower(hex(randomblob(8))), ?, 'parser_phrase', ?, datetime('now'), datetime('now'))`
+      );
+
+      const marker = bySku.get('VDB-MARKERBOARD');
+      if (marker) {
+        for (const v of ['whiteboard', 'markerboard', 'writing board', 'dry erase board', 'dry-erase board']) insertAlias.run(marker, v);
+        // Common size phrases should still land on the canonical, not become their own SKUs.
+        for (const v of ['4x8 whiteboard', '4x8 markerboard', '48x96 whiteboard', '48x96 markerboard']) insertAlias.run(marker, v);
+      }
+
+      const tack = bySku.get('VDB-TACKBOARD');
+      if (tack) {
+        for (const v of ['tackboard', 'bulletin board', 'cork board', 'pin board']) insertAlias.run(tack, v);
+        for (const v of ['4x8 tackboard', '48x96 tackboard', '4x8 bulletin board', '48x96 bulletin board']) insertAlias.run(tack, v);
+      }
+
+      const asiPorc = bySku.get('ASI-VDB-9800-PORC');
+      if (asiPorc) {
+        for (const v of ['asi markerboard', 'asi porcelain markerboard', 'series 9800 markerboard', 'asi visual display markerboard']) insertAlias.run(asiPorc, v);
+      }
+      const asiCork = bySku.get('ASI-VDB-9800-CORK');
+      if (asiCork) {
+        for (const v of ['asi tackboard', 'asi cork tackboard', 'series 9800 tackboard', 'asi visual display tackboard']) insertAlias.run(asiCork, v);
+      }
+    } catch {
+      // Best-effort only.
+    }
+
+    // Wall / corner protection: seed mounting attributes + aliases (no dimension/finish duplicates).
+    try {
+      const rows = db
+        .prepare(
+          `SELECT id, sku
+           FROM catalog_items
+           WHERE sku IN ('WCP-CORNER-GUARD','WCP-CHAIR-RAIL','WCP-CRASH-RAIL')`
+        )
+        .all() as Array<{ id: string; sku: string }>;
+      const bySku = new Map(rows.map((r) => [r.sku, r.id]));
+
+      const insertAttr = db.prepare(`
+        INSERT OR IGNORE INTO catalog_item_attributes (
+          id, catalog_item_id, attribute_type, attribute_value,
+          material_delta_type, material_delta_value, labor_delta_type, labor_delta_value,
+          active, sort_order, created_at, updated_at
+        ) VALUES ('attr-' || lower(hex(randomblob(8))), ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, datetime('now'), datetime('now'))
+      `);
+      const insertAlias = db.prepare(
+        `INSERT OR IGNORE INTO catalog_item_aliases (id, catalog_item_id, alias_type, alias_value, created_at, updated_at)
+         VALUES ('alias-' || lower(hex(randomblob(8))), ?, 'parser_phrase', ?, datetime('now'), datetime('now'))`
+      );
+
+      const mountAttrs = (id: string) => {
+        insertAttr.run(id, 'mounting', 'ADHESIVE', 0);
+        insertAttr.run(id, 'mounting', 'MECHANICAL_FASTENED', 1);
+      };
+
+      const cg = bySku.get('WCP-CORNER-GUARD');
+      if (cg) {
+        mountAttrs(cg);
+        for (const v of ['corner guard', 'corner guards', 'wall corner guard', 'wall protection corner guard', 'acrovyn corner guard']) {
+          insertAlias.run(cg, v);
+        }
+      }
+
+      const chair = bySku.get('WCP-CHAIR-RAIL');
+      if (chair) {
+        mountAttrs(chair);
+        for (const v of ['chair rail', 'chair rails', 'wall guard', 'wall guards', 'acrovyn wall guard', 'wall protection chair rail']) {
+          insertAlias.run(chair, v);
+        }
+      }
+
+      const crash = bySku.get('WCP-CRASH-RAIL');
+      if (crash) {
+        mountAttrs(crash);
+        for (const v of ['crash rail', 'crash rails', 'bumper rail', 'bumper rails', 'acrovyn crash rail', 'scr crash rail']) {
+          insertAlias.run(crash, v);
+        }
+      }
+    } catch {
+      // Best-effort only.
+    }
+
+    // Postal specialties: seed aliases (4C, CBU, parcel lockers) without per-config SKU clutter.
+    try {
+      const rows = db
+        .prepare(
+          `SELECT id, sku
+           FROM catalog_items
+           WHERE sku IN ('POSTAL-4C-HORIZONTAL','POSTAL-4C-HORIZONTAL-3500','POSTAL-CBU-1570','POSTAL-PARCEL-LOCKER-1590')`
+        )
+        .all() as Array<{ id: string; sku: string }>;
+      const bySku = new Map(rows.map((r) => [r.sku, r.id]));
+
+      const insertAlias = db.prepare(
+        `INSERT OR IGNORE INTO catalog_item_aliases (id, catalog_item_id, alias_type, alias_value, created_at, updated_at)
+         VALUES ('alias-' || lower(hex(randomblob(8))), ?, 'parser_phrase', ?, datetime('now'), datetime('now'))`
+      );
+
+      const fourC = bySku.get('POSTAL-4C-HORIZONTAL');
+      if (fourC) {
+        for (const v of ['4c mailbox', 'std-4c mailbox', 'usps 4c mailbox', 'horizontal mailbox', '4c horizontal mailboxes', 'mail receptacle 4c']) {
+          insertAlias.run(fourC, v);
+        }
+        for (const v of ['florence 4c', 'florence std-4c', 'versatile 4c']) insertAlias.run(fourC, v);
+        for (const v of ['tenant mailboxes', 'tenant mailbox system', '4c mailbox system', 'usps tenant mailbox']) insertAlias.run(fourC, v);
+      }
+
+      const fourC3500 = bySku.get('POSTAL-4C-HORIZONTAL-3500');
+      if (fourC3500) {
+        for (const v of ['salsbury 4c', 'salsbury 3500', '3500 series mailbox', '4c mailbox salsbury', 'salsbury horizontal mailbox', 'usps 4c salsbury']) {
+          insertAlias.run(fourC3500, v);
+        }
+      }
+
+      const cbu = bySku.get('POSTAL-CBU-1570');
+      if (cbu) {
+        for (const v of ['cbu', 'cluster box unit', 'cluster mailbox', 'cluster mailboxes', 'usps cbu', 'florence 1570', 'community mailbox', 'community mailboxes']) {
+          insertAlias.run(cbu, v);
+        }
+        for (const v of ['1570-8af', '1570-12af', '1570-16af', '1570-4t5af', '1570-8t6af']) insertAlias.run(cbu, v);
+      }
+
+      const parcel = bySku.get('POSTAL-PARCEL-LOCKER-1590');
+      if (parcel) {
+        for (const v of ['parcel locker', 'package locker', 'outdoor parcel locker', 'usps parcel locker', 'florence 1590']) {
+          insertAlias.run(parcel, v);
+        }
+        for (const v of ['1590-t1af', '1590-t2af']) insertAlias.run(parcel, v);
+      }
+    } catch {
+      // Best-effort only.
+    }
+
+    // Toilet accessories (second-pass hygiene): keep backward compatibility for older shorthand SKUs
+    // by seeding legacy_sku aliases onto the upgraded manufacturer-backed rows.
+    try {
+      const rows = db
+        .prepare(
+          `SELECT id, sku
+           FROM catalog_items
+           WHERE sku IN ('B-6806-36','B-6806-42','B-2706','B-270','ASI-W556509','ASI-W51919-04')`
+        )
+        .all() as Array<{ id: string; sku: string }>;
+      const bySku = new Map(rows.map((r) => [r.sku, r.id]));
+
+      const insertLegacySku = db.prepare(
+        `INSERT OR IGNORE INTO catalog_item_aliases (id, catalog_item_id, alias_type, alias_value, created_at, updated_at)
+         VALUES ('alias-' || lower(hex(randomblob(8))), ?, 'legacy_sku', ?, datetime('now'), datetime('now'))`
+      );
+
+      const gb36 = bySku.get('B-6806-36');
+      if (gb36) {
+        for (const v of ['GB-36']) insertLegacySku.run(gb36, v);
+      }
+      const gb42 = bySku.get('B-6806-42');
+      if (gb42) {
+        for (const v of ['GB-B6806-42']) insertLegacySku.run(gb42, v);
+      }
+      const snv = bySku.get('B-2706');
+      if (snv) {
+        for (const v of ['SNV-B2706']) insertLegacySku.run(snv, v);
+      }
+      const snd = bySku.get('B-270');
+      if (snd) {
+        for (const v of ['SND-B270']) insertLegacySku.run(snd, v);
+      }
+      const ttd = bySku.get('ASI-W556509');
+      if (ttd) {
+        for (const v of ['TTD-W556509']) insertLegacySku.run(ttd, v);
+      }
+      const sd = bySku.get('ASI-W51919-04');
+      if (sd) {
+        for (const v of ['SD-W51919-04']) insertLegacySku.run(sd, v);
+      }
+
+      // Deprecate a few internal/shorthand-only rows from forward-facing use (still compatible for old lines).
+      db.prepare(
+        `UPDATE catalog_items
+         SET deprecated = 1, is_canonical = 0, deprecated_reason = 'Shorthand/internal seed; use manufacturer-backed canonicals.'
+         WHERE sku IN ('2-WALL-GB')`
+      ).run();
+    } catch {
+      // Best-effort only.
+    }
+
+    // Fire protection specialties: seed canonical anchors + variant phrases without SKU explosion.
+    try {
+      const db3 = db;
+      const ensureAliases = (canonicalSku: string, aliasValues: string[]) => {
+        const row = db3.prepare(`SELECT id FROM catalog_items WHERE lower(sku) = lower(?) LIMIT 1`).get(canonicalSku) as { id: string } | undefined;
+        if (!row?.id) return;
+        const insert = db3.prepare(
+          `INSERT OR IGNORE INTO catalog_item_aliases (id, catalog_item_id, alias_type, alias_value, created_at, updated_at)
+           VALUES ('alias-' || lower(hex(randomblob(8))), ?, 'parser_phrase', ?, datetime('now'), datetime('now'))`
+        );
+        for (const v of aliasValues) {
+          const trimmed = String(v || '').trim();
+          if (!trimmed) continue;
+          insert.run(row.id, trimmed);
+        }
+      };
+
+      ensureAliases('FE-CABINET', [
+        'fire extinguisher cabinet',
+        'extinguisher cabinet',
+        'fe cabinet',
+        'fire rated extinguisher cabinet',
+        'semi recessed extinguisher cabinet',
+        'semi-recessed extinguisher cabinet',
+        'recessed extinguisher cabinet',
+        'surface extinguisher cabinet',
+      ]);
+      ensureAliases('AED-CABINET', [
+        'aed cabinet',
+        'aed wall cabinet',
+        'recessed aed cabinet',
+        'surface aed cabinet',
+      ]);
+    } catch {
+      // Best-effort only.
     }
   }
 

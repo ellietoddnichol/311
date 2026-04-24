@@ -50,6 +50,8 @@ import { getErrorMessage } from '../shared/utils/errorMessage';
 import { scopeExceptionCount } from '../shared/utils/scopeReviewExceptions';
 import { computeFieldScheduleHint } from '../shared/utils/fieldScheduleHint';
 import { PRICING_ALL_CATEGORIES, TAKEOFF_ALL_ROOMS } from '../shared/constants/workspaceUi';
+import { toggleBulkSelectionForVisibleConcrete } from '../shared/utils/estimateBulkSelection';
+import { deriveEstimateLineHealth, type EstimateHealthFocus } from '../shared/utils/estimateLineHealth';
 import { ProjectHeader } from '../components/workflow/ProjectHeader';
 import { ProjectStepNav } from '../components/workflow/ProjectStepNav.tsx';
 import { WorkflowRightDrawer } from '../components/workflow/WorkflowRightDrawer';
@@ -60,6 +62,7 @@ import { ProposalSectionEditor } from '../components/workflow/ProposalSectionEdi
 import { ProposalSettingsRail } from '../components/workflow/ProposalSettingsRail';
 import { ProposalPreview } from '../components/workflow/ProposalPreview';
 import { EstimateGrid } from '../components/workspace/EstimateGrid';
+import { EstimateHealthStrip } from '../components/workspace/EstimateHealthStrip';
 import { EstimateCostDriversBanner } from '../components/workspace/EstimateCostDriversBanner';
 import { LaborPlanPanel } from '../components/workspace/LaborPlanPanel';
 import { EstimateWorkspaceFooter } from '../components/workspace/EstimateWorkspaceFooter';
@@ -181,12 +184,29 @@ export function ProjectWorkspace() {
   /** `TAKEOFF_ALL_ROOMS` = combined view; otherwise a real room id (matches working room / takeoff filter when drilling into one room). */
   const [takeoffRoomFilter, setTakeoffRoomFilter] = useState<string>(TAKEOFF_ALL_ROOMS);
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
+  /** Concrete takeoff line ids selected for bulk delete (takeoff single-room + pricing grids only). */
+  const [bulkSelectedLineIds, setBulkSelectedLineIds] = useState<string[]>([]);
+  const [bulkMoveTargetRoomId, setBulkMoveTargetRoomId] = useState('');
+  /** ISO time when takeoff lines were last loaded from the API (workspace load or refresh). */
+  const [takeoffLinesLoadedAt, setTakeoffLinesLoadedAt] = useState<string | null>(null);
+  const [healthStripFocus, setHealthStripFocus] = useState<EstimateHealthFocus | null>(null);
   const [pricingOrganizeMode, setPricingOrganizeMode] = useState<'rooms' | 'categories'>('rooms');
   const [pricingCategoryFilter, setPricingCategoryFilter] = useState<string>(PRICING_ALL_CATEGORIES);
 
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [bundleModalOpen, setBundleModalOpen] = useState(false);
   const [modifiersModalOpen, setModifiersModalOpen] = useState(false);
+  const [addToCatalogOpen, setAddToCatalogOpen] = useState(false);
+  const [addToCatalogBusy, setAddToCatalogBusy] = useState(false);
+  const [addToCatalogDraft, setAddToCatalogDraft] = useState<null | {
+    sku: string;
+    category: string;
+    description: string;
+    uom: CatalogItem['uom'];
+    baseMaterialCost: number;
+    baseLaborMinutes: number;
+    installLaborFamily: string;
+  }>(null);
   const [roomCreateModalOpen, setRoomCreateModalOpen] = useState(false);
   const [roomManagerOpen, setRoomManagerOpen] = useState(false);
   const [roomCreationDraft, setRoomCreationDraft] = useState<RoomCreationDraft>(DEFAULT_ROOM_CREATION_DRAFT);
@@ -285,6 +305,14 @@ export function ProjectWorkspace() {
     const qs = next.toString();
     navigate(`${projectWorkspacePath(id, 'estimate')}${qs ? `?${qs}` : ''}`, { replace: true });
   }, [loading, exceptionCount, activeTab, id, navigate, searchParams]);
+
+  // Proposal must always reflect the latest persisted estimate/takeoff state.
+  useEffect(() => {
+    if (loading) return;
+    if (activeTab !== 'proposal') return;
+    if (!project) return;
+    void refreshTakeoff(project.id);
+  }, [activeTab, loading, project?.id]);
 
   /** Keep `?view=quantities` in sync for the Estimate step only; path carries the workspace tab. */
   useEffect(() => {
@@ -412,6 +440,7 @@ export function ProjectWorkspace() {
       setSyncState('ok');
       setRooms(roomData);
       setLines(lineData);
+      setTakeoffLinesLoadedAt(new Date().toISOString());
       setCatalog(catalogData);
       setSummary(summaryData);
       setSettings(ensureProposalDefaults(settingsData));
@@ -472,6 +501,7 @@ export function ProjectWorkspace() {
       api.getV1Summary(projectId),
     ]);
     setLines(lineData);
+    setTakeoffLinesLoadedAt(new Date().toISOString());
     setSummary(summaryData);
   }
 
@@ -486,6 +516,23 @@ export function ProjectWorkspace() {
   );
 
   useEffect(() => {
+    if (!modifiersModalOpen || !selectedLine) return;
+    const allowed = scopeCategoryOptions.length ? scopeCategoryOptions : [selectedLine.category || 'Uncategorized'];
+    const safeCategory = String(selectedLine.category || '').trim() || String(allowed[0] || 'Uncategorized').trim();
+    const unit = (String(selectedLine.unit || 'EA').trim() || 'EA') as CatalogItem['uom'];
+    setAddToCatalogDraft({
+      sku: String(selectedLine.sku || '').trim() || `NEW-${Math.floor(Math.random() * 100000)}`,
+      category: safeCategory,
+      description: String(selectedLine.description || '').trim() || 'New catalog item',
+      uom: unit,
+      baseMaterialCost: Number.isFinite(selectedLine.materialCost) ? Number(selectedLine.materialCost) : 0,
+      baseLaborMinutes: Number.isFinite(selectedLine.laborMinutes) ? Number(selectedLine.laborMinutes) : 0,
+      installLaborFamily: String((selectedLine as any).installLaborFamily || '').trim(),
+    });
+    setAddToCatalogOpen(false);
+  }, [modifiersModalOpen, selectedLine?.id]);
+
+  useEffect(() => {
     if (!selectedLineId) {
       setLineModifiers([]);
       return;
@@ -495,6 +542,28 @@ export function ProjectWorkspace() {
       .then(setLineModifiers)
       .catch(() => setLineModifiers([]));
   }, [selectedLineId]);
+
+  useEffect(() => {
+    setBulkSelectedLineIds((prev) => prev.filter((id) => lines.some((l) => l.id === id)));
+  }, [lines]);
+
+  useEffect(() => {
+    if (activeTab !== 'estimate') {
+      setBulkSelectedLineIds([]);
+      return;
+    }
+    if (estimateView === 'quantities' && takeoffRoomFilter === TAKEOFF_ALL_ROOMS) {
+      setBulkSelectedLineIds([]);
+    }
+  }, [activeTab, estimateView, takeoffRoomFilter]);
+
+  useEffect(() => {
+    if (bulkSelectedLineIds.length === 0) setBulkMoveTargetRoomId('');
+  }, [bulkSelectedLineIds.length]);
+
+  useEffect(() => {
+    setHealthStripFocus(null);
+  }, [activeTab, estimateView, takeoffRoomFilter, pricingOrganizeMode, pricingCategoryFilter, activeRoomId]);
 
   const roomSubtotal = useMemo(
     () => activeRoomLines.reduce((sum, line) => sum + line.lineTotal, 0),
@@ -645,6 +714,32 @@ export function ProjectWorkspace() {
     }
     return filtered;
   }, [lines, takeoffRoomFilter, roomNamesById]);
+
+  const estimateHealthLines = useMemo(
+    () => (estimateView === 'quantities' ? takeoffGridLines : sortedPricingGridLines),
+    [estimateView, takeoffGridLines, sortedPricingGridLines]
+  );
+
+  const estimateHealthDerived = useMemo(
+    () => deriveEstimateLineHealth(estimateHealthLines, pricingMode),
+    [estimateHealthLines, pricingMode]
+  );
+
+  const healthHighlightLineIds = useMemo(() => {
+    if (!healthStripFocus) return null;
+    const src =
+      healthStripFocus === 'material'
+        ? estimateHealthDerived.missingMaterial.lineIds
+        : healthStripFocus === 'labor'
+          ? estimateHealthDerived.missingLabor.lineIds
+          : estimateHealthDerived.missingInstallFamily.lineIds;
+    const visible = new Set(estimateHealthLines.map((l) => l.id));
+    const out = new Set<string>();
+    for (const id of src) {
+      if (visible.has(id)) out.add(id);
+    }
+    return out.size > 0 ? out : null;
+  }, [healthStripFocus, estimateHealthDerived, estimateHealthLines]);
 
   const takeoffViewStats = useMemo(() => {
     return takeoffGridLines.reduce(
@@ -923,8 +1018,19 @@ export function ProjectWorkspace() {
     return document.querySelector('[data-proposal-document="true"]') as HTMLElement | null;
   }
 
-  function printProposalDocument() {
+  async function ensureProposalIsFresh(): Promise<void> {
     if (!project) return;
+    // Proposal output must reflect the latest persisted takeoff state.
+    await refreshTakeoff(project.id);
+    // Let React flush the updated proposal DOM before we capture it.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+  }
+
+  async function printProposalDocument() {
+    if (!project) return;
+    await ensureProposalIsFresh();
     const container = getProposalContainer();
     if (!container) return;
 
@@ -979,6 +1085,7 @@ export function ProjectWorkspace() {
 
   async function exportProposal() {
     if (!project) return;
+    await ensureProposalIsFresh();
     const container = getProposalContainer();
     if (!container) return;
 
@@ -1225,8 +1332,132 @@ export function ProjectWorkspace() {
     if (!project) return;
     await api.deleteV1TakeoffLine(lineId);
     setLines((prev) => prev.filter((line) => line.id !== lineId));
+    setBulkSelectedLineIds((prev) => prev.filter((id) => id !== lineId));
     if (selectedLineId === lineId) setSelectedLineId(null);
     await refreshTakeoff(project.id);
+  }
+
+  function toggleBulkLine(lineId: string) {
+    setBulkSelectedLineIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(lineId)) next.delete(lineId);
+      else next.add(lineId);
+      return Array.from(next);
+    });
+  }
+
+  function applyBulkHeaderVisible(visibleConcreteIds: string[]) {
+    setBulkSelectedLineIds((prev) =>
+      Array.from(toggleBulkSelectionForVisibleConcrete(new Set(prev), visibleConcreteIds))
+    );
+  }
+
+  async function bulkDeleteSelectedLines() {
+    if (!project || bulkSelectedLineIds.length === 0) return;
+    const ids = Array.from(new Set<string>(bulkSelectedLineIds));
+    if (!window.confirm(`Delete ${ids.length} line item(s)? This cannot be undone.`)) return;
+    try {
+      await Promise.all(ids.map((lineId) => api.deleteV1TakeoffLine(lineId)));
+      setBulkSelectedLineIds([]);
+      if (selectedLineId !== null && ids.includes(selectedLineId)) setSelectedLineId(null);
+    } catch (error) {
+      console.error('Bulk delete failed', error);
+      window.alert(error instanceof Error ? error.message : 'Could not delete all lines.');
+    }
+    await refreshTakeoff(project.id);
+  }
+
+  async function bulkMoveSelectedLinesToRoom(targetRoomId: string) {
+    if (!project || bulkSelectedLineIds.length === 0) return;
+    const trimmed = String(targetRoomId || '').trim();
+    if (!trimmed) return;
+    const ids = Array.from(new Set<string>(bulkSelectedLineIds));
+    const targetRoom = rooms.find((r) => r.id === trimmed);
+    if (!targetRoom || targetRoom.projectId !== project.id) {
+      window.alert('Choose a valid room in this project.');
+      return;
+    }
+    if (rooms.length < 2) {
+      window.alert('Add at least two rooms to move lines between them.');
+      return;
+    }
+    if (!window.confirm(`Move ${ids.length} line item(s) to "${targetRoom.roomName}"?`)) return;
+    try {
+      await api.bulkMoveV1TakeoffLines({ lineIds: ids, roomId: trimmed });
+      setBulkSelectedLineIds([]);
+      setBulkMoveTargetRoomId('');
+    } catch (error) {
+      console.error('Bulk move failed', error);
+      window.alert(error instanceof Error ? error.message : 'Could not move lines.');
+    }
+    await refreshTakeoff(project.id);
+  }
+
+  async function duplicateLine(lineId: string) {
+    if (!project) return;
+    if (!activeRoomId) {
+      window.alert('Choose a room under "Room for new lines" first.');
+      return;
+    }
+    try {
+      const created = await api.duplicateV1TakeoffLine(lineId, { roomId: activeRoomId });
+      await refreshTakeoff(project.id);
+      setSelectedLineId(created.id);
+    } catch (error) {
+      console.error('Failed to duplicate line', error);
+      window.alert(error instanceof Error ? error.message : 'Could not duplicate line.');
+    }
+  }
+
+  async function createCatalogItemFromSelectedLine() {
+    if (!project || !selectedLine || !addToCatalogDraft || addToCatalogBusy) return;
+    const draft = addToCatalogDraft;
+    if (!draft.description.trim()) {
+      window.alert('Description is required.');
+      return;
+    }
+    if (!draft.sku.trim()) {
+      window.alert('SKU is required.');
+      return;
+    }
+    if (!draft.category.trim()) {
+      window.alert('Category is required.');
+      return;
+    }
+
+    setAddToCatalogBusy(true);
+    try {
+      const created = await api.createCatalogItem({
+        id: crypto.randomUUID(),
+        sku: draft.sku.trim(),
+        canonicalSku: draft.sku.trim(),
+        isCanonical: true,
+        category: draft.category.trim(),
+        description: draft.description.trim(),
+        uom: draft.uom,
+        baseMaterialCost: Number.isFinite(draft.baseMaterialCost) ? draft.baseMaterialCost : 0,
+        baseLaborMinutes: Number.isFinite(draft.baseLaborMinutes) ? draft.baseLaborMinutes : 0,
+        installLaborFamily: draft.installLaborFamily.trim() ? draft.installLaborFamily.trim() : null,
+        taxable: true,
+        adaFlag: false,
+        active: true,
+        tags: [],
+      } as CatalogItem);
+
+      setCatalog((prev) => [created, ...prev]);
+      await persistLine(selectedLine.id, {
+        catalogItemId: created.id,
+        sku: created.sku,
+        category: created.category,
+      });
+      window.dispatchEvent(new CustomEvent('catalog-synced'));
+      setAddToCatalogOpen(false);
+    } catch (e) {
+      console.error('Add to catalog failed', e);
+      window.alert(e instanceof Error ? e.message : 'Add to catalog failed.');
+    } finally {
+      setAddToCatalogBusy(false);
+    }
   }
 
   function openLineEditor(lineId: string) {
@@ -1570,6 +1801,54 @@ export function ProjectWorkspace() {
            * opens the same editor as a modal on demand.
            */
           const estimateGridClass = 'isolate grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4';
+          const takeoffBulkSelectEnabled = takeoffRoomFilter !== TAKEOFF_ALL_ROOMS;
+          const estimateBulkActionBar =
+            bulkSelectedLineIds.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200/80 bg-amber-50/90 px-3 py-2 text-[11px] text-amber-950">
+                <span className="font-semibold tabular-nums">{bulkSelectedLineIds.length} selected</span>
+                <span className="inline-flex flex-wrap items-center gap-1.5 border-l border-amber-300/60 pl-2">
+                  <label className="inline-flex items-center gap-1.5 font-medium text-amber-950">
+                    <span className="shrink-0 text-amber-900/80">Move to</span>
+                    <select
+                      className="max-w-[11rem] rounded-md border border-amber-300/90 bg-white px-1.5 py-1 text-[11px] font-medium text-amber-950 disabled:cursor-not-allowed disabled:opacity-50"
+                      value={bulkMoveTargetRoomId}
+                      onChange={(e) => setBulkMoveTargetRoomId(e.target.value)}
+                      disabled={rooms.length < 2}
+                      aria-label="Target room for bulk move"
+                    >
+                      <option value="">Room…</option>
+                      {rooms.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.roomName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="rounded-md border border-amber-700/50 bg-white px-2.5 py-1 font-semibold text-amber-950 shadow-sm hover:bg-amber-100/80 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={rooms.length < 2 || !bulkMoveTargetRoomId}
+                    onClick={() => void bulkMoveSelectedLinesToRoom(bulkMoveTargetRoomId)}
+                  >
+                    Move to room
+                  </button>
+                </span>
+                <button
+                  type="button"
+                  className="rounded-md bg-red-600 px-2.5 py-1 font-semibold text-white shadow-sm hover:bg-red-700"
+                  onClick={() => void bulkDeleteSelectedLines()}
+                >
+                  Delete selected…
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-amber-300/90 bg-white px-2.5 py-1 font-semibold text-amber-950 hover:bg-amber-100/80"
+                  onClick={() => setBulkSelectedLineIds([])}
+                >
+                  Clear selection
+                </button>
+              </div>
+            ) : null;
           return (
           <div className="flex min-w-0 flex-col gap-1">
           <div className={estimateGridClass}>
@@ -1625,6 +1904,14 @@ export function ProjectWorkspace() {
                 disabledAdd={!activeRoomId}
                 bidBucketStats={bidBucketStatsForToolbar}
               />
+              <EstimateHealthStrip
+                health={estimateHealthDerived}
+                pricingMode={pricingMode}
+                bulkSelectedCount={bulkSelectedLineIds.length}
+                dataLoadedAt={takeoffLinesLoadedAt}
+                focus={healthStripFocus}
+                onFocusChange={setHealthStripFocus}
+              />
               {estimateView === 'quantities' ? (
                 <div className="space-y-3">
                   {summary ? (
@@ -1651,6 +1938,7 @@ export function ProjectWorkspace() {
                       </span>
                     </p>
                   ) : null}
+                  {estimateBulkActionBar}
                   <EstimateGrid
                     lines={takeoffGridLines}
                     rooms={rooms}
@@ -1665,6 +1953,12 @@ export function ProjectWorkspace() {
                     onSelectLine={openLineEditor}
                     onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
                     onDeleteLine={(lineId) => void deleteLine(lineId)}
+                    onDuplicateLine={(lineId) => void duplicateLine(lineId)}
+                    multiSelectEnabled={takeoffBulkSelectEnabled}
+                    bulkSelectedLineIds={bulkSelectedLineIds}
+                    onBulkToggleLine={toggleBulkLine}
+                    onBulkHeaderApplyVisibleToggle={applyBulkHeaderVisible}
+                    healthHighlightLineIds={healthHighlightLineIds}
                   />
                 </div>
               ) : (
@@ -1899,6 +2193,8 @@ export function ProjectWorkspace() {
                 </div>
               </div>
 
+              {estimateBulkActionBar}
+
               <div className="min-h-0 min-w-0 flex-1">
               <EstimateGrid
                 lines={sortedPricingGridLines}
@@ -1914,8 +2210,14 @@ export function ProjectWorkspace() {
                 onOpenLineDetail={openLineEditor}
                 onPersistLine={(lineId, updates) => void persistLine(lineId, updates)}
                 onDeleteLine={(lineId) => void deleteLine(lineId)}
+                onDuplicateLine={(lineId) => void duplicateLine(lineId)}
+                multiSelectEnabled
+                bulkSelectedLineIds={bulkSelectedLineIds}
+                onBulkToggleLine={toggleBulkLine}
+                onBulkHeaderApplyVisibleToggle={applyBulkHeaderVisible}
                 workspaceFrame
                 categoryGroupHeaders={pricingOrganizeMode === 'categories' && pricingCategoryFilter === PRICING_ALL_CATEGORIES}
+                healthHighlightLineIds={healthHighlightLineIds}
               />
               </div>
               </div>
@@ -2148,7 +2450,17 @@ export function ProjectWorkspace() {
                   </div>
                   <h3 className="mt-1 text-base font-semibold tracking-tight text-slate-950">Line, pricing, and add-ons</h3>
                 </div>
-                <button onClick={() => setModifiersModalOpen(false)} className="h-9 shrink-0 rounded-full border border-slate-200 bg-white px-3 text-[11px] font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">Done</button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddToCatalogOpen((v) => !v)}
+                    className="h-9 rounded-full border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                    title="Create a catalog item from this line and match it"
+                  >
+                    Add to catalog
+                  </button>
+                  <button onClick={() => setModifiersModalOpen(false)} className="h-9 rounded-full border border-slate-200 bg-white px-3 text-[11px] font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">Done</button>
+                </div>
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <div className="rounded-lg bg-white p-2 shadow-sm ring-1 ring-slate-200/80"><p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-500">Qty</p><p className="mt-0.5 text-base font-semibold tabular-nums text-slate-950">{formatNumberSafe(selectedLine.qty, 0)}</p></div>
@@ -2164,6 +2476,106 @@ export function ProjectWorkspace() {
                   <div className="space-y-3">
                     <div className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200/80">
                       <p className="text-[11px] font-semibold text-slate-900">Line details</p>
+                      {addToCatalogOpen && addToCatalogDraft ? (
+                        <div className="mt-2 rounded-xl border border-blue-200/70 bg-blue-50/60 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-[11px] font-semibold text-blue-950">Add this line to the catalog</p>
+                            <button
+                              type="button"
+                              className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-blue-800 hover:bg-blue-50"
+                              onClick={() => setAddToCatalogOpen(false)}
+                              disabled={addToCatalogBusy}
+                            >
+                              Close
+                            </button>
+                          </div>
+                          <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                            <label className="text-[11px] font-medium text-slate-700">
+                              SKU
+                              <input
+                                className="ui-input mt-1 h-9 rounded-lg"
+                                value={addToCatalogDraft.sku}
+                                onChange={(e) => setAddToCatalogDraft((prev) => (prev ? { ...prev, sku: e.target.value } : prev))}
+                              />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Category
+                              <CatalogCategorySelect
+                                className="ui-input mt-1 h-9 rounded-lg"
+                                value={addToCatalogDraft.category}
+                                options={scopeCategoryOptions}
+                                onChange={(v) => setAddToCatalogDraft((prev) => (prev ? { ...prev, category: v } : prev))}
+                              />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
+                              Description
+                              <input
+                                className="ui-input mt-1 h-9 rounded-lg"
+                                value={addToCatalogDraft.description}
+                                onChange={(e) => setAddToCatalogDraft((prev) => (prev ? { ...prev, description: e.target.value } : prev))}
+                              />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Unit
+                              <input
+                                className="ui-input mt-1 h-9 rounded-lg"
+                                value={addToCatalogDraft.uom}
+                                onChange={(e) => setAddToCatalogDraft((prev) => (prev ? { ...prev, uom: (e.target.value || 'EA') as CatalogItem['uom'] } : prev))}
+                              />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Base material ($)
+                              <input
+                                className="ui-input mt-1 h-9 rounded-lg tabular-nums"
+                                inputMode="decimal"
+                                value={String(addToCatalogDraft.baseMaterialCost)}
+                                onChange={(e) =>
+                                  setAddToCatalogDraft((prev) =>
+                                    prev ? { ...prev, baseMaterialCost: Number(String(e.target.value).replace(/,/g, '')) || 0 } : prev
+                                  )
+                                }
+                              />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Base labor (min)
+                              <input
+                                className="ui-input mt-1 h-9 rounded-lg tabular-nums"
+                                inputMode="decimal"
+                                value={String(addToCatalogDraft.baseLaborMinutes)}
+                                onChange={(e) =>
+                                  setAddToCatalogDraft((prev) =>
+                                    prev ? { ...prev, baseLaborMinutes: Number(String(e.target.value).replace(/,/g, '')) || 0 } : prev
+                                  )
+                                }
+                              />
+                            </label>
+                            <label className="text-[11px] font-medium text-slate-700 md:col-span-2">
+                              Install labor family (optional)
+                              <input
+                                className="ui-input mt-1 h-9 rounded-lg"
+                                value={addToCatalogDraft.installLaborFamily}
+                                onChange={(e) =>
+                                  setAddToCatalogDraft((prev) => (prev ? { ...prev, installLaborFamily: e.target.value } : prev))
+                                }
+                                placeholder="locker, fire_extinguisher_cabinet, wall_protection..."
+                              />
+                              <p className="mt-1 text-[10px] text-slate-600">
+                                Use when labor minutes are missing/zero on future matched lines so the estimate can fall back safely.
+                              </p>
+                            </label>
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              className="ui-btn-secondary h-9 px-3 text-xs"
+                              onClick={() => void createCatalogItemFromSelectedLine()}
+                              disabled={addToCatalogBusy}
+                            >
+                              {addToCatalogBusy ? 'Creating…' : 'Create & Match'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                       <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
                         <label className="text-[11px] font-medium text-slate-700 md:col-span-2">Description
                           <input className="ui-input mt-1 h-9 rounded-lg" value={selectedLine.description} onChange={(e) => patchLineLocal(selectedLine.id, { description: e.target.value })} onBlur={() => void persistLine(selectedLine.id)} />

@@ -6,6 +6,37 @@ On every process start, **`server.ts`** calls `initDb()` then **`initEstimatorSc
 
 **Production:** The same `tsx server.ts` (or `npm start`) entrypoint must run on Cloud Run (or your host) so existing databases pick up new columns before the v1 API reads or writes those fields.
 
+## Durable project persistence (Cloud Run)
+
+Cloud Run does **not** preserve the container filesystem across deploys/revisions. If SQLite is stored inside the container (for example `./estimator.db` under `/app`), **projects and takeoff lines will be lost on deploy**.
+
+This repo supports two durability strategies without changing estimate math:
+
+1. **Preferred (POSIX volume)**: run SQLite on a real mounted filesystem (VM/Kubernetes persistent volume / NFS).
+   - Set `DATABASE_PATH` to that mounted path (example: `/data/estimator.db`).
+
+2. **Cloud Run fallback (GCS snapshot restore + backup loop)**: restore SQLite from a GCS object at boot if the file is missing, and periodically upload a consistent DB snapshot.
+   - Set:
+     - `DATABASE_GCS_BUCKET`
+     - `DATABASE_GCS_OBJECT` (default `estimator.db`)
+     - `DATABASE_GCS_BACKUP_INTERVAL_MS` (default `30000`)
+   - Ensure the Cloud Run runtime service account has read/write access to that bucket’s objects.
+
+Limitations:
+- GCS backup is **eventual** (interval-based) durability; the last few seconds of writes may be lost if an instance is terminated before the next backup.
+
+## Operational observability (recommended)
+
+The app surfaces SQLite persistence health in **Settings → Project Durability**:
+- effective server DB path
+- detected mode (`volume` vs `ephemeral_gcs` vs `ephemeral`)
+- whether a restore from GCS occurred on startup (and why/why not)
+- last successful backup time
+- last backup failure + error message
+- the current GCS object metadata (updated time / size) when configured
+
+Use **Backup now** for an on-demand snapshot (only works when `DATABASE_GCS_BUCKET` is configured).
+
 ## Secrets
 
 Do not commit Google service account JSON or `gen-lang-client-*.json` (see `.gitignore`). Configure Cloud Run with environment variables or Secret Manager for Gemini and Sheets as needed.

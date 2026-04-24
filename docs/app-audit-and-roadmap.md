@@ -77,7 +77,7 @@ Legend: **●** solid · **◐** partial / brittle · **○** stub or unused.
 | Integration | Required for | Behavior when missing |
 |---|---|---|
 | SQLite (`better-sqlite3`) | Everything | N/A — single local file. |
-| Google Sheets (catalog) | Catalog source of record | Startup auto-sync catches and warns; UI `CatalogAutoSync` `console.warn`s silently. **No user-facing health banner.** |
+| Google Sheets (catalog) | Catalog source of record | Sync consumes ITEMS/MODIFIERS/BUNDLES plus governed ALIASES/ATTRIBUTES. UI surfaces sync counts; deeper health/banner work still useful. |
 | Gemini | Intake extract, proposal draft, install-review email | Throws with a specific message; no in-app health surface. Install-review has a fallback path; proposal draft does not. |
 | Google Document AI | Optional PDF provider | Falls back to `pdf-parse`. |
 | Google Maps Grounding Lite | Optional address enrichment | Returns `null`; warnings only. |
@@ -95,7 +95,7 @@ Legend: **●** solid · **◐** partial / brittle · **○** stub or unused.
 | Backups | ○ | None documented. `estimator.db` + base64 files in-row. |
 | Telemetry | ○ | `console.*` only. No Sentry, no structured log sink. |
 | Env health view | ○ | `scripts/intake-env-smoke.ts` exists; nothing surfaces it in the app. |
-| Tests | ◐ | 20 server tests, all intake-heavy. Zero route/repo/client/e2e coverage. |
+| Tests | ◐ | Server/unit test backbone exists and is growing (intake, sync ingestion, snapshots, proposal formatting). Route/e2e coverage is still thin. |
 | Dead code | ◐ | See §3.5. |
 
 ---
@@ -167,8 +167,8 @@ Intake computes: `sourceManufacturer`, `sourceBidBucket`, `sourceSectionHeader`,
 
 Persisted to `takeoff_lines_v1`: everything above **except `installFamilyFallback.key`**.
 
-Rendered in the estimate grid: **almost none of it**.
-Rendered in the proposal: **none of it**.
+Rendered in the estimate grid: key transparency exists (labor origin, selected options, base→delta→final snapshots on new lines).
+Rendered in the proposal: selected/inferred options can be surfaced client-facing (truthfulness work in `proposalDocument.ts`).
 
 This is the single largest regression the workspace overhaul has to close before it can claim to be "intentional, end-to-end."
 

@@ -2,7 +2,6 @@ import { createHash } from 'crypto';
 
 /** Canonical fields only — stable when row order changes if content is unchanged. */
 export interface ReviewLineFingerprintInput {
-  sourceReference: string;
   roomName: string;
   itemCode: string;
   itemName: string;
@@ -30,7 +29,6 @@ export function computeReviewLineFingerprint(input: ReviewLineFingerprintInput):
     itemName: stableScalar(input.itemName),
     quantity: Number.isFinite(input.quantity) ? input.quantity : 0,
     roomName: stableScalar(input.roomName),
-    sourceReference: stableScalar(input.sourceReference),
     unit: stableScalar(input.unit),
   };
   const json = JSON.stringify(payload);

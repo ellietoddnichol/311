@@ -124,7 +124,12 @@ Notes:
 
 ## Google Sheets catalog sync
 
-The app pulls **ITEMS**, **MODIFIERS**, and **BUNDLES** tabs from a spreadsheet into SQLite. The Settings UI and authenticated clients should use **`POST /api/v1/settings/sync-catalog`** (see `api.syncV1Catalog()`). A legacy route **`POST /api/sync/sheets`** still exists for older integrations and calls the same sync implementation.
+The app pulls **CLEAN_ITEMS** (curated), **MODIFIERS**, **BUNDLES**, **ALIASES**, and **ATTRIBUTES** tabs from a spreadsheet into SQLite. **ITEMS** is raw/staging only (not intended as the live sync source after cutover). The Settings UI and authenticated clients should use **`POST /api/v1/settings/sync-catalog`** (see `api.syncV1Catalog()`). A legacy route **`POST /api/sync/sheets`** still exists for older integrations and calls the same sync implementation.
+
+- **Aliases**: drive canonical-first resolution (legacy SKUs, vendor SKUs, parser phrases, etc.).
+- **Attributes**: governed variants (finish / mounting / coating / grip / assembly) with optional pricing/labor deltas; new takeoff lines persist snapshots for auditability and proposal truthfulness.
+
+Cutover and rollback for the **CLEAN_ITEMS** sync source: see **`docs/CATALOG_SYNC_CUTOVER.md`**.
 
 For debugging service-account resolution only, set **`GOOGLE_SHEETS_AUTH_DEBUG=1`** (logs metadata, not the private key).
 

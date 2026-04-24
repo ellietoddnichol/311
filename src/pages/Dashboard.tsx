@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
@@ -11,38 +11,24 @@ import {
   Plus,
   Upload,
 } from 'lucide-react';
-import { api } from '../services/api';
 import { ProjectRecord } from '../shared/types/estimator';
 import { getCanonicalProjectDate, getCanonicalProjectDateTimestamp } from '../shared/utils/projectDates';
 import { format } from 'date-fns';
+import { useProjectsQuery } from '../hooks/api/useProjectsQuery.ts';
 
 type DashboardDrilldown = 'active' | 'due-soon' | 'draft-proposals' | 'submitted';
 
 export function Dashboard() {
-  const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: projects = [], isLoading, isError, error, refetch, isFetching } = useProjectsQuery();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    void loadProjects();
-  }, []);
-
-  async function loadProjects() {
-    try {
-      const data = await api.getV1Projects();
-      setProjects(data);
-    } catch (err) {
-      console.error('Failed to load projects', err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const sortedByRecent = [...projects].sort((a, b) => {
-    const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
-    const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
-    return bTime - aTime;
-  });
+  const sortedByRecent = useMemo(() => {
+    return [...projects].sort((a, b) => {
+      const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
+  }, [projects]);
 
   const recentProjects = sortedByRecent.slice(0, 5);
   const needingAttention = projects
@@ -61,6 +47,20 @@ export function Dashboard() {
     .slice(0, 5);
 
   const draftProposals = projects.filter((project) => project.status === 'Draft').slice(0, 5);
+
+  const missingBidDateCount = useMemo(() => {
+    return projects.filter((project) => getCanonicalProjectDateTimestamp(project) === null && project.status !== 'Archived').length;
+  }, [projects]);
+
+  const dueTodayCount = useMemo(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const end = start + 24 * 60 * 60 * 1000;
+    return projects.filter((project) => {
+      const due = getCanonicalProjectDateTimestamp(project);
+      return due !== null && due >= start && due < end && project.status !== 'Archived';
+    }).length;
+  }, [projects]);
 
   const stats: Array<{
     label: string;
@@ -177,8 +177,48 @@ export function Dashboard() {
           <button onClick={() => navigate('/projects')} className="ui-btn-secondary h-10 px-4 text-[11px] font-semibold uppercase tracking-[0.06em]">
             View All
           </button>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="ui-btn-secondary h-10 px-3 text-[11px] font-semibold uppercase tracking-[0.06em] disabled:opacity-60"
+            title="Refresh dashboard"
+          >
+            {isFetching ? 'Refreshing…' : 'Refresh'}
+          </button>
         </div>
       </div>
+
+      <section className="ui-panel-muted p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="ui-mono-kicker">Now / Attention</p>
+            <p className="mt-1 text-sm text-slate-900">
+              {missingBidDateCount > 0 || dueTodayCount > 0
+                ? 'A few items need attention before you price and submit.'
+                : 'No urgent warnings detected.'}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              These are lightweight checks from project metadata (they do not change estimate math).
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {dueTodayCount > 0 ? (
+              <button type="button" onClick={() => openDrilldown('due-soon')} className="ui-chip-soft">
+                <CalendarClock className="h-3.5 w-3.5" aria-hidden /> Due today: {dueTodayCount}
+              </button>
+            ) : null}
+            {missingBidDateCount > 0 ? (
+              <button type="button" onClick={() => openDrilldown('active')} className="ui-chip-soft">
+                <Flag className="h-3.5 w-3.5" aria-hidden /> Missing bid date: {missingBidDateCount}
+              </button>
+            ) : null}
+            <button type="button" onClick={() => navigate('/project/new')} className="ui-chip-soft">
+              <ClipboardList className="h-3.5 w-3.5" aria-hidden /> Start intake
+            </button>
+          </div>
+        </div>
+      </section>
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {stats.map((stat) => (
@@ -218,7 +258,15 @@ export function Dashboard() {
         </div>
       </section>
 
-      {loading ? (
+      {isError ? (
+        <div className="ui-surface p-10 text-center">
+          <p className="text-sm font-medium text-slate-900">Could not load dashboard projects.</p>
+          <p className="mt-1 text-xs text-slate-500">{error instanceof Error ? error.message : 'Unknown error'}</p>
+          <button type="button" onClick={() => void refetch()} className="ui-btn-secondary mt-4">
+            Retry
+          </button>
+        </div>
+      ) : isLoading ? (
         <div className="ui-surface p-10 text-center text-sm text-slate-500">Loading dashboard...</div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">

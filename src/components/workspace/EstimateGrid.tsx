@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Info, Layers3, Sparkles } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight, Copy, Info, Layers3, Sparkles, Trash2 } from 'lucide-react';
 import { PricingMode, RoomRecord, TakeoffLineModifierRollup, TakeoffLineRecord, isMaterialOnlyMainBid } from '../../shared/types/estimator';
 import { formatClientProposalItemDisplay } from '../../shared/utils/proposalDocument';
 import { formatCurrencySafe, formatLaborDurationMinutes, formatNumberSafe } from '../../utils/numberFormat';
+import { api } from '../../services/api';
+import { filterDisplayRowsVisibleInTable, visibleConcreteLineIds } from '../../shared/utils/estimateBulkSelection';
 
 interface Props {
   lines: TakeoffLineRecord[];
@@ -21,10 +23,20 @@ interface Props {
   onOpenLineDetail?: (lineId: string) => void;
   onPersistLine: (lineId: string, updates?: Partial<TakeoffLineRecord>) => Promise<void> | void;
   onDeleteLine: (lineId: string) => void;
+  /** When set, row actions include duplicate (same visibility as delete: not on combined “all rooms” rollups). */
+  onDuplicateLine?: (lineId: string) => void;
   /** Visual weight: workspace uses a stronger frame for the pricing grid. */
   workspaceFrame?: boolean;
   /** When true (pricing view only), inject category group divider rows at category boundaries. Rows must already be sorted by category. */
   categoryGroupHeaders?: boolean;
+  /** When true, first column is selection checkboxes for rows with `canDelete` (real line ids only). */
+  multiSelectEnabled?: boolean;
+  bulkSelectedLineIds?: string[];
+  onBulkToggleLine?: (lineId: string) => void;
+  /** Toggle select-all for rows currently visible in the table (excludes collapsed bundle children). */
+  onBulkHeaderApplyVisibleToggle?: (visibleConcreteLineIds: string[]) => void;
+  /** When set, matching concrete rows get a light highlight (e.g. estimate health strip focus). */
+  healthHighlightLineIds?: ReadonlySet<string> | null;
 }
 
 interface DisplayRow {
@@ -61,6 +73,12 @@ interface DisplayRow {
   laborOrigin: 'source' | 'catalog' | 'install_family' | null;
   /** Catalog- or heuristic-seeded install-labor-family key, surfaced in the row tooltip. */
   installLaborFamily: string | null;
+  /** Snapshot of chosen/inferred catalog attributes for the line (new work only). */
+  catalogAttributeSnapshot?: Array<{
+    attributeType: 'finish' | 'coating' | 'grip' | 'mounting' | 'assembly';
+    attributeValue: string;
+    source: 'user' | 'inferred';
+  }> | null;
   /** Whether the row was classified as installable scope during intake. */
   isInstallableScope: boolean | null;
 }
@@ -92,8 +110,14 @@ export function EstimateGrid({
   onOpenLineDetail,
   onPersistLine,
   onDeleteLine,
+  onDuplicateLine,
   workspaceFrame = false,
   categoryGroupHeaders = false,
+  multiSelectEnabled = false,
+  bulkSelectedLineIds = [],
+  onBulkToggleLine,
+  onBulkHeaderApplyVisibleToggle,
+  healthHighlightLineIds = null,
 }: Props) {
   const [collapsedBundles, setCollapsedBundles] = useState<Record<string, boolean>>({});
   /**
@@ -104,26 +128,40 @@ export function EstimateGrid({
    * estimator can answer "where does this labor come from?" without opening the modal.
    */
   const [inspectorOpenLineId, setInspectorOpenLineId] = useState<string | null>(null);
+  const [catalogAttrsByItemId, setCatalogAttrsByItemId] = useState<Record<string, import('../../types').CatalogItemAttribute[]>>({});
+  const [catalogAttrsLoadingItemId, setCatalogAttrsLoadingItemId] = useState<string | null>(null);
   const toggleInspector = (lineId: string) => {
     setInspectorOpenLineId((current) => (current === lineId ? null : lineId));
   };
+
+  async function ensureCatalogItemAttributesLoaded(catalogItemId: string) {
+    if (!catalogItemId) return;
+    if (catalogAttrsByItemId[catalogItemId]) return;
+    setCatalogAttrsLoadingItemId(catalogItemId);
+    try {
+      const rows = await api.listCatalogItemAttributes(catalogItemId);
+      setCatalogAttrsByItemId((prev) => ({ ...prev, [catalogItemId]: rows }));
+    } finally {
+      setCatalogAttrsLoadingItemId(null);
+    }
+  }
   const showMaterial = pricingMode !== 'labor_only';
   const showLabor = !isMaterialOnlyMainBid(pricingMode);
   const isTakeoffView = viewMode === 'takeoff';
   const addInsColumn = !isTakeoffView ? 1 : 0;
-  const columnCount = isTakeoffView ? 4 : 8 + (showLabor ? 2 : 0) + (showMaterial ? 1 : 0) + addInsColumn;
 
   /** Fixed column shares so the line grid—not a single description column—uses most width sensibly */
   const estimateColWidths = useMemo(() => {
     if (isTakeoffView) return null;
+    const pad = multiSelectEnabled ? (['2.25rem'] as const) : [];
     if (showLabor && showMaterial) {
-      return ['22%', '8%', '9%', '4%', '3%', '7%', '8%', '7%', '7%', '7%', '9%', '6%'];
+      return [...pad, '21%', '8%', '9%', '4%', '3%', '7%', '8%', '7%', '7%', '7%', '9%', '6%'];
     }
     if (showLabor) {
-      return ['23%', '9%', '10%', '4%', '4%', '8%', '9%', '8%', '7%', '8%', '9%'];
+      return [...pad, '22%', '9%', '10%', '4%', '4%', '8%', '9%', '8%', '7%', '8%', '9%'];
     }
-    return ['26%', '9%', '11%', '4%', '4%', '10%', '10%', '10%', '9%', '10%'];
-  }, [isTakeoffView, showLabor, showMaterial]);
+    return [...pad, '25%', '9%', '11%', '4%', '4%', '10%', '10%', '10%', '9%', '10%'];
+  }, [isTakeoffView, showLabor, showMaterial, multiSelectEnabled]);
 
   const bundleIdList = useMemo(
     () => Array.from(new Set(lines.map((l) => l.bundleId).filter(Boolean) as string[])),
@@ -227,6 +265,28 @@ export function EstimateGrid({
 
   function intakeContextChips(row: DisplayRow) {
     const chips: React.ReactNode[] = [];
+    const missingFlags: string[] = [];
+    if (showMaterial && (!Number.isFinite(row.materialCost) || row.materialCost <= 0)) {
+      missingFlags.push('Material');
+    }
+    if (showLabor && (!Number.isFinite(row.laborMinutesExtended) || row.laborMinutesExtended <= 0)) {
+      missingFlags.push('Labor');
+    }
+    if (showLabor && (!String(row.installLaborFamily || '').trim()) && (!Number.isFinite(row.laborMinutesExtended) || row.laborMinutesExtended <= 0)) {
+      missingFlags.push('Install family');
+    }
+    if (missingFlags.length > 0) {
+      chips.push(
+        <span
+          key="missing"
+          className="inline-flex max-w-[14rem] items-center gap-1 rounded bg-rose-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-950 ring-1 ring-rose-100/90"
+          title={`Missing: ${missingFlags.join(' · ')}`}
+        >
+          Missing
+          <span className="truncate font-mono normal-case text-rose-900/80">· {missingFlags.join(', ')}</span>
+        </span>
+      );
+    }
     if (row.sourceBidBucket) {
       chips.push(
         <span
@@ -362,6 +422,66 @@ export function EstimateGrid({
           : origin === 'source'
             ? 'bg-emerald-50 text-emerald-900 ring-emerald-100/90'
             : 'bg-slate-100 text-slate-700 ring-slate-200/80';
+
+    const snapshot = row.catalogAttributeSnapshot || null;
+    const selectedKeys = new Set((snapshot || []).map((a) => `${a.attributeType}:${a.attributeValue}`));
+    const sourceLine = lines.find((l) => l.id === row.lineId) || null;
+    const catalogItemId = sourceLine?.catalogItemId || null;
+
+    const materialDeltas = sourceLine?.attributeDeltaMaterialSnapshot || null;
+    const laborDeltas = sourceLine?.attributeDeltaLaborSnapshot || null;
+    const hasDeltaSnapshots = Boolean((materialDeltas && materialDeltas.length) || (laborDeltas && laborDeltas.length));
+
+    const snapshotEffectIndex = (() => {
+      const index = new Map<string, { mat: boolean; labor: boolean }>();
+      (materialDeltas || []).forEach((d) => {
+        const key = `${d.attributeType}:${d.attributeValue}`;
+        index.set(key, { mat: true, labor: index.get(key)?.labor ?? false });
+      });
+      (laborDeltas || []).forEach((d) => {
+        const key = `${d.attributeType}:${d.attributeValue}`;
+        index.set(key, { mat: index.get(key)?.mat ?? false, labor: true });
+      });
+      return index;
+    })();
+
+    const attributeChipRows = (snapshot || []).slice(0, 6).map((s) => {
+      const key = `${s.attributeType}:${s.attributeValue}`;
+      const effect = snapshotEffectIndex.get(key) || null;
+      const affectsMaterial = effect?.mat ?? false;
+      const affectsLabor = effect?.labor ?? false;
+      const tone =
+        affectsMaterial && affectsLabor
+          ? 'bg-violet-50 text-violet-900 ring-violet-100/90'
+          : affectsMaterial
+            ? 'bg-emerald-50 text-emerald-900 ring-emerald-100/90'
+            : affectsLabor
+              ? 'bg-amber-50 text-amber-950 ring-amber-100/90'
+              : 'bg-white text-slate-700 ring-slate-200/80';
+      const effectLabel = affectsMaterial && affectsLabor ? 'Mat+Labor' : affectsMaterial ? 'Material' : affectsLabor ? 'Labor' : 'Selected';
+      return { key, label: key, effectLabel, tone };
+    });
+
+    const baseMaterialCost = sourceLine?.baseMaterialCostSnapshot ?? sourceLine?.baseMaterialCost ?? null;
+    const finalMaterialCost = sourceLine?.materialCost ?? null;
+    const materialDelta =
+      baseMaterialCost != null && finalMaterialCost != null ? Number((finalMaterialCost - baseMaterialCost).toFixed(2)) : null;
+
+    const baseLaborMinutes = sourceLine?.baseLaborMinutesSnapshot ?? null;
+    const finalLaborMinutes = sourceLine?.laborMinutes ?? null;
+    const laborDelta =
+      baseLaborMinutes != null && finalLaborMinutes != null ? Number((finalLaborMinutes - baseLaborMinutes).toFixed(2)) : null;
+
+    const materialDeltaLines = (materialDeltas || []).slice(0, 6).map((d) => {
+      const key = `${d.attributeType}:${d.attributeValue}`;
+      const applied = Number(d.appliedAmount ?? 0);
+      return { key, label: key, applied };
+    });
+    const laborDeltaLines = (laborDeltas || []).slice(0, 6).map((d) => {
+      const key = `${d.attributeType}:${d.attributeValue}`;
+      const applied = Number(d.appliedAmount ?? 0);
+      return { key, label: key, applied };
+    });
     return (
       <div className="space-y-2 rounded-xl bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_100%)] p-3 text-[11px] text-slate-700 shadow-inner ring-1 ring-slate-200/80">
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -398,6 +518,110 @@ export function EstimateGrid({
           </button>
         </div>
         <p className="max-w-prose text-[11px] leading-snug text-slate-600">{originExplanation}</p>
+        {snapshot && snapshot.length > 0 ? (
+          <div>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                Selected options
+                <span className="ml-1.5 text-[10px] font-medium normal-case tracking-normal text-slate-500">
+                  {`(includes ${snapshot.length} option${snapshot.length === 1 ? '' : 's'} in pricing)`}
+                </span>
+              </p>
+              {catalogItemId && !hasDeltaSnapshots && !catalogAttrsByItemId[catalogItemId] ? (
+                <button
+                  type="button"
+                  className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void ensureCatalogItemAttributesLoaded(catalogItemId);
+                  }}
+                  disabled={catalogAttrsLoadingItemId === catalogItemId}
+                >
+                  {catalogAttrsLoadingItemId === catalogItemId ? 'Loading…' : 'Load effects'}
+                </button>
+              ) : null}
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {attributeChipRows.map((chip) => (
+                <span
+                  key={chip.key}
+                  className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold ring-1 ${chip.tone}`}
+                  title="Selected option snapshot"
+                >
+                  <span className="mr-1.5 font-sans text-[9px] font-semibold uppercase tracking-wide opacity-80">{chip.effectLabel}</span>
+                  {chip.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {sourceLine && snapshot && snapshot.length > 0 ? (
+          <div className="grid grid-cols-1 gap-1.5 md:grid-cols-3">
+            <div className="rounded-lg bg-white px-2 py-1.5 shadow-sm ring-1 ring-slate-200/80">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-500">Material (base → final)</p>
+              <p className="mt-0.5 text-[12px] font-semibold tabular-nums text-slate-900">
+                {baseMaterialCost != null ? formatCurrencySafe(baseMaterialCost) : '—'} → {finalMaterialCost != null ? formatCurrencySafe(finalMaterialCost) : '—'}
+              </p>
+              {materialDelta != null ? (
+                <p className="mt-0.5 text-[9px] leading-snug text-slate-500">
+                  {materialDelta >= 0 ? '+' : ''}
+                  {formatCurrencySafe(materialDelta)} from options
+                </p>
+              ) : null}
+            </div>
+            <div className="rounded-lg bg-white px-2 py-1.5 shadow-sm ring-1 ring-slate-200/80">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-500">Labor minutes (base → final)</p>
+              <p className="mt-0.5 text-[12px] font-semibold tabular-nums text-slate-900">
+                {baseLaborMinutes != null ? `${formatNumberSafe(baseLaborMinutes, 2)} min` : '—'} → {finalLaborMinutes != null ? `${formatNumberSafe(finalLaborMinutes, 2)} min` : '—'}
+              </p>
+              {laborDelta != null ? <p className="mt-0.5 text-[9px] leading-snug text-slate-500">{laborDelta >= 0 ? '+' : ''}{formatNumberSafe(laborDelta, 2)} min from options</p> : null}
+            </div>
+            <div className="rounded-lg bg-white px-2 py-1.5 shadow-sm ring-1 ring-slate-200/80">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-500">Resolved (pricing)</p>
+              <p className="mt-0.5 text-[12px] font-semibold tabular-nums text-slate-900">
+                Mat {formatCurrencySafe(sourceLine.materialCost)} • Labor {formatCurrencySafe(sourceLine.laborCost)}
+              </p>
+              <p className="mt-0.5 text-[9px] leading-snug text-slate-500">Values shown already include selected options.</p>
+            </div>
+          </div>
+        ) : null}
+        {sourceLine && hasDeltaSnapshots ? (
+          <div className="rounded-xl bg-white/70 p-2 ring-1 ring-slate-200/80">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-500">Applied option deltas (snapshotted)</p>
+            <div className="mt-1 grid grid-cols-1 gap-1.5 md:grid-cols-2">
+              <div className="rounded-lg bg-white px-2 py-1.5 shadow-sm ring-1 ring-slate-200/80">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-500">Material</p>
+                {materialDeltaLines.length ? (
+                  <div className="mt-1 space-y-0.5">
+                    {materialDeltaLines.map((d) => (
+                      <div key={d.key} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="font-mono text-slate-700">{d.label}</span>
+                        <span className="tabular-nums text-slate-900">{d.applied >= 0 ? '+' : ''}{formatCurrencySafe(d.applied)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[11px] text-slate-500">No material deltas applied.</p>
+                )}
+              </div>
+              <div className="rounded-lg bg-white px-2 py-1.5 shadow-sm ring-1 ring-slate-200/80">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-500">Labor minutes</p>
+                {laborDeltaLines.length ? (
+                  <div className="mt-1 space-y-0.5">
+                    {laborDeltaLines.map((d) => (
+                      <div key={d.key} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="font-mono text-slate-700">{d.label}</span>
+                        <span className="tabular-nums text-slate-900">{d.applied >= 0 ? '+' : ''}{formatNumberSafe(d.applied, 2)} min</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[11px] text-slate-500">No labor deltas applied.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
         <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4">
           <div className="rounded-lg bg-white px-2 py-1.5 shadow-sm ring-1 ring-slate-200/80">
             <p className="text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-500">Minutes / unit</p>
@@ -516,6 +740,7 @@ export function EstimateGrid({
         sourceManufacturer: line.sourceManufacturer ?? null,
         laborOrigin: line.laborOrigin ?? null,
         installLaborFamily: line.installLaborFamily ?? null,
+        catalogAttributeSnapshot: line.catalogAttributeSnapshot ?? null,
         isInstallableScope: line.isInstallableScope ?? null,
       }));
     }
@@ -566,6 +791,7 @@ export function EstimateGrid({
         sourceManufacturer: line.sourceManufacturer ?? null,
         laborOrigin: line.laborOrigin ?? null,
         installLaborFamily: line.installLaborFamily ?? null,
+        catalogAttributeSnapshot: line.catalogAttributeSnapshot ?? null,
         isInstallableScope: line.isInstallableScope ?? null,
         roomIds: new Set<string>(),
         notesSet: new Set<string>(),
@@ -621,6 +847,7 @@ export function EstimateGrid({
         existing.laborOrigin = incomingOrigin;
       }
       if (!existing.installLaborFamily && line.installLaborFamily) existing.installLaborFamily = line.installLaborFamily;
+      if (!existing.catalogAttributeSnapshot && line.catalogAttributeSnapshot) existing.catalogAttributeSnapshot = line.catalogAttributeSnapshot;
       if (existing.isInstallableScope == null && line.isInstallableScope != null) existing.isInstallableScope = line.isInstallableScope;
       if (!existing.sourceManufacturer && line.sourceManufacturer) existing.sourceManufacturer = line.sourceManufacturer;
       byItem.set(key, existing);
@@ -678,6 +905,33 @@ export function EstimateGrid({
       })
       .sort((left, right) => right.lineTotal - left.lineTotal || left.description.localeCompare(right.description));
   }, [lines, organizeBy, roomNamesById]);
+
+  const collapsedBundleIdSet = useMemo(
+    () => new Set(Object.keys(collapsedBundles).filter((bid) => collapsedBundles[bid])),
+    [collapsedBundles]
+  );
+  const tableVisibleRows = useMemo(
+    () => filterDisplayRowsVisibleInTable(displayRows, organizeBy, collapsedBundleIdSet),
+    [displayRows, organizeBy, collapsedBundleIdSet]
+  );
+
+  const visibleConcreteInTable = useMemo(() => visibleConcreteLineIds(tableVisibleRows), [tableVisibleRows]);
+
+  const baseColumnCount = isTakeoffView ? 4 : 8 + (showLabor ? 2 : 0) + (showMaterial ? 1 : 0) + addInsColumn;
+  const multiSelectCol = multiSelectEnabled ? 1 : 0;
+  const columnCount = baseColumnCount + multiSelectCol;
+
+  const bulkSelectedSet = useMemo(() => new Set(bulkSelectedLineIds), [bulkSelectedLineIds]);
+  const allVisibleConcreteSelected =
+    visibleConcreteInTable.length > 0 && visibleConcreteInTable.every((id) => bulkSelectedSet.has(id));
+  const someVisibleConcreteSelected = visibleConcreteInTable.some((id) => bulkSelectedSet.has(id));
+
+  const bulkHeaderCheckboxRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = bulkHeaderCheckboxRef.current;
+    if (!el || !multiSelectEnabled) return;
+    el.indeterminate = someVisibleConcreteSelected && !allVisibleConcreteSelected;
+  }, [multiSelectEnabled, someVisibleConcreteSelected, allVisibleConcreteSelected]);
 
   const panelClass = workspaceFrame && !isTakeoffView
     ? 'ui-panel overflow-hidden rounded-xl border-2 border-slate-200/90 shadow-md ring-1 ring-slate-200/40'
@@ -761,6 +1015,21 @@ export function EstimateGrid({
             <tr>
               {isTakeoffView ? (
                 <>
+                  {multiSelectEnabled ? (
+                    <th className="ui-table-th w-9 max-w-[2.25rem] px-2 text-center" scope="col">
+                      {visibleConcreteInTable.length > 0 ? (
+                        <input
+                          ref={bulkHeaderCheckboxRef}
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-slate-900"
+                          checked={allVisibleConcreteSelected}
+                          onChange={() => onBulkHeaderApplyVisibleToggle?.(visibleConcreteInTable)}
+                          aria-label="Select all lines visible in this table"
+                          title="Select or clear all lines currently visible (excludes rolled-up combined rows)"
+                        />
+                      ) : null}
+                    </th>
+                  ) : null}
                   <th className="ui-table-th min-w-[12rem]">Item</th>
                   <th className="ui-table-th-end w-[5.5rem] whitespace-nowrap">Qty</th>
                   <th
@@ -773,6 +1042,21 @@ export function EstimateGrid({
                 </>
               ) : (
                 <>
+                  {multiSelectEnabled ? (
+                    <th className="ui-table-th w-9 max-w-[2.25rem] px-2 text-center" scope="col">
+                      {visibleConcreteInTable.length > 0 ? (
+                        <input
+                          ref={bulkHeaderCheckboxRef}
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-slate-900"
+                          checked={allVisibleConcreteSelected}
+                          onChange={() => onBulkHeaderApplyVisibleToggle?.(visibleConcreteInTable)}
+                          aria-label="Select all lines visible in this table"
+                          title="Select or clear all lines currently visible"
+                        />
+                      ) : null}
+                    </th>
+                  ) : null}
                   <th className="ui-table-th min-w-0">Item</th>
                   <th className="ui-table-th whitespace-nowrap">Room</th>
                   <th className="ui-table-th min-w-0">Category</th>
@@ -851,6 +1135,7 @@ export function EstimateGrid({
                 const isCategoryStart = categoryGroupHeaders && !isTakeoffView && (index === 0 || previousCategory !== currentCategory);
 
                 const disp = itemCellDisplay(row.description, row.sku);
+                const healthHighlight = !!(healthHighlightLineIds?.size && healthHighlightLineIds.has(row.lineId));
 
                 return (
                   <React.Fragment key={row.id}>
@@ -930,10 +1215,23 @@ export function EstimateGrid({
                           : stripe
                             ? 'bg-white'
                             : 'bg-slate-50/80'
-                      } hover:bg-slate-100/80`}
+                      } ${healthHighlight ? 'ring-2 ring-inset ring-amber-400/75' : ''} hover:bg-slate-100/80`}
                     >
                       {isTakeoffView ? (
                         <>
+                          {multiSelectEnabled ? (
+                            <td className="ui-table-cell w-9 max-w-[2.25rem] px-2 text-center align-middle" onClick={stopRowEvent}>
+                              {row.canDelete ? (
+                                <input
+                                  type="checkbox"
+                                  className="h-3.5 w-3.5 rounded border-slate-300 text-slate-900"
+                                  checked={bulkSelectedSet.has(row.lineId)}
+                                  onChange={() => onBulkToggleLine?.(row.lineId)}
+                                  aria-label={`Select line for bulk delete: ${row.description || row.lineId}`}
+                                />
+                              ) : null}
+                            </td>
+                          ) : null}
                           <td className="ui-table-cell min-w-0 pr-4">
                             <div className="mb-0.5 flex items-center gap-1.5">
                               <span className="font-mono text-[10px] font-semibold tabular-nums tracking-[0.1em] text-slate-400">{rowNumber}</span>
@@ -1014,17 +1312,34 @@ export function EstimateGrid({
                                   'Edit'
                                 )}
                               </button>
+                              {onDuplicateLine && row.canDelete ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDuplicateLine(row.lineId);
+                                  }}
+                                  className="ui-table-action w-7 min-w-[1.75rem] border-transparent px-0 text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+                                  aria-label="Duplicate line"
+                                  title="Duplicate line into the room selected for new lines"
+                                >
+                                  <Copy className="h-3.5 w-3.5" aria-hidden />
+                                </button>
+                              ) : null}
                               {row.canDelete ? (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    onDeleteLine(row.lineId);
+                                    if (window.confirm('Delete this line item?')) {
+                                      onDeleteLine(row.lineId);
+                                    }
                                   }}
                                   className="ui-table-action w-7 min-w-[1.75rem] border-transparent px-0 text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
                                   aria-label="Delete line"
+                                  title="Delete line"
                                 >
-                                  ×
+                                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
                                 </button>
                               ) : null}
                             </div>
@@ -1032,6 +1347,19 @@ export function EstimateGrid({
                         </>
                       ) : (
                         <>
+                          {multiSelectEnabled ? (
+                            <td className="ui-table-cell w-9 max-w-[2.25rem] px-2 text-center align-top pt-3" onClick={stopRowEvent}>
+                              {row.canDelete ? (
+                                <input
+                                  type="checkbox"
+                                  className="h-3.5 w-3.5 rounded border-slate-300 text-slate-900"
+                                  checked={bulkSelectedSet.has(row.lineId)}
+                                  onChange={() => onBulkToggleLine?.(row.lineId)}
+                                  aria-label={`Select line for bulk delete: ${row.description || row.lineId}`}
+                                />
+                              ) : null}
+                            </td>
+                          ) : null}
                           <td className="ui-table-cell min-w-0 align-top">
                             <div className="mb-0.5 flex items-center gap-1.5">
                               <span className="font-mono text-[10px] font-semibold tabular-nums tracking-[0.1em] text-slate-400">{rowNumber}</span>
@@ -1075,6 +1403,9 @@ export function EstimateGrid({
                               {row.qty !== 1 ? (
                                 <div className="ui-table-meta">{formatNumberSafe(row.laborMinutesPerUnit, row.laborMinutesPerUnit % 1 === 0 ? 0 : 1)} min/u</div>
                               ) : null}
+                              {row.catalogAttributeSnapshot && row.catalogAttributeSnapshot.length > 0 ? (
+                                <div className="ui-table-meta text-[10px] text-slate-500">incl options</div>
+                              ) : null}
                             </td>
                           ) : null}
                           {!isTakeoffView && showLabor ? (
@@ -1087,6 +1418,9 @@ export function EstimateGrid({
                             <td className="ui-table-cell text-right">
                               <span className="ui-table-num">{formatCurrencySafe(row.materialCost)}</span>
                               <div className="ui-table-meta text-right text-[10px] text-slate-500">mat / u</div>
+                              {row.catalogAttributeSnapshot && row.catalogAttributeSnapshot.length > 0 ? (
+                                <div className="ui-table-meta text-right text-[10px] text-slate-500">incl options</div>
+                              ) : null}
                             </td>
                           ) : null}
                           {!isTakeoffView ? (
@@ -1146,17 +1480,34 @@ export function EstimateGrid({
                                   'Line'
                                 )}
                               </button>
+                              {onDuplicateLine && row.canDelete ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDuplicateLine(row.lineId);
+                                  }}
+                                  className="ui-table-action w-7 min-w-[1.75rem] border-transparent px-0 text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+                                  aria-label="Duplicate line"
+                                  title="Duplicate line into the room selected for new lines"
+                                >
+                                  <Copy className="h-3.5 w-3.5" aria-hidden />
+                                </button>
+                              ) : null}
                               {row.canDelete ? (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    onDeleteLine(row.lineId);
+                                    if (window.confirm('Delete this line item?')) {
+                                      onDeleteLine(row.lineId);
+                                    }
                                   }}
                                   className="ui-table-action w-7 min-w-[1.75rem] border-transparent px-0 text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
                                   aria-label="Delete line"
+                                  title="Delete line"
                                 >
-                                  ×
+                                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
                                 </button>
                               ) : null}
                             </div>

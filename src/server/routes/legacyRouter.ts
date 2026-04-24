@@ -6,13 +6,16 @@ import {
   upsertModifierInGoogleSheet,
 } from '../services/googleSheetsCatalogSync.ts';
 import { getEstimatorDb } from '../db/connection.ts';
-import { listCatalogItemsForApi } from '../repos/catalogRepo.ts';
+import { listCatalogItemsForApi, searchCatalogItemsForApi } from '../repos/catalogRepo.ts';
+import { createCatalogAlias, deleteCatalogAlias, listCatalogAliasesForItem } from '../repos/catalogAliasesRepo.ts';
+import { createCatalogAttribute, deactivateCatalogAttribute, listCatalogAttributesForItem } from '../repos/catalogAttributesRepo.ts';
 import { handleRouteError } from '../http/jsonErrors.ts';
 import {
   legacyBundleUpdateSchema,
   legacyCatalogItemBodySchema,
   legacyModifierUpdateSchema,
 } from '../validation/legacySchemas.ts';
+import { z } from 'zod';
 
 /**
  * Legacy catalog CRUD endpoints (mounted at `/api`).
@@ -42,6 +45,154 @@ legacyRouter.get('/catalog/items', (req, res) => {
   res.json(listCatalogItemsForApi(includeInactive));
 });
 
+legacyRouter.get('/catalog/search', (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const category = req.query.category ? String(req.query.category) : null;
+  const includeInactive = req.query.includeInactive === '1' || req.query.includeInactive === 'true';
+  const includeDeprecated = req.query.includeDeprecated === '1' || req.query.includeDeprecated === 'true';
+  const includeNonCanonical = req.query.includeNonCanonical === '1' || req.query.includeNonCanonical === 'true';
+  try {
+    const results = searchCatalogItemsForApi({
+      query: q,
+      category,
+      includeInactive,
+      includeDeprecated,
+      includeNonCanonical,
+      limit: 60,
+    });
+    res.json(results);
+  } catch (err: unknown) {
+    handleRouteError(res, err, '[GET /api/catalog/search]');
+  }
+});
+
+legacyRouter.get('/catalog/items/:id/aliases', (req, res) => {
+  try {
+    const rows = listCatalogAliasesForItem(req.params.id);
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        catalogItemId: r.catalogItemId,
+        aliasType: r.aliasType,
+        aliasValue: r.aliasValue,
+      }))
+    );
+  } catch (err: unknown) {
+    handleRouteError(res, err, '[GET /api/catalog/items/:id/aliases]');
+  }
+});
+
+const createAliasSchema = z.object({
+  aliasType: z.enum(['legacy_sku', 'vendor_sku', 'parser_phrase', 'generic_name', 'search_key']),
+  aliasValue: z.string().min(1).max(256),
+});
+
+legacyRouter.post('/catalog/items/:id/aliases', (req, res) => {
+  const parsed = createAliasSchema.safeParse(req.body);
+  if (!parsed.success) return handleRouteError(res, parsed.error, '[POST /api/catalog/items/:id/aliases]');
+  try {
+    const id = crypto.randomUUID();
+    const row = createCatalogAlias({
+      id,
+      catalogItemId: req.params.id,
+      aliasType: parsed.data.aliasType,
+      aliasValue: parsed.data.aliasValue.trim(),
+    });
+    res.status(201).json({
+      id: row.id,
+      catalogItemId: row.catalogItemId,
+      aliasType: row.aliasType,
+      aliasValue: row.aliasValue,
+    });
+  } catch (err: unknown) {
+    handleRouteError(res, err, '[POST /api/catalog/items/:id/aliases]');
+  }
+});
+
+legacyRouter.delete('/catalog/item-aliases/:aliasId', (req, res) => {
+  try {
+    deleteCatalogAlias(req.params.aliasId);
+    res.status(204).send();
+  } catch (err: unknown) {
+    handleRouteError(res, err, '[DELETE /api/catalog/item-aliases/:aliasId]');
+  }
+});
+
+legacyRouter.get('/catalog/items/:id/attributes', (req, res) => {
+  const includeInactive = req.query.includeInactive === '1' || req.query.includeInactive === 'true';
+  try {
+    const rows = listCatalogAttributesForItem(req.params.id, { includeInactive });
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        catalogItemId: r.catalogItemId,
+        attributeType: r.attributeType,
+        attributeValue: r.attributeValue,
+        materialDeltaType: r.materialDeltaType,
+        materialDeltaValue: r.materialDeltaValue,
+        laborDeltaType: r.laborDeltaType,
+        laborDeltaValue: r.laborDeltaValue,
+        active: r.active,
+        sortOrder: r.sortOrder,
+      }))
+    );
+  } catch (err: unknown) {
+    handleRouteError(res, err, '[GET /api/catalog/items/:id/attributes]');
+  }
+});
+
+const createAttributeSchema = z.object({
+  attributeType: z.enum(['finish', 'coating', 'grip', 'mounting', 'assembly']),
+  attributeValue: z.string().min(1).max(128),
+  materialDeltaType: z.enum(['absolute', 'percent', 'minutes']).nullable().optional(),
+  materialDeltaValue: z.coerce.number().finite().nullable().optional(),
+  laborDeltaType: z.enum(['absolute', 'percent', 'minutes']).nullable().optional(),
+  laborDeltaValue: z.coerce.number().finite().nullable().optional(),
+  sortOrder: z.coerce.number().int().finite().optional(),
+});
+
+legacyRouter.post('/catalog/items/:id/attributes', (req, res) => {
+  const parsed = createAttributeSchema.safeParse(req.body);
+  if (!parsed.success) return handleRouteError(res, parsed.error, '[POST /api/catalog/items/:id/attributes]');
+  try {
+    const id = crypto.randomUUID();
+    const row = createCatalogAttribute({
+      id,
+      catalogItemId: req.params.id,
+      attributeType: parsed.data.attributeType,
+      attributeValue: parsed.data.attributeValue.trim(),
+      materialDeltaType: parsed.data.materialDeltaType ?? null,
+      materialDeltaValue: parsed.data.materialDeltaValue ?? null,
+      laborDeltaType: parsed.data.laborDeltaType ?? null,
+      laborDeltaValue: parsed.data.laborDeltaValue ?? null,
+      sortOrder: parsed.data.sortOrder ?? 0,
+    });
+    res.status(201).json({
+      id: row.id,
+      catalogItemId: row.catalogItemId,
+      attributeType: row.attributeType,
+      attributeValue: row.attributeValue,
+      materialDeltaType: row.materialDeltaType,
+      materialDeltaValue: row.materialDeltaValue,
+      laborDeltaType: row.laborDeltaType,
+      laborDeltaValue: row.laborDeltaValue,
+      active: row.active,
+      sortOrder: row.sortOrder,
+    });
+  } catch (err: unknown) {
+    handleRouteError(res, err, '[POST /api/catalog/items/:id/attributes]');
+  }
+});
+
+legacyRouter.delete('/catalog/item-attributes/:attributeId', (req, res) => {
+  try {
+    deactivateCatalogAttribute(req.params.attributeId);
+    res.status(204).send();
+  } catch (err: unknown) {
+    handleRouteError(res, err, '[DELETE /api/catalog/item-attributes/:attributeId]');
+  }
+});
+
 legacyRouter.post('/catalog/items', async (req, res) => {
   const parsed = legacyCatalogItemBodySchema.safeParse(req.body);
   if (!parsed.success) return handleRouteError(res, parsed.error, '[POST /api/catalog/items]');
@@ -49,12 +200,22 @@ legacyRouter.post('/catalog/items', async (req, res) => {
   try {
     getEstimatorDb()
       .prepare(
-        `INSERT INTO catalog_items (id, sku, category, subcategory, family, description, manufacturer, brand, model, model_number, series, image_url, uom, base_material_cost, base_labor_minutes, labor_unit_type, taxable, ada_flag, tags, notes, active, install_labor_family)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO catalog_items (
+          id, sku, canonical_sku, is_canonical, alias_of, category, subcategory, family, description, manufacturer, brand, model, model_number, series, image_url,
+          uom, base_material_cost, base_labor_minutes, labor_unit_type, labor_basis, taxable, ada_flag, tags, notes, active, install_labor_family,
+          default_mounting_type, finish_group, attribute_group, duplicate_group_key, deprecated, deprecated_reason,
+          record_granularity, material_family, system_series, privacy_level,
+          manufacturer_configured_item, canonical_match_anchor, exact_component_sku, requires_project_configuration,
+          default_unit, estimator_notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         i.id,
         i.sku,
+        i.canonicalSku ?? i.sku,
+        i.isCanonical === false ? 0 : 1,
+        i.aliasOf ?? null,
         i.category,
         i.subcategory ?? null,
         i.family ?? null,
@@ -69,12 +230,29 @@ legacyRouter.post('/catalog/items', async (req, res) => {
         i.baseMaterialCost,
         i.baseLaborMinutes,
         i.laborUnitType ?? null,
+        i.laborBasis ?? null,
         i.taxable ? 1 : 0,
         i.adaFlag ? 1 : 0,
         JSON.stringify(i.tags ?? []),
         i.notes ?? null,
         i.active ? 1 : 0,
-        i.installLaborFamily ?? null
+        i.installLaborFamily ?? null,
+        i.defaultMountingType ?? null,
+        i.finishGroup ?? null,
+        i.attributeGroup ?? null,
+        i.duplicateGroupKey ?? null,
+        i.deprecated ? 1 : 0,
+        i.deprecatedReason ?? null,
+        i.recordGranularity ?? null,
+        i.materialFamily ?? null,
+        i.systemSeries ?? null,
+        i.privacyLevel ?? null,
+        i.manufacturerConfiguredItem ? 1 : 0,
+        i.canonicalMatchAnchor ? 1 : 0,
+        i.exactComponentSku ? 1 : 0,
+        i.requiresProjectConfiguration ? 1 : 0,
+        i.defaultUnit ?? null,
+        i.estimatorNotes ?? null
       );
     await syncCatalogToGoogleSheetOptional('create item', () =>
       upsertItemInGoogleSheet({
@@ -110,12 +288,21 @@ legacyRouter.put('/catalog/items/:id', async (req, res) => {
     getEstimatorDb()
       .prepare(
         `UPDATE catalog_items SET 
-          sku = ?, category = ?, subcategory = ?, family = ?, description = ?, manufacturer = ?, brand = ?, model = ?, model_number = ?, series = ?, image_url = ?, uom = ?, 
-          base_material_cost = ?, base_labor_minutes = ?, labor_unit_type = ?, taxable = ?, ada_flag = ?, tags = ?, notes = ?, active = ?, install_labor_family = ?
+          sku = ?, canonical_sku = ?, is_canonical = ?, alias_of = ?,
+          category = ?, subcategory = ?, family = ?, description = ?, manufacturer = ?, brand = ?, model = ?, model_number = ?, series = ?, image_url = ?, uom = ?, 
+          base_material_cost = ?, base_labor_minutes = ?, labor_unit_type = ?, labor_basis = ?,
+          taxable = ?, ada_flag = ?, tags = ?, notes = ?, active = ?, install_labor_family = ?,
+          default_mounting_type = ?, finish_group = ?, attribute_group = ?, duplicate_group_key = ?, deprecated = ?, deprecated_reason = ?,
+          record_granularity = ?, material_family = ?, system_series = ?, privacy_level = ?,
+          manufacturer_configured_item = ?, canonical_match_anchor = ?, exact_component_sku = ?, requires_project_configuration = ?,
+          default_unit = ?, estimator_notes = ?
         WHERE id = ?`
       )
       .run(
         i.sku,
+        i.canonicalSku ?? i.sku,
+        i.isCanonical === false ? 0 : 1,
+        i.aliasOf ?? null,
         i.category,
         i.subcategory ?? null,
         i.family ?? null,
@@ -130,12 +317,29 @@ legacyRouter.put('/catalog/items/:id', async (req, res) => {
         i.baseMaterialCost,
         i.baseLaborMinutes,
         i.laborUnitType ?? null,
+        i.laborBasis ?? null,
         i.taxable ? 1 : 0,
         i.adaFlag ? 1 : 0,
         JSON.stringify(i.tags ?? []),
         i.notes ?? null,
         i.active ? 1 : 0,
         i.installLaborFamily ?? null,
+        i.defaultMountingType ?? null,
+        i.finishGroup ?? null,
+        i.attributeGroup ?? null,
+        i.duplicateGroupKey ?? null,
+        i.deprecated ? 1 : 0,
+        i.deprecatedReason ?? null,
+        i.recordGranularity ?? null,
+        i.materialFamily ?? null,
+        i.systemSeries ?? null,
+        i.privacyLevel ?? null,
+        i.manufacturerConfiguredItem ? 1 : 0,
+        i.canonicalMatchAnchor ? 1 : 0,
+        i.exactComponentSku ? 1 : 0,
+        i.requiresProjectConfiguration ? 1 : 0,
+        i.defaultUnit ?? null,
+        i.estimatorNotes ?? null,
         req.params.id
       );
     await syncCatalogToGoogleSheetOptional('update item', () =>
