@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { Storage } from '@google-cloud/storage';
 import type Database from 'better-sqlite3';
+import { getDurableSqliteSupabaseConfig } from './durableSqliteSupabase.ts';
 
 function isCloudRun(): boolean {
   return Boolean(process.env.K_SERVICE || process.env.K_REVISION || process.env.K_CONFIGURATION);
@@ -28,12 +29,15 @@ export async function restoreSqliteFromGcsIfConfigured(dbPath: string): Promise<
 }> {
   const cfg = getDurableSqliteGcsConfig();
   if (!cfg) {
+    if (isCloudRun() && getDurableSqliteSupabaseConfig()) {
+      return { attempted: false, restored: false };
+    }
     if (isCloudRun()) {
       return {
         attempted: false,
         restored: false,
         message:
-          'Cloud Run detected but DATABASE_GCS_BUCKET is not set; SQLite will be stored on ephemeral container disk and can be lost on deploy.',
+          'Cloud Run detected but no remote SQLite backup is configured. Set DATABASE_GCS_BUCKET, or set DATABASE_SUPABASE_BUCKET with SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Otherwise SQLite is on ephemeral container disk and can be lost on deploy.',
       };
     }
     return { attempted: false, restored: false };

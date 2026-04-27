@@ -70,8 +70,13 @@ export function calculateEstimateSummary(project: ProjectRecord, lines: TakeoffL
 
   const totalLaborMinutes = Number((rawLaborMinutesScaled * effects.laborHoursMultiplier).toFixed(2));
   const totalLaborHours = Number((totalLaborMinutes / 60).toFixed(2));
-  const hoursPerInstallerDay = 8;
-  const productiveCrewHoursPerDay = Number((hoursPerInstallerDay * Math.max(1, jobConditions.installerCount)).toFixed(2));
+  const paid = jobConditions.installerPaidDayHours;
+  const breakH = jobConditions.dailyBreakHoursPerInstaller;
+  const setupCleanup = jobConditions.fieldSetupCleanupHoursPerInstallerDay;
+  const productiveHrsPerInstaller = Math.max(0.25, paid - breakH - setupCleanup);
+  const productiveCrewHoursPerDay = Number(
+    (productiveHrsPerInstaller * Math.max(1, jobConditions.installerCount)).toFixed(2)
+  );
   const durationDays =
     totalLaborHours > 0 ? Math.max(1, Math.ceil(totalLaborHours / productiveCrewHoursPerDay)) : 0;
 

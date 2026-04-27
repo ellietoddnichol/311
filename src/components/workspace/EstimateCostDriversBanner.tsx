@@ -71,7 +71,7 @@ export function EstimateCostDriversBanner({
               Rolled-up <strong>{formatNumberSafe(totalLaborHours, 1)} hr</strong> extends minutes × qty across lines; calendar{' '}
               <strong>{formatNumberSafe(durationDays, 0)}</strong> day{durationDays === 1 ? '' : 's'} uses{' '}
               <strong>{formatNumberSafe(installerCount, 0)}</strong> installer{installerCount === 1 ? '' : 's'} and{' '}
-              <strong>{formatNumberSafe(productiveCrewHoursPerDay, 1)}</strong> productive crew-hr/day capacity.
+              <strong>{formatNumberSafe(productiveCrewHoursPerDay, 1)}</strong> productive crew-hr/day (install capacity: paid day minus breaks and setup/cleanup, per installer, × crew).
               {Math.abs(laborHoursMultiplier - 1) > 0.001 ? (
                 <> Schedule <strong>time</strong> multiplier ×{formatNumberSafe(laborHoursMultiplier, 2)} adjusts hours, separate from $/hr.</>
               ) : null}

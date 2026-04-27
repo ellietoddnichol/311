@@ -18,6 +18,20 @@ export function titleStringForInference(raw: string | null | undefined): string 
   return t.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * True when the bid/job # field is empty or a common “no number yet” placeholder.
+ * The UI and APIs sometimes store `0`, “-”, or “TBD”, which would otherwise block
+ * `generateBidPackageNumber` because they are non-empty strings.
+ */
+export function isBlankOrPlaceholderBidNumber(raw: string | null | undefined): boolean {
+  const s = String(raw ?? '').trim();
+  if (!s) return true;
+  const lower = s.toLowerCase();
+  if (s === '0' || s === '-' || s === '–' || s === '—' || s === '--') return true;
+  if (['n/a', 'na', 'tbd', 'none', 'pending', 'unknown'].includes(lower)) return true;
+  return false;
+}
+
 function normalizeName(input: string): string {
   return String(input || '').trim().toLowerCase();
 }

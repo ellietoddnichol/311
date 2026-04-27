@@ -22,6 +22,15 @@ This repo supports two durability strategies without changing estimate math:
      - `DATABASE_GCS_BACKUP_INTERVAL_MS` (default `30000`)
    - Ensure the Cloud Run runtime service account has read/write access to that bucket’s objects.
 
+3. **Supabase Storage (alternative to GCS)**: use a Supabase private bucket to restore/backup the same SQLite file. If `DATABASE_SUPABASE_BUCKET` is set (and credentials are valid), it **takes precedence** over GCS.
+   - Set:
+     - `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` — from Supabase project API settings
+     - `SUPABASE_SERVICE_ROLE_KEY` — **server only**; never put this in the Vite client bundle
+     - `DATABASE_SUPABASE_BUCKET` — bucket name you created under Storage
+     - `DATABASE_SUPABASE_OBJECT` (default `estimator.db`) — object path inside that bucket; use a folder prefix if you want, e.g. `backups/estimator.db`
+     - `DATABASE_SUPABASE_BACKUP_INTERVAL_MS` (optional, default `30000`)
+   - In the Supabase dashboard: Storage → create the bucket (private is recommended). The service role key bypasses Storage RLS for uploads/downloads from the server.
+
 Limitations:
 - GCS backup is **eventual** (interval-based) durability; the last few seconds of writes may be lost if an instance is terminated before the next backup.
 

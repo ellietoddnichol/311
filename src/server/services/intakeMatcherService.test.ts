@@ -12,6 +12,7 @@ function baseReviewLine(over: Partial<IntakeReviewLine>): IntakeReviewLine {
   return {
     lineId: 'line-1',
     reviewLineFingerprint: 'fp1',
+    reviewLineContentKey: 'ck1',
     roomName: 'Men',
     itemName: 'Towel bar',
     description: 'Towel bar stainless',
@@ -115,6 +116,44 @@ test('ignored review override persists for same fingerprint', async () => {
   assert.ok(draft);
   const row = draft!.lineSuggestions[0];
   assert.equal(row.applicationStatus, 'ignored');
+});
+
+test('ignored review override matches by content key when fingerprint changes', async () => {
+  const { buildIntakeEstimateDraft } = await import('./intakeMatcherService.ts');
+  const { getEstimatorDb } = await import('../db/connection.ts');
+  const { computeReviewLineContentKey } = await import('../utils/reviewLineFingerprint.ts');
+  const db = getEstimatorDb();
+  const fpOld = `fp-old-${crypto.randomUUID()}`;
+  const fpNew = `fp-new-${crypto.randomUUID()}`;
+  const contentKey = computeReviewLineContentKey({
+    roomName: 'nd',
+    itemCode: 'hs - auto',
+    itemName: 'hs - auto',
+    description: 'Automatic Hand Sanitizer Dispenser',
+  });
+  db.prepare(
+    `INSERT OR REPLACE INTO intake_review_overrides_v1 (review_line_fingerprint, status, updated_at, content_ignore_key)
+     VALUES (?, 'ignored', datetime('now'), ?)`
+  ).run(fpOld, contentKey);
+
+  const line = baseReviewLine({
+    lineId: 'l-hand',
+    reviewLineFingerprint: fpNew,
+    reviewLineContentKey: contentKey,
+    roomName: 'nd',
+    itemCode: 'HS - AUTO',
+    itemName: 'HS - AUTO',
+    description: 'Automatic Hand Sanitizer Dispenser',
+    quantity: 4,
+  });
+  const draft = buildIntakeEstimateDraft({
+    reviewLines: [line],
+    catalog: [{ id: 'c1', sku: 'X', description: 'Item', category: 'Cat', uom: 'EA', baseMaterialCost: 10, baseLaborMinutes: 10, taxable: true, adaFlag: false, active: true, tags: [] }] as any,
+    modifiers: [],
+  });
+  assert.ok(draft);
+  assert.equal(draft!.lineSuggestions[0].applicationStatus, 'ignored');
+  assert.ok(draft!.lineSuggestions[0].matcherSignals.includes('review_override:ignored'));
 });
 
 test('admin lines (addenda / qty headers / source metadata) are informational_only and do not surface as review items', async () => {

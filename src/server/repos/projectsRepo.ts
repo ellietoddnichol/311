@@ -7,6 +7,7 @@ import {
   generateBidPackageNumber,
   inferDefaultClientName,
   inferDefaultLocationFromProjectTitle,
+  isBlankOrPlaceholderBidNumber,
   logProjectAutofill,
   titleStringForInference,
 } from '../services/projectDefaults.ts';
@@ -201,18 +202,19 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
   const titleForDefaults = rawTitle || projectName;
 
   const projectNumberRaw = String(input.projectNumber ?? '').trim();
+  const shouldAutofillBid = isBlankOrPlaceholderBidNumber(projectNumberRaw);
   const clientNameRaw = String(input.clientName ?? '').trim();
   const addressRaw = String(input.address ?? '').trim();
 
   logProjectAutofill('create.begin', {
     rawTitleLen: rawTitle.length,
     coercedName: projectName,
-    projectNumberBlank: !projectNumberRaw,
+    projectNumberBlank: shouldAutofillBid,
     clientBlank: !clientNameRaw,
     addressBlank: !addressRaw,
   });
 
-  const projectNumberAuto = projectNumberRaw ? null : generateBidPackageNumber({ projectId, projectName });
+  const projectNumberAuto = shouldAutofillBid ? generateBidPackageNumber({ projectId, projectName }) : null;
   const clientAuto = clientNameRaw ? null : inferDefaultClientName({ projectName: titleForDefaults });
   const locationAuto = addressRaw ? null : inferDefaultLocationFromProjectTitle({ projectName: titleForDefaults });
 
@@ -225,8 +227,8 @@ export function createProject(input: Partial<ProjectRecord>): ProjectRecord {
 
   const project: ProjectRecord = {
     id: projectId,
-    projectNumber: projectNumberRaw || projectNumberAuto,
-    projectNumberSource: projectNumberRaw ? 'manual' : 'auto',
+    projectNumber: shouldAutofillBid ? (projectNumberAuto as string) : projectNumberRaw,
+    projectNumberSource: shouldAutofillBid ? 'auto' : 'manual',
     projectName,
     clientName: clientNameRaw || (clientAuto ? clientAuto.clientName : null),
     clientNameSource: clientNameRaw ? 'manual' : clientAuto ? 'auto' : 'manual',
@@ -375,23 +377,31 @@ export function updateProject(projectId: string, input: Partial<ProjectRecord>):
   next.projectName = coerceSafeProjectName(next.projectName, 'Untitled Project');
   const titleForDefaults = rawTitle || next.projectName;
 
+  const existingNeedsBid = isBlankOrPlaceholderBidNumber(String(existing.projectNumber ?? ''));
+  const shouldAutofillBidOnUpdate =
+    existingNeedsBid &&
+    (!hasIncomingProjectNumber ||
+      incomingProjectNumber === null ||
+      incomingProjectNumber === '' ||
+      (incomingProjectNumber != null && isBlankOrPlaceholderBidNumber(incomingProjectNumber)));
+
   logProjectAutofill('update.begin', {
     projectId,
     hasIncomingProjectNumber,
     hasIncomingAddress,
     hasIncomingLocationLabel,
-    existingProjectNumberBlank: !String(existing.projectNumber || '').trim(),
+    existingProjectNumberBlank: existingNeedsBid,
     existingAddressBlank: !String(existing.address || '').trim(),
     titleForDefaultsSample: titleForDefaults.slice(0, 80),
   });
 
   // Default only when blank, and never regenerate on unrelated edits.
-  if (!String(existing.projectNumber || '').trim() && (incomingProjectNumber === null || incomingProjectNumber === '')) {
+  if (shouldAutofillBidOnUpdate) {
     next.projectNumber = generateBidPackageNumber({ projectId, projectName: next.projectName });
     next.projectNumberSource = 'auto';
     logProjectAutofill('update.filled.projectNumber', { source: 'generateBidPackageNumber' });
   } else if (hasIncomingProjectNumber) {
-    if (incomingProjectNumber === '' && String(existing.projectNumber || '').trim()) {
+    if (incomingProjectNumber === '' && !existingNeedsBid) {
       // Full PUT often serializes empty optional fields as "" / null — do not wipe a stored value.
       next.projectNumber = existing.projectNumber;
       next.projectNumberSource = existing.projectNumberSource;

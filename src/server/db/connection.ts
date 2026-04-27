@@ -5,12 +5,15 @@ import { initLegacyDb } from '../legacyInit.ts';
 import { initEstimatorSchema } from './schema.ts';
 import { resolveEstimatorDbPath } from './resolveEstimatorDbPath.ts';
 import {
-  backupSqliteToGcsOnce,
-  getDurableSqliteGcsConfig,
-  restoreSqliteFromGcsIfConfigured,
-  startSqliteGcsBackupLoop,
-} from './durableSqliteGcs.ts';
+  backupSqliteToRemoteDurableOnce,
+  getActiveRemoteDurableKind,
+  restoreSqliteFromRemoteDurableIfConfigured,
+  startRemoteDurableSqliteBackupLoop,
+} from './durableSqliteRemote.ts';
+import { getDurableSqliteGcsConfig } from './durableSqliteGcs.ts';
+import { getDurableSqliteSupabaseConfig, warnIfSupabaseBucketWithoutCredentials } from './durableSqliteSupabase.ts';
 import { getDbPersistenceStatus, updateDbPersistenceStatus } from '../repos/dbPersistenceRepo.ts';
+import type { DbPersistenceStatusRecord } from '../../shared/types/estimator.ts';
 
 let estimatorDb: Database | null = null;
 let backupStopper: { stop: () => Promise<void> } | null = null;
@@ -35,33 +38,46 @@ export async function prepareEstimatorDbForServer(): Promise<void> {
   if (prepared) return;
   prepared = true;
 
+  warnIfSupabaseBucketWithoutCredentials();
   const dbPath = resolveEstimatorDbPath();
   resolvedDbPath = dbPath;
+  const supaCfg = getDurableSqliteSupabaseConfig();
   const gcsCfg = getDurableSqliteGcsConfig();
-  const mode =
-    dbPath.startsWith('/data/')
-      ? (gcsCfg ? 'volume' : 'volume')
-      : gcsCfg
+  const activeRemote = getActiveRemoteDurableKind();
+  const remoteMeta =
+    supaCfg != null
+      ? { bucket: supaCfg.bucket, object: supaCfg.object }
+      : gcsCfg != null
+        ? { bucket: gcsCfg.bucket, object: gcsCfg.object }
+        : null;
+
+  const mode: DbPersistenceStatusRecord['mode'] = dbPath.startsWith('/data/')
+    ? 'volume'
+    : activeRemote === 'supabase'
+      ? 'ephemeral_supabase'
+      : activeRemote === 'gcs'
         ? 'ephemeral_gcs'
         : 'ephemeral';
+
   updateDbPersistenceStatus({
     dbPath,
     mode,
-    gcsBucket: gcsCfg?.bucket ?? null,
-    gcsObject: gcsCfg?.object ?? null,
+    gcsBucket: remoteMeta?.bucket ?? null,
+    gcsObject: remoteMeta?.object ?? null,
   });
 
-  const restore = await restoreSqliteFromGcsIfConfigured(dbPath);
+  const restore = await restoreSqliteFromRemoteDurableIfConfigured(dbPath);
   if (restore.message) {
     console.log(`[db] ${restore.message}`);
   }
-  if (gcsCfg) {
+  if (activeRemote) {
+    const noSnapshot = /no.*snapshot|not found|No Supabase Storage object|Backup object not found/i;
     updateDbPersistenceStatus({
       restoreAttemptedAt: restore.attempted ? new Date().toISOString() : null,
       restoreStatus: restore.attempted
         ? restore.restored
           ? 'restored'
-          : /No GCS snapshot found/i.test(restore.message || '')
+          : noSnapshot.test(restore.message || '')
             ? 'no_snapshot'
             : 'failed'
         : fs.existsSync(dbPath)
@@ -84,7 +100,7 @@ export async function prepareEstimatorDbForServer(): Promise<void> {
   initLegacyDb(estimatorDb);
   initEstimatorSchema(estimatorDb);
 
-  backupStopper = startSqliteGcsBackupLoop(estimatorDb, dbPath, {
+  backupStopper = startRemoteDurableSqliteBackupLoop(estimatorDb, dbPath, {
     onBackupResult: (result) => {
       if (result.ok) {
         updateDbPersistenceStatus({
@@ -112,13 +128,12 @@ export function getDbPersistenceStatusSnapshot() {
 export async function runDbBackupNow(): Promise<{ ok: boolean; message: string }> {
   const db = getEstimatorDb();
   const dbPath = getResolvedEstimatorDbPath();
-  const result = await backupSqliteToGcsOnce(db, dbPath);
+  const result = await backupSqliteToRemoteDurableOnce(db, dbPath);
   const now = new Date().toISOString();
   if (result.ok) {
     updateDbPersistenceStatus({
       lastBackupSuccessAt: now,
       lastBackupError: null,
-      // leave lastBackupFailureAt as-is for audit
     });
     return { ok: true, message: result.message || 'Backup complete.' };
   }
@@ -128,3 +143,5 @@ export async function runDbBackupNow(): Promise<{ ok: boolean; message: string }
   });
   return { ok: false, message: result.message || 'Backup failed.' };
 }
+
+export { getRemoteDurableSqliteObjectMetadata } from './durableSqliteRemote.ts';

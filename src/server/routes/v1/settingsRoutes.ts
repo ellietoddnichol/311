@@ -11,7 +11,7 @@ import { backfillTakeoffRegistryToGoogleSheets, syncCatalogFromGoogleSheets } fr
 import { generateProposalDraftFromGemini } from '../../services/geminiProposalDraft.ts';
 import { getErrorMessage } from '../../../shared/utils/errorMessage.ts';
 import { getDbPersistenceStatusSnapshot, runDbBackupNow } from '../../db/connection.ts';
-import { getGcsBackupObjectMetadata } from '../../db/durableSqliteGcs.ts';
+import { getActiveRemoteDurableKind, getRemoteDurableSqliteObjectMetadata } from '../../db/durableSqliteRemote.ts';
 
 export const settingsRouter = Router();
 
@@ -102,14 +102,14 @@ settingsRouter.post('/backfill-takeoff-registry', async (_req, res) => {
 
 settingsRouter.get('/persistence-status', async (_req, res) => {
   const status = getDbPersistenceStatusSnapshot();
-  const objectMeta = await getGcsBackupObjectMetadata();
-  return res.json({ data: { ...status, gcsObjectMeta: objectMeta } });
+  const objectMeta = await getRemoteDurableSqliteObjectMetadata();
+  return res.json({ data: { ...status, gcsObjectMeta: objectMeta, remoteDurableKind: getActiveRemoteDurableKind() } });
 });
 
 settingsRouter.post('/persistence-backup-now', async (_req, res) => {
   const result = await runDbBackupNow();
   const status = getDbPersistenceStatusSnapshot();
-  const objectMeta = await getGcsBackupObjectMetadata();
+  const objectMeta = await getRemoteDurableSqliteObjectMetadata();
   const code = result.ok ? 200 : 503;
-  return res.status(code).json({ data: { ok: result.ok, message: result.message, status: { ...status, gcsObjectMeta: objectMeta } } });
+  return res.status(code).json({ data: { ok: result.ok, message: result.message, status: { ...status, gcsObjectMeta: objectMeta, remoteDurableKind: getActiveRemoteDurableKind() } } });
 });

@@ -18,7 +18,7 @@ import {
 } from './intakeCatalogMatching.ts';
 import { intakeAsText } from './metadataExtractorService.ts';
 import { getEstimatorDb } from '../db/connection.ts';
-import { getIntakeReviewOverridesByFingerprints } from '../repos/intakeReviewOverridesRepo.ts';
+import { getIntakeReviewOverridesForMatcherLines } from '../repos/intakeReviewOverridesRepo.ts';
 
 const TOP_N = 3;
 const MFR_BOOST = 0.04;
@@ -462,6 +462,7 @@ export function buildIntakeEstimateDraft(params: {
 
     return {
       reviewLineFingerprint: line.reviewLineFingerprint,
+      reviewLineContentKey: line.reviewLineContentKey,
       lineId: line.lineId,
       scopeBucket,
       applicationStatus: baseStatus,
@@ -483,7 +484,12 @@ export function buildIntakeEstimateDraft(params: {
     };
   });
 
-  const overrideMap = getIntakeReviewOverridesByFingerprints(rawLineSuggestions.map((s) => s.reviewLineFingerprint));
+  const overrideMap = getIntakeReviewOverridesForMatcherLines(
+    rawLineSuggestions.map((s) => ({
+      reviewLineFingerprint: s.reviewLineFingerprint,
+      reviewLineContentKey: s.reviewLineContentKey,
+    }))
+  );
   const lineSuggestions = rawLineSuggestions.map((s) => {
     const ov = overrideMap.get(s.reviewLineFingerprint);
     if (!ov || ov.status !== 'ignored') return s;

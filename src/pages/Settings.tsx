@@ -7,7 +7,7 @@ import { getErrorMessage } from '../shared/utils/errorMessage';
 export function Settings() {
   const [settings, setSettings] = useState<SettingsRecord | null>(null);
   const [syncStatus, setSyncStatus] = useState<CatalogSyncStatusRecord | null>(null);
-  const [persistenceStatus, setPersistenceStatus] = useState<(DbPersistenceStatusRecord & { gcsObjectMeta?: any }) | null>(null);
+  const [persistenceStatus, setPersistenceStatus] = useState<(DbPersistenceStatusRecord & { gcsObjectMeta?: any; remoteDurableKind?: 'supabase' | 'gcs' | null }) | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncRuns, setSyncRuns] = useState<Array<{
@@ -217,7 +217,7 @@ export function Settings() {
             onClick={() => void backupDbNow()}
             disabled={backingUpDb || saving || syncing || backfillingRegistry}
             className="ui-btn-secondary disabled:opacity-50"
-            title="Run a backup immediately (GCS mode only)"
+            title="Run an immediate remote backup (Supabase Storage or GCS when configured)"
           >
             {backingUpDb ? 'Backing up…' : 'Backup now'}
           </button>
@@ -225,11 +225,11 @@ export function Settings() {
 
         {persistenceStatus ? (
           <>
-            {(persistenceStatus.mode === 'ephemeral_gcs' || persistenceStatus.mode === 'ephemeral') ? (
+            {(persistenceStatus.mode === 'ephemeral_gcs' || persistenceStatus.mode === 'ephemeral_supabase' || persistenceStatus.mode === 'ephemeral') ? (
               <div className="ui-callout-warn">
                 <p className="ui-label mb-1 !normal-case tracking-normal text-[var(--warn)]">Durability warning</p>
                 <p className="text-xs text-slate-700">
-                  This deployment is using an <span className="font-semibold">ephemeral filesystem</span>. If running with GCS backups, recent edits can be lost between backup intervals.
+                  This deployment is using an <span className="font-semibold">ephemeral filesystem</span>. If running with Supabase Storage or GCS backups, recent edits can be lost between backup intervals.
                   A <span className="font-semibold">persistent volume</span> (or a database service) is the preferred long-term setup.
                 </p>
               </div>
@@ -266,10 +266,12 @@ export function Settings() {
 
             {persistenceStatus.gcsObjectMeta ? (
               <div className="ui-panel-muted p-3 text-xs text-[var(--text)]">
-                <p className="font-semibold text-slate-800">GCS object</p>
+                <p className="font-semibold text-slate-800">Remote backup object</p>
                 <p className="mt-1 font-mono text-[11px] break-all">
                   {(persistenceStatus.gcsBucket && persistenceStatus.gcsObject)
-                    ? `gs://${persistenceStatus.gcsBucket}/${persistenceStatus.gcsObject}`
+                    ? persistenceStatus.remoteDurableKind === 'supabase'
+                      ? `supabase://storage/${persistenceStatus.gcsBucket}/${persistenceStatus.gcsObject}`
+                      : `gs://${persistenceStatus.gcsBucket}/${persistenceStatus.gcsObject}`
                     : 'Not configured'}
                 </p>
                 {persistenceStatus.gcsObjectMeta?.ok ? (

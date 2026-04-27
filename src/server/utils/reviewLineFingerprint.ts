@@ -34,3 +34,23 @@ export function computeReviewLineFingerprint(input: ReviewLineFingerprintInput):
   const json = JSON.stringify(payload);
   return createHash('sha256').update(json, 'utf8').digest('hex');
 }
+
+/** Same canonical fields as the fingerprint, but without quantity or unit (volatile across re-parses). */
+export type ReviewLineContentKeyInput = Pick<
+  ReviewLineFingerprintInput,
+  'roomName' | 'itemCode' | 'itemName' | 'description'
+>;
+
+/**
+ * Hash for matching durable actions (e.g. Ignore) when `computeReviewLineFingerprint` changes
+ * because quantity or unit changed between document passes.
+ */
+export function computeReviewLineContentKey(input: ReviewLineContentKeyInput): string {
+  const payload = {
+    description: stableScalar(input.description),
+    itemCode: stableScalar(input.itemCode),
+    itemName: stableScalar(input.itemName),
+    roomName: stableScalar(input.roomName),
+  };
+  return createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex');
+}

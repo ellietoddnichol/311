@@ -99,10 +99,12 @@ export interface ProjectJobConditions {
   performanceBondPercent: number;
   estimateAdderPercent: number;
   estimateAdderAmount: number;
-  /** Legacy / display; estimate duration uses 8 hr × installer count (no break deduction). */
+  /** Paid hours per installer day; with breaks and non-install time, sets install capacity for calendar duration. */
   installerPaidDayHours: number;
-  /** Legacy; not used in estimate math. */
+  /** Breaks / lunch per installer day; reduces install capacity for duration (not line $). */
   dailyBreakHoursPerInstaller: number;
+  /** Setup, cleanup, layout, tool — not straight install (hr per installer per paid day). Reduces calendar capacity only. */
+  fieldSetupCleanupHoursPerInstallerDay: number;
   /** Legacy; not applied in estimate math. */
   laborLearningCurvePercent: number;
   /** Legacy; not applied in estimate math. */
@@ -430,7 +432,7 @@ export interface DbPersistenceStatusRecord {
   /** Effective resolved DB path on the server. */
   dbPath: string;
   /** Persistence mode inferred by server startup. */
-  mode: 'local' | 'volume' | 'ephemeral_gcs' | 'ephemeral';
+  mode: 'local' | 'volume' | 'ephemeral_gcs' | 'ephemeral_supabase' | 'ephemeral';
   gcsBucket: string | null;
   gcsObject: string | null;
   restoreAttemptedAt: string | null;

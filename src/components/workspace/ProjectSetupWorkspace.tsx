@@ -566,6 +566,50 @@ export function ProjectSetupWorkspace({
                 onChange={(e) => patchJobConditions({ installerCount: Number(e.target.value) || 1 })}
               />
             </label>
+            <div className="sm:col-span-2 md:col-span-3 rounded-lg border border-slate-200/90 bg-slate-50/80 p-3">
+              <p className="text-[11px] font-semibold text-slate-900">Field time (calendar duration)</p>
+              <p className="mt-1 text-[10px] leading-snug text-slate-600">
+                Line <strong>labor minutes</strong> are install work. Calendar <strong>days</strong> divide total install hours by crew capacity
+                per day: (paid hours − breaks − setup/cleanup) × crew size. Does not change line $.
+              </p>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <label className="text-[11px] font-medium text-slate-700">
+                  Paid hrs / installer day
+                  <input
+                    type="number"
+                    step="0.25"
+                    min={4}
+                    max={12}
+                    className="ui-input mt-0.5 h-8 w-full"
+                    value={jobConditions.installerPaidDayHours}
+                    onChange={(e) => patchJobConditions({ installerPaidDayHours: Number(e.target.value) || 8 })}
+                  />
+                </label>
+                <label className="text-[11px] font-medium text-slate-700">
+                  Breaks + lunch (hr / installer)
+                  <input
+                    type="number"
+                    step="0.25"
+                    min={0}
+                    className="ui-input mt-0.5 h-8 w-full"
+                    value={jobConditions.dailyBreakHoursPerInstaller}
+                    onChange={(e) => patchJobConditions({ dailyBreakHoursPerInstaller: Number(e.target.value) || 0 })}
+                  />
+                </label>
+                <label className="text-[11px] font-medium text-slate-700">
+                  Setup, cleanup, layout (hr / installer / day)
+                  <input
+                    type="number"
+                    step="0.25"
+                    min={0}
+                    className="ui-input mt-0.5 h-8 w-full"
+                    value={jobConditions.fieldSetupCleanupHoursPerInstallerDay}
+                    onChange={(e) => patchJobConditions({ fieldSetupCleanupHoursPerInstallerDay: Number(e.target.value) || 0 })}
+                    title="Not straight install: protect floors, tool setup, end-of-day cleanup, packing — default 0 for legacy; try 0.5–1.5 for typical field days"
+                  />
+                </label>
+              </div>
+            </div>
             <details className="group sm:col-span-2 md:col-span-3 rounded-xl border border-slate-200 bg-white/90 px-3 py-2">
               <summary className="cursor-pointer list-none text-[11px] font-semibold text-slate-800 [&::-webkit-details-marker]:hidden">
                 Advanced: stacked material profit, sub labor markup (usually 0%)

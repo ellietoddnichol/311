@@ -353,6 +353,8 @@ export interface IntakeReviewLine {
   lineId: string;
   /** Stable content key for reorder-safe correction logging and estimate draft rows. */
   reviewLineFingerprint: string;
+  /** Stable when quantity or unit drifts on re-parse; used with durable “Ignore” rows. */
+  reviewLineContentKey: string;
   /** Matcher tier: A = eligible for auto-link / pre-accept, B = suggest, C = needs work. */
   catalogAutoApplyTier?: IntakeCatalogAutoApplyTier;
   /** True when server auto-linked catalog (Tier A + auto_link_tier_a mode). */
@@ -521,6 +523,7 @@ export interface IntakeProposalClauseHint {
 
 export interface IntakeLineEstimateSuggestion {
   reviewLineFingerprint: string;
+  reviewLineContentKey: string;
   lineId: string;
   scopeBucket: IntakeScopeBucket;
   applicationStatus: IntakeApplicationStatus;

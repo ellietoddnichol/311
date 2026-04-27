@@ -97,6 +97,7 @@ test('new project job conditions use zero field-schedule pricing pads', () => {
   assert.equal(j.installerFieldSuppliesPercent, 0);
   assert.equal(j.laborLearningCurvePercent, 0);
   assert.equal(j.dailyBreakHoursPerInstaller, 0);
+  assert.equal(j.fieldSetupCleanupHoursPerInstallerDay, 0);
 });
 
 test('union labor is baseline and does not surface as a modifier', () => {
@@ -178,7 +179,7 @@ test('material-only bid still builds labor companion dollars from minutes when u
   assert.ok(summary.baseBidTotal > 200);
 });
 
-test('material waste, field supplies, learning curve, and breaks do not change estimate pricing', () => {
+test('material waste, field supplies, learning curve, and breaks do not change estimate pricing (breaks do reduce calendar capacity)', () => {
   const project = buildProject({
     jobConditions: {
       ...createDefaultProjectJobConditions(),
@@ -208,7 +209,22 @@ test('material waste, field supplies, learning curve, and breaks do not change e
   assert.equal(summary.conditionAssumptions.some((a) => /waste/i.test(a)), false);
   assert.equal(summary.conditionAssumptions.some((a) => /learning-curve/i.test(a)), false);
   assert.equal(summary.conditionAssumptions.some((a) => /breaks/i.test(a)), false);
-  assert.equal(summary.productiveCrewHoursPerDay, 8);
+  assert.equal(summary.productiveCrewHoursPerDay, 7);
+});
+
+test('field setup/cleanup time reduces install capacity per day for calendar duration', () => {
+  const project = buildProject({
+    jobConditions: {
+      ...createDefaultProjectJobConditions(),
+      installerCount: 2,
+      installerPaidDayHours: 8,
+      dailyBreakHoursPerInstaller: 0.5,
+      fieldSetupCleanupHoursPerInstallerDay: 1,
+    },
+  });
+  // 8 - 0.5 - 1 = 6.5 install hr per installer × 2 = 13 crew-hr / day
+  const summary = calculateEstimateSummary(project, [buildLine({ laborMinutes: 60, laborCost: 100, baseLaborCost: 100, unitSell: 150, lineTotal: 150 })]);
+  assert.ok(Math.abs(summary.productiveCrewHoursPerDay - 13) < 0.01);
 });
 
 test('zero travel distance does not appear in condition assumptions or proposal summary lines', () => {

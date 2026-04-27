@@ -138,11 +138,16 @@ intakeRouter.post('/div10-training-capture', async (req, res) => {
 intakeRouter.post('/review-override', (req, res) => {
   const body = req.body || {};
   const fingerprint = String(body.reviewLineFingerprint || '').trim();
+  const contentKey = body.reviewLineContentKey != null ? String(body.reviewLineContentKey).trim() : '';
   const status = String(body.status || '').trim();
   if (!fingerprint || status !== 'ignored') {
     return res.status(400).json({ error: 'reviewLineFingerprint and status=ignored are required.' });
   }
-  upsertIntakeReviewOverride({ reviewLineFingerprint: fingerprint, status: 'ignored' });
+  upsertIntakeReviewOverride({
+    reviewLineFingerprint: fingerprint,
+    status: 'ignored',
+    reviewLineContentKey: contentKey || null,
+  });
   return res.json({ data: { ok: true } });
 });
 

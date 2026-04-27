@@ -4,6 +4,7 @@ import {
   generateBidPackageNumber,
   inferDefaultClientName,
   inferDefaultLocationFromProjectTitle,
+  isBlankOrPlaceholderBidNumber,
   titleStringForInference,
 } from './projectDefaults.ts';
 
@@ -30,5 +31,13 @@ test('inferDefaultLocationFromProjectTitle fills only on strong City, ST pattern
 
 test('titleStringForInference strips controls and collapses whitespace', () => {
   assert.equal(titleStringForInference('  A\u0000 - B  '), 'A - B');
+});
+
+test('isBlankOrPlaceholderBidNumber treats 0, dashes, and tbd as empty for bid # autofill', () => {
+  assert.equal(isBlankOrPlaceholderBidNumber(''), true);
+  assert.equal(isBlankOrPlaceholderBidNumber('0'), true);
+  assert.equal(isBlankOrPlaceholderBidNumber('TBD'), true);
+  assert.equal(isBlankOrPlaceholderBidNumber('BP-2026-ABCDEF'), false);
+  assert.equal(isBlankOrPlaceholderBidNumber('ACME-1234'), false);
 });
 

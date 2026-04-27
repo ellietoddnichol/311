@@ -397,17 +397,17 @@ export const api = {
     }> }>(res);
     return payload.data;
   },
-  async getV1PersistenceStatus(): Promise<DbPersistenceStatusRecord & { gcsObjectMeta?: any }> {
+  async getV1PersistenceStatus(): Promise<DbPersistenceStatusRecord & { gcsObjectMeta?: any; remoteDurableKind?: 'supabase' | 'gcs' | null }> {
     const res = await apiFetch(`${API_BASE}/v1/settings/persistence-status`);
-    const payload = await handleResponse<{ data: DbPersistenceStatusRecord & { gcsObjectMeta?: any } }>(res);
+    const payload = await handleResponse<{ data: DbPersistenceStatusRecord & { gcsObjectMeta?: any; remoteDurableKind?: 'supabase' | 'gcs' | null } }>(res);
     return payload.data;
   },
-  async backupV1PersistenceNow(): Promise<{ ok: boolean; message: string; status: DbPersistenceStatusRecord & { gcsObjectMeta?: any } }> {
+  async backupV1PersistenceNow(): Promise<{ ok: boolean; message: string; status: DbPersistenceStatusRecord & { gcsObjectMeta?: any; remoteDurableKind?: 'supabase' | 'gcs' | null } }> {
     const res = await apiFetch(`${API_BASE}/v1/settings/persistence-backup-now`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
-    const payload = await handleResponse<{ data: { ok: boolean; message: string; status: DbPersistenceStatusRecord & { gcsObjectMeta?: any } } }>(res);
+    const payload = await handleResponse<{ data: { ok: boolean; message: string; status: DbPersistenceStatusRecord & { gcsObjectMeta?: any; remoteDurableKind?: 'supabase' | 'gcs' | null } } }>(res);
     return payload.data;
   },
   async syncV1Catalog(): Promise<{
@@ -535,7 +535,11 @@ export const api = {
     const payload = await handleResponse<{ data: { ok: boolean; deduped?: boolean } }>(res);
     return payload.data;
   },
-  async postV1IntakeReviewOverride(body: { reviewLineFingerprint: string; status: 'ignored' }): Promise<{ ok: boolean }> {
+  async postV1IntakeReviewOverride(body: {
+    reviewLineFingerprint: string;
+    status: 'ignored';
+    reviewLineContentKey?: string | null;
+  }): Promise<{ ok: boolean }> {
     const res = await apiFetch(`${API_BASE}/v1/intake/review-override`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

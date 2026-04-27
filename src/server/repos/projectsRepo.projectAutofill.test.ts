@@ -58,6 +58,11 @@ test('projectsRepo project autofill: raw title inference, jobConditions merge, p
     clientName: created3.clientName,
     address: created3.address,
   } as any);
-  assert.equal(updated3?.projectNumber, num);
-  assert.equal(getProject(created3.id)?.projectNumber, num);
+  const created4 = createProject({
+    projectName: 'Zero project - Omaha, NE',
+    projectNumber: '0',
+    clientName: 'Acme',
+    address: '',
+  });
+  assert.match(String(created4.projectNumber || ''), /^BP-/);
 });

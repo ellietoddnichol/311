@@ -319,6 +319,19 @@ export function initEstimatorSchema(db: Database) {
     // Best-effort seeding only.
   }
 
+  try {
+    const intakeOverrideCols = db.prepare('PRAGMA table_info(intake_review_overrides_v1)').all() as Array<{ name: string }>;
+    const intakeOverrideNames = new Set(intakeOverrideCols.map((c) => c.name));
+    if (!intakeOverrideNames.has('content_ignore_key')) {
+      db.exec('ALTER TABLE intake_review_overrides_v1 ADD COLUMN content_ignore_key TEXT');
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_intake_review_overrides_content_ignore_key ON intake_review_overrides_v1(content_ignore_key)'
+      );
+    }
+  } catch {
+    // best-effort
+  }
+
   // Idempotent migration for new sync-count columns.
   try {
     const statusCols = db.prepare('PRAGMA table_info(catalog_sync_status_v1)').all() as Array<{ name: string }>;

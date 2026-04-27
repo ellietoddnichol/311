@@ -2207,6 +2207,8 @@ export function ProjectIntake() {
     const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === fingerprint)?.id;
     if (item && lineId) {
       applyCatalogToLineId(lineId, item, 'Accepted estimate suggestion');
+    } else if (item) {
+      rememberIntakeCatalogChoice(item.id, intakeMemoryFieldsForFingerprint(fingerprint));
     }
   }
 
@@ -2217,13 +2219,23 @@ export function ProjectIntake() {
     const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === fingerprint)?.id;
     if (item && lineId) {
       applyCatalogToLineId(lineId, item, 'Replaced catalog candidate (estimate review)');
+    } else if (item) {
+      rememberIntakeCatalogChoice(item.id, intakeMemoryFieldsForFingerprint(fingerprint));
     }
   }
 
   function handleIgnoreEstimateLine(fingerprint: string) {
+    const draft = lastIntakeParse?.estimateDraft;
+    const row = draft?.lineSuggestions.find((r) => r.reviewLineFingerprint === fingerprint);
     patchEstimateReviewLine(fingerprint, { applicationStatus: 'ignored', selectedCatalogItemId: null });
     maybeCaptureDiv10Training(fingerprint, 'ignored', null);
-    void api.postV1IntakeReviewOverride({ reviewLineFingerprint: fingerprint, status: 'ignored' }).catch(() => {});
+    void api
+      .postV1IntakeReviewOverride({
+        reviewLineFingerprint: fingerprint,
+        status: 'ignored',
+        reviewLineContentKey: row?.reviewLineContentKey ?? null,
+      })
+      .catch(() => {});
     const lineId = lineSuggestions.find((l) => l.reviewLineFingerprint === fingerprint)?.id;
     if (lineId) ignoreLine(lineId);
   }
@@ -2294,6 +2306,13 @@ export function ProjectIntake() {
         (typeof m.score === 'number' && m.score < ESTIMATE_REVIEW_LOW_SCORE_THRESHOLD);
       if (low) {
         nextReview[row.reviewLineFingerprint] = { applicationStatus: 'ignored', selectedCatalogItemId: null };
+        void api
+          .postV1IntakeReviewOverride({
+            reviewLineFingerprint: row.reviewLineFingerprint,
+            status: 'ignored',
+            reviewLineContentKey: row.reviewLineContentKey,
+          })
+          .catch(() => {});
       }
     }
     setEstimateReviewLines(nextReview);

@@ -2,13 +2,15 @@ import { GlobalModifierImpact, ProjectConditions, ProjectJobConditions, ProjectR
 import { formatCurrencySafe, formatNumberSafe, formatPercentSafe } from '../../utils/numberFormat';
 
 /**
- * Default field-schedule / material-pad fields on new projects. The estimate engine does not apply waste,
- * supplies, learning-curve, or break deductions; duration uses 8 crew-hr per installer-day × crew size.
+ * Default field-schedule fields. Install minute totals on lines are "hands-on" work; calendar duration
+ * uses per-installer paid hours minus breaks and {@link ProjectJobConditions.fieldSetupCleanupHoursPerInstallerDay}
+ * to compute crew capacity (productive crew-hr / day = per-installer install capacity × crew size).
  */
 export const OFFICE_FIELD_SCHEDULE_DEFAULTS: Pick<
   ProjectJobConditions,
   | 'installerPaidDayHours'
   | 'dailyBreakHoursPerInstaller'
+  | 'fieldSetupCleanupHoursPerInstallerDay'
   | 'laborLearningCurvePercent'
   | 'materialWastePercent'
   | 'installerFieldSuppliesPercent'
@@ -16,6 +18,7 @@ export const OFFICE_FIELD_SCHEDULE_DEFAULTS: Pick<
 > = {
   installerPaidDayHours: 8,
   dailyBreakHoursPerInstaller: 0,
+  fieldSetupCleanupHoursPerInstallerDay: 1,
   laborLearningCurvePercent: 0,
   materialWastePercent: 0,
   installerFieldSuppliesPercent: 0,
@@ -67,6 +70,7 @@ const DEFAULT_JOB_CONDITIONS: ProjectJobConditions = {
   estimateAdderPercent: 0,
   estimateAdderAmount: 0,
   ...OFFICE_FIELD_SCHEDULE_DEFAULTS,
+  fieldSetupCleanupHoursPerInstallerDay: 0,
 };
 
 export function createDefaultProjectJobConditions(): ProjectJobConditions {
@@ -134,6 +138,12 @@ export function normalizeProjectJobConditions(input?: Partial<ProjectJobConditio
     numeric((merged as Partial<ProjectJobConditions>).dailyBreakHoursPerInstaller, DEFAULT_JOB_CONDITIONS.dailyBreakHoursPerInstaller),
     installerPaidDayHours
   );
+  const rawFieldSetup = numeric(
+    (merged as Partial<ProjectJobConditions>).fieldSetupCleanupHoursPerInstallerDay,
+    DEFAULT_JOB_CONDITIONS.fieldSetupCleanupHoursPerInstallerDay
+  );
+  const maxSetupForDay = Math.max(0, installerPaidDayHours - dailyBreakHoursPerInstaller - 0.25);
+  const fieldSetupCleanupHoursPerInstallerDay = Math.max(0, Math.min(6, rawFieldSetup, maxSetupForDay));
 
   const performanceBondPercent = clampPercent(
     numeric((merged as Partial<ProjectJobConditions>).performanceBondPercent, DEFAULT_JOB_CONDITIONS.performanceBondPercent),
@@ -185,6 +195,7 @@ export function normalizeProjectJobConditions(input?: Partial<ProjectJobConditio
     deliveryQuotedSeparately: Boolean((merged as Partial<ProjectJobConditions>).deliveryQuotedSeparately),
     installerPaidDayHours,
     dailyBreakHoursPerInstaller,
+    fieldSetupCleanupHoursPerInstallerDay,
     laborLearningCurvePercent: clampPercent(
       numeric((merged as Partial<ProjectJobConditions>).laborLearningCurvePercent, DEFAULT_JOB_CONDITIONS.laborLearningCurvePercent),
       0,

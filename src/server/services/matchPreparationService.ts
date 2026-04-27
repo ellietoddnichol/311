@@ -8,7 +8,7 @@ import { prepareBundleMatch } from './intake/bundleIntakeMatching.ts';
 import { detectBundleCandidates } from './intake/normalizer.ts';
 import { prepareCatalogMatch } from './catalogMatchService.ts';
 import { intakeAsText } from './metadataExtractorService.ts';
-import { computeReviewLineFingerprint } from '../utils/reviewLineFingerprint.ts';
+import { computeReviewLineContentKey, computeReviewLineFingerprint } from '../utils/reviewLineFingerprint.ts';
 import type { NormalizedIntakeLine } from './spreadsheetInterpreterService.ts';
 import { expandBundleLines } from './intake/bundleRowExpander.ts';
 import { getInstallLaborFamily } from './intake/installLaborFamilies.ts';
@@ -137,10 +137,17 @@ export function toReviewLines(lines: NormalizedIntakeLine[], catalog: CatalogIte
       quantity: line.quantity,
       unit: line.unit || 'EA',
     });
+    const reviewLineContentKey = computeReviewLineContentKey({
+      roomName: normalizeRoomName(line.roomName),
+      itemCode: line.itemCode,
+      itemName: line.itemName || description,
+      description,
+    });
 
     return {
       lineId: randomUUID(),
       reviewLineFingerprint,
+      reviewLineContentKey,
       roomName: normalizeRoomName(line.roomName),
       itemName: line.itemName || description,
       description,
