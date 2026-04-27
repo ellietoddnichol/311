@@ -2,17 +2,14 @@ FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-# Cloud Run: set DB_DRIVER=pg to skip the native toolchain (better-sqlite3 prebuild usually
-# suffices on bookworm; python/make/g++ are only needed when node-gyp must compile sqlite).
-ARG DB_DRIVER=sqlite
-RUN if [ "$DB_DRIVER" != "pg" ]; then \
-    apt-get update && apt-get install -y --no-install-recommends \
-      python3 \
-      make \
-      g++ \
-    && rm -rf /var/lib/apt/lists/*; \
-  fi
-ENV DB_DRIVER=${DB_DRIVER}
+# better-sqlite3 compiles from source when no matching prebuild exists (common on newer Node
+# or non-default platforms). bookworm-slim omits python/make/g++, which breaks node-gyp.
+# Keep this even when DB_DRIVER=pg at runtime — the dependency is still installed and may need compile.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+  && rm -rf /var/lib/apt/lists/*
 
 # .npmrc must be present before `npm ci` (legacy-peer-deps for OpenAI/zod peer mismatch).
 # --include=dev: CI / Cloud Build often sets NODE_ENV=production; without this, npm ci skips
