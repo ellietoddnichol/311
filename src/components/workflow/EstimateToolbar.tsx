@@ -24,6 +24,8 @@ interface EstimateToolbarProps {
   onAddManualLine: () => void;
   onOpenCatalog: () => void;
   onOpenBundles: () => void;
+  /** Toilet partition layout wizard (standard + ADA stalls → lines). */
+  onOpenPartitionBuilder?: () => void;
   /** Open line detail / modifiers (add-ins) for the selected line. */
   onOpenLineAddIns?: () => void;
   canOpenLineAddIns?: boolean;
@@ -55,6 +57,7 @@ export function EstimateToolbar({
   onAddManualLine,
   onOpenCatalog,
   onOpenBundles,
+  onOpenPartitionBuilder,
   onOpenLineAddIns,
   canOpenLineAddIns,
   selectedLineLabel,
@@ -253,6 +256,16 @@ export function EstimateToolbar({
             <button type="button" onClick={onOpenBundles} className="ui-btn-secondary h-8 rounded-md px-2.5 text-xs font-medium">
               Bundles
             </button>
+            {onOpenPartitionBuilder ? (
+              <button
+                type="button"
+                onClick={onOpenPartitionBuilder}
+                className="ui-btn-secondary h-8 rounded-md px-2.5 text-xs font-medium"
+                title="Build takeoff lines from standard and ADA stall counts"
+              >
+                Partitions
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onAddManualLine}

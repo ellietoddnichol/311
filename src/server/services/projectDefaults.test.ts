@@ -8,7 +8,17 @@ import {
   titleStringForInference,
 } from './projectDefaults.ts';
 
-test('generateBidPackageNumber is stable for same inputs', () => {
+test('async preview matches sync generate (same as server autofill inputs)', async () => {
+  const { generateBidPackageNumberPreview } = await import('../../shared/utils/bidPackageNumber.ts');
+  const id = 'proj-1';
+  const name = 'CWA - Example Project';
+  const now = new Date('2026-01-02T00:00:00Z');
+  const a = generateBidPackageNumber({ projectId: id, projectName: name, now });
+  const b = await generateBidPackageNumberPreview({ projectId: id, projectName: name, now });
+  assert.equal(a, b);
+});
+
+test('generateBidPackageNumber is stable for same inputs (same calendar year)', () => {
   const id = 'proj-1';
   const name = 'CWA - Example Project';
   const a = generateBidPackageNumber({ projectId: id, projectName: name, now: new Date('2026-01-02T00:00:00Z') });

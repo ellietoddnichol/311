@@ -49,7 +49,7 @@ import {
 import { getErrorMessage } from '../shared/utils/errorMessage';
 import { scopeExceptionCount } from '../shared/utils/scopeReviewExceptions';
 import { computeFieldScheduleHint } from '../shared/utils/fieldScheduleHint';
-import { PRICING_ALL_CATEGORIES, TAKEOFF_ALL_ROOMS } from '../shared/constants/workspaceUi';
+import type { PartitionLayoutGeneratedLine } from '../shared/utils/partitionLayoutBuilder';
 import { toggleBulkSelectionForVisibleConcrete } from '../shared/utils/estimateBulkSelection';
 import { deriveEstimateLineHealth, type EstimateHealthFocus } from '../shared/utils/estimateLineHealth';
 import { ProjectHeader } from '../components/workflow/ProjectHeader';
@@ -69,6 +69,7 @@ import { EstimateWorkspaceFooter } from '../components/workspace/EstimateWorkspa
 import { ItemPicker } from '../components/workspace/ItemPicker';
 import { ModifierPanel } from '../components/workspace/ModifierPanel';
 import { BundlePickerModal } from '../components/workspace/BundlePickerModal';
+import { PartitionLayoutBuilderModal } from '../components/workspace/PartitionLayoutBuilderModal';
 import { OverviewPage } from './project/OverviewPage';
 import { SetupPage } from './project/SetupPage';
 import { ScopeReviewPage } from './project/ScopeReviewPage';
@@ -195,6 +196,7 @@ export function ProjectWorkspace() {
 
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [bundleModalOpen, setBundleModalOpen] = useState(false);
+  const [partitionBuilderOpen, setPartitionBuilderOpen] = useState(false);
   const [modifiersModalOpen, setModifiersModalOpen] = useState(false);
   const [addToCatalogOpen, setAddToCatalogOpen] = useState(false);
   const [addToCatalogBusy, setAddToCatalogBusy] = useState(false);
@@ -798,8 +800,13 @@ export function ProjectWorkspace() {
 
   const categories = useMemo(() => {
     const all = new Set<string>();
-    catalog.forEach((item) => all.add(item.category));
-    return ['all', ...Array.from(all).sort()];
+    for (const item of catalog) {
+      if (!item) continue;
+      const c = String(item.category ?? '')
+        .trim();
+      if (c) all.add(c);
+    }
+    return ['all', ...Array.from(all).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))];
   }, [catalog]);
 
   const scopeCategoryOptions = useMemo(
@@ -1236,6 +1243,35 @@ export function ProjectWorkspace() {
       notes: ''
     });
     setLines((prev) => [...prev, created]);
+    await refreshTakeoff(project.id);
+  }
+
+  async function addPartitionLayoutLines(roomId: string, generated: PartitionLayoutGeneratedLine[]) {
+    if (!project) return;
+    for (const line of generated) {
+      const base = {
+        projectId: project.id,
+        roomId,
+        sourceType: 'manual' as const,
+        description: line.description,
+        qty: line.qty,
+        unit: line.unit,
+        category: line.category,
+        materialCost: 0,
+        laborCost: 0,
+        laborMinutes: line.laborMinutes,
+        notes: line.notes,
+        isInstallableScope: line.isInstallableScope,
+      };
+      await api.createV1TakeoffLine({
+        ...base,
+        ...(line.installLaborFamily ? { installLaborFamily: line.installLaborFamily } : {}),
+        ...(line.installScopeType ? { installScopeType: line.installScopeType } : {}),
+        ...(line.laborOrigin ? { laborOrigin: line.laborOrigin } : {}),
+        ...(line.generatedLaborMinutes != null ? { generatedLaborMinutes: line.generatedLaborMinutes } : {}),
+        ...(line.catalogItemId ? { catalogItemId: line.catalogItemId, sku: line.sku ?? null } : {}),
+      });
+    }
     await refreshTakeoff(project.id);
   }
 
@@ -1891,6 +1927,7 @@ export function ProjectWorkspace() {
                 onAddManualLine={() => void addManualLine()}
                 onOpenCatalog={() => setCatalogOpen(true)}
                 onOpenBundles={() => setBundleModalOpen(true)}
+                onOpenPartitionBuilder={() => setPartitionBuilderOpen(true)}
                 onOpenLineAddIns={() => setModifiersModalOpen(true)}
                 canOpenLineAddIns={!!selectedLineId}
                 selectedLineLabel={selectedLine?.description ?? null}
@@ -2432,6 +2469,14 @@ export function ProjectWorkspace() {
         onClose={() => setBundleModalOpen(false)}
         onApplyBundle={applyBundle}
         presentation="drawer"
+      />
+
+      <PartitionLayoutBuilderModal
+        open={partitionBuilderOpen}
+        rooms={rooms}
+        activeRoomId={activeRoomId}
+        onClose={() => setPartitionBuilderOpen(false)}
+        onAddLines={(roomId, plan) => addPartitionLayoutLines(roomId, plan)}
       />
 
       {modifiersModalOpen && selectedLine && (

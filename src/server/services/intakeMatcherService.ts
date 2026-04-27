@@ -74,6 +74,26 @@ function keysWithMinCount(countMap: Map<string, number>, min: number): Set<strin
   return new Set([...countMap.entries()].filter(([, c]) => c >= min).map(([k]) => k));
 }
 
+/** Item / description text only (no room) — used to drop OCR fragments like "nd" from priced review. */
+function primaryScopeTextCore(line: IntakeReviewLine): string {
+  const parts = [line.itemCode, line.itemName, line.description]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean);
+  if (parts.length === 0) return '';
+  const lowerKeys = parts.map((p) => p.toLowerCase());
+  if (new Set(lowerKeys).size === 1) {
+    return parts[0];
+  }
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/** True when item code alone looks like a real SKU/model token (not a 1–2 char OCR scrap). */
+function looksLikeStructuredItemCode(code: string): boolean {
+  const c = String(code || '').trim();
+  if (c.length >= 4) return true;
+  return /^[A-Za-z]{1,3}-?\d{2,}/.test(c) || /\d{3,}/.test(c);
+}
+
 function findLineClassification(
   line: IntakeReviewLine,
   lineIndex: number,
@@ -105,6 +125,13 @@ function findLineClassification(
 function mapScopeBucket(cls: IntakeAiLineClassification | undefined, line: IntakeReviewLine): IntakeScopeBucket {
   const text = `${line.description} ${line.notes}`.toLowerCase();
   const blob = `${line.itemCode} ${line.itemName} ${line.description} ${line.notes} ${line.sourceReference}`.toLowerCase();
+
+  // OCR / cell splits often yield 1–2 character "lines" that still fuzzy-match catalog items; keep them out of
+  // priced review (and avoid ignore-persistence churn when room vs. field assignment changes the content key).
+  const core = primaryScopeTextCore(line);
+  if (core.length > 0 && core.length < 3 && !looksLikeStructuredItemCode(String(line.itemCode || ''))) {
+    return 'informational_only';
+  }
 
   const looksLikeAdminOrMetadata =
     /\b(addendum|addenda|addendums?)\b/.test(blob) ||

@@ -53,7 +53,8 @@ import {
 } from '../shared/utils/intakeEstimateReview';
 import { IntakeEstimateReviewPanel } from '../components/intake/IntakeEstimateReviewPanel';
 import { IntakeFieldBadge, IntakeFieldLegend } from '../components/intake/IntakeFieldChrome';
-import { createInitialProjectDraft } from './intake/projectIntakeDraft';
+import { createInitialProjectDraft, newIntakeProjectDraftId } from './intake/projectIntakeDraft';
+import { generateBidPackageNumberPreview, isBlankOrPlaceholderBidNumber } from '../shared/utils/bidPackageNumber';
 import { normalizeProjectSizeSelectValue, PROJECT_JOB_SIZE_OPTIONS } from '../shared/utils/projectJobSizeTiers';
 
 type CreationMode = 'blank' | 'takeoff' | 'document' | 'template';
@@ -1218,6 +1219,7 @@ export function ProjectIntake() {
       setProjectDraft((prev) => ({
         ...defaults,
         ...prev,
+        id: prev.id || defaults.id || newIntakeProjectDraftId(),
         laborBurdenPercent: prev.laborBurdenPercent ?? defaults.laborBurdenPercent,
         overheadPercent: prev.overheadPercent ?? defaults.overheadPercent,
         profitPercent: prev.profitPercent ?? defaults.profitPercent,
@@ -1243,6 +1245,34 @@ export function ProjectIntake() {
     }, 650);
     return () => clearTimeout(timer);
   }, [projectDraft.address]);
+
+  useEffect(() => {
+    if (projectDraft.projectNumberSource === 'manual') return;
+    const id = String(projectDraft.id || '').trim();
+    if (!id) {
+      setProjectDraft((p) => ({ ...p, id: newIntakeProjectDraftId() }));
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const next = await generateBidPackageNumberPreview({
+            projectId: id,
+            projectName: String(projectDraft.projectName || ''),
+            now: new Date(),
+          });
+          setProjectDraft((p) => {
+            if (p.projectNumberSource === 'manual') return p;
+            if (p.projectNumber === next) return p;
+            return { ...p, projectNumber: next, projectNumberSource: 'auto' };
+          });
+        } catch (e) {
+          console.warn('Bid package # preview failed', e);
+        }
+      })();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [projectDraft.id, projectDraft.projectName, projectDraft.projectNumberSource]);
 
   useEffect(() => {
     if (step < 3) return;
@@ -1512,6 +1542,11 @@ export function ProjectIntake() {
         ? prev.projectName
         : coerceSafeProjectName(result.projectMetadata.projectName || '', '') || 'Imported Project',
       projectNumber: prev.projectNumber || result.projectMetadata.projectNumber || prev.projectNumber,
+      projectNumberSource: (() => {
+        if (String(prev.projectNumber || '').trim()) return prev.projectNumberSource;
+        if (String(result.projectMetadata.projectNumber || '').trim()) return 'manual' as const;
+        return prev.projectNumberSource;
+      })(),
       clientName: prev.clientName || result.projectMetadata.client || prev.clientName,
       generalContractor: prev.generalContractor || result.projectMetadata.generalContractor || prev.generalContractor,
       estimator: prev.estimator || result.projectMetadata.estimator || prev.estimator,
@@ -1744,6 +1779,11 @@ export function ProjectIntake() {
           ...prev,
           projectName: prev.projectName || takeoffStructuredProjectName,
           projectNumber: prev.projectNumber || dominantProjectNumber,
+          projectNumberSource: (() => {
+            if (String(prev.projectNumber || '').trim()) return prev.projectNumberSource;
+            if (String(dominantProjectNumber || '').trim()) return 'manual' as const;
+            return prev.projectNumberSource;
+          })(),
           clientName: prev.clientName || dominantClient,
           address: prev.address || dominantAddress,
           bidDate: prev.bidDate || dominantBidDate,
@@ -1813,6 +1853,11 @@ export function ProjectIntake() {
           plausibleTitleFromFileName(takeoffFileName || '') ||
           'Takeoff Imported Project',
         projectNumber: prev.projectNumber || documentMetadata.projectNumber || prev.projectNumber,
+        projectNumberSource: (() => {
+          if (String(prev.projectNumber || '').trim()) return prev.projectNumberSource;
+          if (String(documentMetadata.projectNumber || '').trim()) return 'manual' as const;
+          return prev.projectNumberSource;
+        })(),
         clientName: prev.clientName || documentMetadata.clientName || prev.clientName,
         address: prev.address || documentMetadata.address || prev.address,
         bidDate: prev.bidDate || documentMetadata.bidDate || prev.bidDate,
@@ -1986,6 +2031,7 @@ export function ProjectIntake() {
       projectName:
         coerceSafeProjectName(metadata.projectName || '', '') || prev.projectName || 'Imported Project',
       projectNumber: metadata.projectNumber || prev.projectNumber,
+      projectNumberSource: String(metadata.projectNumber || '').trim() ? ('manual' as const) : prev.projectNumberSource,
       clientName: metadata.clientName || prev.clientName,
       address: metadata.address || prev.address,
       bidDate: metadata.bidDate || prev.bidDate,
@@ -2599,6 +2645,12 @@ export function ProjectIntake() {
         ...prev,
         projectName: prev.projectName || input.metadata?.projectName || prev.projectName,
         projectNumber: prev.projectNumber || (input.metadata as any)?.projectNumber || prev.projectNumber,
+        projectNumberSource: (() => {
+          const metaNum = String((input.metadata as any)?.projectNumber || '').trim();
+          if (String(prev.projectNumber || '').trim()) return prev.projectNumberSource;
+          if (metaNum) return 'manual' as const;
+          return prev.projectNumberSource;
+        })(),
         clientName: prev.clientName || (input.metadata as any)?.clientName || prev.clientName,
         address: prev.address || input.metadata?.address || prev.address,
         bidDate: prev.bidDate || (input.metadata as any)?.bidDate || prev.bidDate,
@@ -2913,7 +2965,9 @@ export function ProjectIntake() {
       }
 
       const createdProject = await api.createV1Project({
-        projectNumber: projectDraft.projectNumber || null,
+        id: String(projectDraft.id || '').trim() || undefined,
+        projectNumber:
+          projectDraft.projectNumberSource === 'auto' ? null : (projectDraft.projectNumber || null),
         projectName: projectDraft.projectName || 'Untitled Project',
         clientName: projectDraft.clientName || null,
         generalContractor: projectDraft.generalContractor || null,
@@ -3409,7 +3463,13 @@ export function ProjectIntake() {
                   <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Job basics</p>
                   <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
                     <label className="text-xs text-slate-600">Project Name<input className="ui-input mt-1" value={projectDraft.projectName || ''} onChange={(e) => patchProjectDraft({ projectName: e.target.value })} /></label>
-                    <label className="text-xs text-slate-600">Bid Package / Job #<input className="ui-input mt-1" value={projectDraft.projectNumber || ''} onChange={(e) => patchProjectDraft({ projectNumber: e.target.value })} /></label>
+                    <label className="text-xs text-slate-600">Bid Package / Job #<input className="ui-input mt-1" value={projectDraft.projectNumber || ''} onChange={(e) => {
+                        const v = e.target.value;
+                        patchProjectDraft({
+                          projectNumber: v,
+                          projectNumberSource: isBlankOrPlaceholderBidNumber(v) ? 'auto' : 'manual',
+                        });
+                      }} /></label>
                     <label className="text-xs text-slate-600">Client<input className="ui-input mt-1" value={projectDraft.clientName || ''} onChange={(e) => patchProjectDraft({ clientName: e.target.value })} /></label>
                     <label className="text-xs text-slate-600">Estimator<input className="ui-input mt-1" value={projectDraft.estimator || ''} onChange={(e) => patchProjectDraft({ estimator: e.target.value })} /></label>
                     <label className="text-xs text-slate-600 md:col-span-2">Project Type

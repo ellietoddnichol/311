@@ -1,10 +1,19 @@
 import type { ProjectRecord, SettingsRecord } from '../../shared/types/estimator';
 import { createDefaultProjectJobConditions } from '../../shared/utils/jobConditions';
 
+export function newIntakeProjectDraftId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return `draft-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+}
+
 export function createInitialProjectDraft(settings?: SettingsRecord | null): Partial<ProjectRecord> {
   return {
+    id: newIntakeProjectDraftId(),
     projectName: '',
     projectNumber: '',
+    projectNumberSource: 'auto',
     clientName: '',
     generalContractor: '',
     estimator: '',

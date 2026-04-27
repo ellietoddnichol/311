@@ -249,6 +249,59 @@ test('admin lines (addenda / qty headers / source metadata) are informational_on
   }
 });
 
+test('1–2 character scope fragments (OCR/cell noise) are informational_only, not priced review', async () => {
+  const { buildIntakeEstimateDraft } = await import('./intakeMatcherService.ts');
+  const cat = { id: 'c1', sku: 'X', description: 'Item', category: 'Cat', uom: 'EA', baseMaterialCost: 10, baseLaborMinutes: 10, taxable: true, adaFlag: false, active: true, tags: [] } as any;
+  const draft = buildIntakeEstimateDraft({
+    reviewLines: [
+      {
+        lineId: 'l-nd',
+        reviewLineFingerprint: 'fp-nd',
+        reviewLineContentKey: 'ck-nd',
+        roomName: 'General',
+        itemName: 'nd',
+        description: 'nd',
+        category: 'Misc',
+        itemCode: '',
+        quantity: 1,
+        unit: 'EA',
+        notes: '',
+        sourceReference: 'doc.pdf',
+        laborIncluded: null,
+        materialIncluded: null,
+        confidence: 0.4,
+        completeness: 'complete',
+        matchStatus: 'suggested',
+        matchedCatalogItemId: null,
+        matchExplanation: '',
+        catalogMatch: null,
+        suggestedMatch: {
+          catalogItemId: 'c-flag',
+          sku: 'FLAG-EXT-20',
+          description: '20ft flagpole',
+          category: 'Misc',
+          unit: 'EA',
+          materialCost: 1,
+          laborMinutes: 1,
+          score: 0.4,
+          confidence: 'possible' as const,
+          reason: 'name similarity',
+        },
+        bundleMatch: null,
+        suggestedBundle: null,
+        warnings: [],
+        semanticTags: [],
+      },
+    ] as any,
+    catalog: [cat],
+    modifiers: [],
+  });
+  assert.ok(draft);
+  const row = draft!.lineSuggestions[0];
+  assert.equal(row.scopeBucket, 'informational_only');
+  assert.equal(row.applicationStatus, 'ignored');
+});
+
 test('buildIntakeEstimateDraft applies manufacturer consistency to ranking', async () => {
   const { buildIntakeEstimateDraft } = await import('./intakeMatcherService.ts');
   const catalogItems: CatalogItem[] = [

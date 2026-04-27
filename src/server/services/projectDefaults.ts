@@ -1,5 +1,8 @@
 import { createHash } from 'crypto';
+import { completeBidNumberFromSha1Hex, getBidPackageHashInput } from '../../shared/utils/bidPackageNumber.ts';
 import { stripIntakeControlCharacters } from '../../shared/utils/intakeTextGuards.ts';
+
+export { isBlankOrPlaceholderBidNumber } from '../../shared/utils/bidPackageNumber.ts';
 
 const DEBUG_AUTOFILL = process.env.ESTIMATOR_DEBUG_PROJECT_AUTOFILL === '1';
 
@@ -18,31 +21,12 @@ export function titleStringForInference(raw: string | null | undefined): string 
   return t.replace(/\s+/g, ' ').trim();
 }
 
-/**
- * True when the bid/job # field is empty or a common “no number yet” placeholder.
- * The UI and APIs sometimes store `0`, “-”, or “TBD”, which would otherwise block
- * `generateBidPackageNumber` because they are non-empty strings.
- */
-export function isBlankOrPlaceholderBidNumber(raw: string | null | undefined): boolean {
-  const s = String(raw ?? '').trim();
-  if (!s) return true;
-  const lower = s.toLowerCase();
-  if (s === '0' || s === '-' || s === '–' || s === '—' || s === '--') return true;
-  if (['n/a', 'na', 'tbd', 'none', 'pending', 'unknown'].includes(lower)) return true;
-  return false;
-}
-
-function normalizeName(input: string): string {
-  return String(input || '').trim().toLowerCase();
-}
-
 export function generateBidPackageNumber(params: { projectId: string; projectName: string; now?: Date }): string {
   const now = params.now ?? new Date();
   const year = now.getFullYear();
-  const base = `${params.projectId}|${normalizeName(params.projectName)}|${year}`;
-  const digest = createHash('sha1').update(base).digest('hex').slice(0, 6).toUpperCase();
-  // Human-readable, stable, and unique enough for internal reference.
-  return `BP-${year}-${digest}`;
+  const base = getBidPackageHashInput(params.projectId, params.projectName, year);
+  const fullHex = createHash('sha1').update(base, 'utf8').digest('hex');
+  return completeBidNumberFromSha1Hex(fullHex, year);
 }
 
 const CLIENT_RULES: Array<{ label: string; match: (projectName: string) => boolean; client: string }> = [
