@@ -14,7 +14,8 @@
     "test:intake": "tsx --test src/server/services/intake/**/*.test.ts",
     "db:migrate": "node scripts/run-pg-migrations.mjs",
     "migrate:sqlite-to-pg": "tsx scripts/migrate-sqlite-to-pg.ts",
-    "catalog:audit": "tsx scripts/catalog-audit.ts"
+    "catalog:audit": "tsx scripts/catalog-audit.ts",
+    "catalog:propose": "tsx scripts/catalog-transform-proposal.ts"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",

@@ -74,12 +74,20 @@ function toLegacyNormalizedLines(items: NormalizedIntakeItem[]) {
     catalogMatch: (() => {
       const bestCandidate = (item.catalogMatchCandidates || [])[0];
       if (!bestCandidate || bestCandidate.confidence < 0.75) return null;
-      return candidateToIntakeCatalogMatch(bestCandidate);
+      return candidateToIntakeCatalogMatch(bestCandidate, {
+        description: item.description,
+        notes: item.notes,
+        modifiers: item.modifiers,
+      });
     })(),
     suggestedMatch: (() => {
       const bestCandidate = (item.catalogMatchCandidates || [])[0];
       if (!bestCandidate || bestCandidate.confidence >= 0.75) return null;
-      return candidateToIntakeCatalogMatch(bestCandidate);
+      return candidateToIntakeCatalogMatch(bestCandidate, {
+        description: item.description,
+        notes: item.notes,
+        modifiers: item.modifiers,
+      });
     })(),
   }));
 }

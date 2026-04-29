@@ -63,6 +63,10 @@ export function initEstimatorSchema() {
       source_type TEXT NOT NULL,
       source_ref TEXT,
       description TEXT NOT NULL,
+      proposal_visibility TEXT NOT NULL DEFAULT 'customer_visible',
+      proposal_description_override TEXT,
+      parent_estimate_line_id TEXT,
+      source_line_type TEXT NOT NULL DEFAULT 'catalog_item',
       sku TEXT,
       category TEXT,
       subcategory TEXT,
@@ -216,6 +220,24 @@ export function initEstimatorSchema() {
   const hasProposalClarifications = settingsColumns.some((column) => column.name === 'proposal_clarifications');
   if (!hasProposalClarifications) {
     estimatorDb.exec("ALTER TABLE settings_v1 ADD COLUMN proposal_clarifications TEXT NOT NULL DEFAULT ''");
+  }
+
+  const takeoffColumns = estimatorDb.prepare("PRAGMA table_info(takeoff_lines_v1)").all() as Array<{ name: string }>;
+  const hasProposalVisibility = takeoffColumns.some((column) => column.name === 'proposal_visibility');
+  if (!hasProposalVisibility) {
+    estimatorDb.exec("ALTER TABLE takeoff_lines_v1 ADD COLUMN proposal_visibility TEXT NOT NULL DEFAULT 'customer_visible'");
+  }
+  const hasProposalDescriptionOverride = takeoffColumns.some((column) => column.name === 'proposal_description_override');
+  if (!hasProposalDescriptionOverride) {
+    estimatorDb.exec('ALTER TABLE takeoff_lines_v1 ADD COLUMN proposal_description_override TEXT');
+  }
+  const hasParentEstimateLineId = takeoffColumns.some((column) => column.name === 'parent_estimate_line_id');
+  if (!hasParentEstimateLineId) {
+    estimatorDb.exec('ALTER TABLE takeoff_lines_v1 ADD COLUMN parent_estimate_line_id TEXT');
+  }
+  const hasSourceLineType = takeoffColumns.some((column) => column.name === 'source_line_type');
+  if (!hasSourceLineType) {
+    estimatorDb.exec("ALTER TABLE takeoff_lines_v1 ADD COLUMN source_line_type TEXT NOT NULL DEFAULT 'catalog_item'");
   }
 
   const hasProposalAcceptanceLabel = settingsColumns.some((column) => column.name === 'proposal_acceptance_label');

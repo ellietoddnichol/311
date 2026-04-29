@@ -1,6 +1,8 @@
 import type { CatalogItem } from '../../../types.ts';
 import type { CatalogMatchCandidate, IntakeCatalogMatch, NormalizedIntakeItem } from '../../../shared/types/intake.ts';
 import { normalizeComparableText } from '../metadataExtractorService.ts';
+import { inferInstallFamily, resolveLaborMinutesWithInstallFamily } from '../pricing/installFamilyPricing.ts';
+import { normalizeStructuredModifiers } from '../pricing/structuredModifiers.ts';
 import { interpretTakeoffHeader } from './headerInterpreter.ts';
 
 function clamp(value: number): number {
@@ -296,8 +298,36 @@ export function matchMatrixHeaderToCatalog(rawHeader: string, catalogItems: Cata
     .slice(0, 3);
 }
 
-export function candidateToIntakeCatalogMatch(candidate: CatalogMatchCandidate | null | undefined): IntakeCatalogMatch | null {
+export function candidateToIntakeCatalogMatch(
+  candidate: CatalogMatchCandidate | null | undefined,
+  context?: {
+    description?: string | null;
+    notes?: string[] | string | null;
+    modifiers?: string[] | null;
+  }
+): IntakeCatalogMatch | null {
   if (!candidate.catalogItemId || !candidate.sku || !candidate.description || !candidate.category || !candidate.unit) return null;
+  const normalized = normalizeStructuredModifiers({
+    modifierStrings: context?.modifiers || [],
+    description: context?.description || candidate.description,
+    notes: context?.notes || null,
+  });
+  const installFamily = inferInstallFamily({
+    category: candidate.category,
+    description: context?.description || candidate.description,
+    unit: candidate.unit,
+    structuredModifiers: normalized.installModifiers,
+  });
+  const resolvedLabor = resolveLaborMinutesWithInstallFamily({
+    catalogLaborMinutes: Number(candidate.laborMinutes || 0),
+    installFamily,
+    structuredModifiers: [
+      ...normalized.installModifiers,
+      ...normalized.internalConditions,
+      ...normalized.proposalVisibleOptions,
+      ...normalized.productAttributes,
+    ],
+  });
   return {
     catalogItemId: candidate.catalogItemId,
     sku: candidate.sku,
@@ -305,7 +335,19 @@ export function candidateToIntakeCatalogMatch(candidate: CatalogMatchCandidate |
     category: candidate.category,
     unit: candidate.unit,
     materialCost: Number(candidate.materialCost || 0),
-    laborMinutes: Number(candidate.laborMinutes || 0),
+    laborMinutes: resolvedLabor.laborMinutes,
+    installFamily: installFamily === 'unknown' ? null : installFamily,
+    structuredModifiers: Array.from(new Set([
+      ...normalized.installModifiers,
+      ...normalized.internalConditions,
+      ...normalized.proposalVisibleOptions,
+      ...normalized.productAttributes,
+    ])),
+    laborOrigin: resolvedLabor.origin,
+    reviewFlags: Array.from(new Set([
+      ...normalized.reviewFlags,
+      ...resolvedLabor.reviewFlags,
+    ])),
     score: candidate.confidence,
     confidence: candidate.confidence >= 0.75 ? 'strong' : candidate.confidence >= 0.4 ? 'possible' : 'none',
     reason: candidate.reasons.join('; '),

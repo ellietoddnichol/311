@@ -12,3 +12,7 @@ estimator.db
 estimator.db-shm
 estimator.db-wal
 node_modules
+
+# Generated reports (regenerate, do not commit)
+reports/catalog-audit/*.csv
+reports/catalog-transform-proposal/*.csv

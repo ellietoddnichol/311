@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { archiveProject, createProject, deleteProject, getProject, listProjects, updateProject } from '../../repos/projectsRepo.ts';
+import { listTakeoffLines } from '../../repos/takeoffRepo.ts';
+import { computeVendorSubtotalVarianceReport } from '../../services/vendorVarianceService.ts';
 import {
   createProjectFile,
   deleteProjectFile,
@@ -22,6 +24,16 @@ projectsRouter.get('/:projectId', (req, res) => {
   }
 
   return res.json({ data: project });
+});
+
+projectsRouter.get('/:projectId/vendor-variance', (req, res) => {
+  const project = getProject(req.params.projectId);
+  if (!project) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+  const lines = listTakeoffLines(project.id);
+  const report = computeVendorSubtotalVarianceReport(lines);
+  return res.json({ data: report });
 });
 
 projectsRouter.post('/', (req, res) => {

@@ -17,7 +17,11 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-const client = new pg.Client({ connectionString: databaseUrl });
+const caPath = String(process.env.PG_SSL_CA_PATH || '').trim();
+const rejectUnauthorized = !['0', 'false', 'no'].includes(String(process.env.PG_SSL_REJECT_UNAUTHORIZED || '').trim().toLowerCase());
+const ssl = caPath ? { ca: fs.readFileSync(caPath, 'utf8'), rejectUnauthorized } : undefined;
+
+const client = new pg.Client({ connectionString: databaseUrl, ssl });
 await client.connect();
 
 try {

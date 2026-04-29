@@ -42,6 +42,81 @@ export interface ClientFacingPricingRow {
   amount: number;
 }
 
+type ProposalPrintMode = 'children_only' | 'parent_only' | 'both';
+
+export type ProposalPrintOptions = {
+  expandedParentChildMode?: ProposalPrintMode;
+};
+
+function inferLineVisibility(line: TakeoffLineRecord): 'internal_only' | 'customer_visible' | 'optional_or_alt' {
+  const explicit = (line as any).proposalVisibility as string | undefined;
+  if (explicit === 'internal_only' || explicit === 'customer_visible' || explicit === 'optional_or_alt') return explicit;
+  const sourceLineType = String((line as any).sourceLineType || '').toLowerCase();
+  const sourceType = String(line.sourceType || '').toLowerCase();
+  if (sourceLineType === 'quote_subtotal' || sourceType === 'quote_subtotal') return 'internal_only';
+  return 'customer_visible';
+}
+
+function cleanProposalDescription(value: string): string {
+  let text = String(value || '').trim();
+  if (!text) return '';
+
+  const replacements: Array<[RegExp, string]> = [
+    [/\brough[_\s-]?opening[_\s-]?check\b/gi, 'Field verify rough openings prior to installation'],
+    [/\bblocking[_\s-]?check\b/gi, 'Confirm blocking prior to installation'],
+    [/\bfield[_\s-]?verify\b/gi, 'Field verify'],
+    [/\belectrical[_\s-]?by[_\s-]?others\b/gi, 'Electrical by others'],
+    [/\bconcrete[_\s-]?by[_\s-]?others\b/gi, 'Concrete by others'],
+    [/\bexisting[_\s-]?conditions\b/gi, 'Existing conditions'],
+    [/\bno[_\s-]?install\b|\bplace[_\s-]?only\b/gi, 'Furnish only'],
+  ];
+  replacements.forEach(([re, replacement]) => {
+    text = text.replace(re, replacement);
+  });
+
+  // Remove snake_case tokens that look like internal keys.
+  text = text.replace(/\b[a-z]+_[a-z0-9_]+\b/g, (m) => {
+    if (/(ada|usps)/i.test(m)) return m.toUpperCase();
+    return '';
+  });
+
+  text = text.replace(/\s+/g, ' ').replace(/\s+([,.;:])/g, '$1').trim();
+  return text;
+}
+
+function toProposalPrintableLines(lines: TakeoffLineRecord[], options?: ProposalPrintOptions): TakeoffLineRecord[] {
+  const mode: ProposalPrintMode = options?.expandedParentChildMode || 'children_only';
+
+  const byParent = new Map<string, TakeoffLineRecord[]>();
+  const parents = new Map<string, TakeoffLineRecord>();
+  lines.forEach((line) => {
+    const parentId = (line as any).parentEstimateLineId as string | null | undefined;
+    if (parentId) {
+      if (!byParent.has(parentId)) byParent.set(parentId, []);
+      byParent.get(parentId)!.push(line);
+    }
+    parents.set(line.id, line);
+  });
+
+  const visible = lines.filter((line) => inferLineVisibility(line) !== 'internal_only');
+
+  const suppressedParents = new Set<string>();
+  if (mode === 'children_only') {
+    byParent.forEach((_children, parentId) => suppressedParents.add(parentId));
+  } else if (mode === 'parent_only') {
+    byParent.forEach((children, parentId) => children.forEach((child) => suppressedParents.add(child.id)));
+  }
+
+  return visible
+    .filter((line) => !suppressedParents.has(line.id))
+    .map((line) => {
+      const override = (line as any).proposalDescriptionOverride as string | null | undefined;
+      const nextDescription = cleanProposalDescription(override?.trim() ? override : line.description);
+      return { ...line, description: nextDescription };
+    })
+    .filter((line) => Boolean(String(line.description || '').trim()));
+}
+
 export function isClientFacingLabel(label: string): boolean {
   const normalized = label.toLowerCase().trim();
   if (!normalized) return false;
@@ -84,9 +159,10 @@ export function getProposalSectionLabel(line: TakeoffLineRecord): string {
 }
 
 export function buildProposalScopeBreakout(lines: TakeoffLineRecord[], showMaterial: boolean, showLabor: boolean): ProposalScopeSection[] {
+  const printable = toProposalPrintableLines(lines);
   const sectionMap = new Map<string, ProposalScopeSection>();
 
-  lines.forEach((line) => {
+  printable.forEach((line) => {
     const section = getProposalSectionLabel(line);
     const existing = sectionMap.get(section) || {
       section,
@@ -118,9 +194,10 @@ export function buildProposalScopeBreakout(lines: TakeoffLineRecord[], showMater
 }
 
 export function buildProposalLineItems(lines: TakeoffLineRecord[]): ProposalLineItem[] {
+  const printable = toProposalPrintableLines(lines);
   const aggregated = new Map<string, ProposalLineItem>();
 
-  lines.forEach((line) => {
+  printable.forEach((line) => {
     const section = getProposalSectionLabel(line);
     const description = String(line.description || '').trim();
     const unit = String(line.unit || 'EA').trim() || 'EA';
@@ -164,12 +241,13 @@ export function buildProposalScheduleSections(
   showLabor: boolean,
   laborHourMultiplier = 1
 ): ProposalScheduleSection[] {
+  const printable = toProposalPrintableLines(lines);
   const normalizedLaborHourMultiplier = Number.isFinite(laborHourMultiplier) && laborHourMultiplier > 0
     ? laborHourMultiplier
     : 1;
   const sectionMap = new Map<string, Map<string, ProposalScheduleItem>>();
 
-  lines.forEach((line) => {
+  printable.forEach((line) => {
     const section = getProposalSectionLabel(line);
     const description = String(line.description || '').trim();
     const unit = String(line.unit || 'EA').trim() || 'EA';

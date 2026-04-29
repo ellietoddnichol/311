@@ -102,6 +102,18 @@ export interface RoomRecord {
 
 export type TakeoffPricingSource = 'auto' | 'manual';
 
+export type ProposalVisibility = 'internal_only' | 'customer_visible' | 'optional_or_alt';
+
+export type EstimateSourceLineType =
+  | 'catalog_item'
+  | 'add_in'
+  | 'expanded_parent'
+  | 'expanded_child'
+  | 'quote_subtotal'
+  | 'bundle_parent'
+  | 'bundle_child'
+  | 'manual';
+
 export interface TakeoffLineRecord {
   id: string;
   projectId: string;
@@ -109,6 +121,14 @@ export interface TakeoffLineRecord {
   sourceType: string;
   sourceRef: string | null;
   description: string;
+  /** Optional: proposal visibility rule for printing. */
+  proposalVisibility?: ProposalVisibility;
+  /** Optional: customer-facing override for printing. */
+  proposalDescriptionOverride?: string | null;
+  /** Optional: parent/child linkage for expanded sets/bundles. */
+  parentEstimateLineId?: string | null;
+  /** Optional: normalized line kind used for proposal filtering/formatting. */
+  sourceLineType?: EstimateSourceLineType;
   sku: string | null;
   category: string | null;
   subcategory: string | null;

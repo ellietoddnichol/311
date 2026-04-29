@@ -220,6 +220,14 @@ export interface IntakeCatalogMatch {
   unit: string;
   materialCost: number;
   laborMinutes: number;
+  /** Optional: derived install family used for labor fallback/review. */
+  installFamily?: string | null;
+  /** Optional: structured modifier keys inferred from free text. */
+  structuredModifiers?: string[];
+  /** Optional: how the labor minutes value was chosen. */
+  laborOrigin?: 'catalog' | 'install_family_fallback';
+  /** Optional: normalization flags that should be reviewed. */
+  reviewFlags?: string[];
   score: number;
   confidence: IntakeMatchConfidence;
   reason: string;

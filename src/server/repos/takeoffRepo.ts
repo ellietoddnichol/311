@@ -45,6 +45,10 @@ function mapTakeoffRow(row: any): TakeoffLineRecord {
     sourceType: row.source_type,
     sourceRef: row.source_ref,
     description: row.description,
+    proposalVisibility: row.proposal_visibility || 'customer_visible',
+    proposalDescriptionOverride: row.proposal_description_override ?? null,
+    parentEstimateLineId: row.parent_estimate_line_id ?? null,
+    sourceLineType: row.source_line_type || 'catalog_item',
     sku: row.sku,
     category: row.category,
     subcategory: row.subcategory,
@@ -153,6 +157,12 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     sourceType: input.sourceType ?? 'manual',
     sourceRef: input.sourceRef ?? null,
     description: input.description,
+    proposalVisibility: input.proposalVisibility
+      ?? (String(input.sourceLineType || input.sourceType || '').toLowerCase() === 'quote_subtotal' ? 'internal_only' : 'customer_visible'),
+    proposalDescriptionOverride: input.proposalDescriptionOverride ?? null,
+    parentEstimateLineId: input.parentEstimateLineId ?? null,
+    sourceLineType: input.sourceLineType
+      ?? (String(input.sourceType || '').toLowerCase() === 'quote_subtotal' ? 'quote_subtotal' : (input.catalogItemId ? 'catalog_item' : 'manual')),
     sku: input.sku ?? null,
     category: input.category ?? null,
     subcategory: input.subcategory ?? null,
@@ -177,10 +187,12 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
 
   estimatorDb.prepare(`
     INSERT INTO takeoff_lines_v1 (
-      id, project_id, room_id, source_type, source_ref, description, sku, category, subcategory, base_type,
+      id, project_id, room_id, source_type, source_ref, description,
+      proposal_visibility, proposal_description_override, parent_estimate_line_id, source_line_type,
+      sku, category, subcategory, base_type,
       qty, unit, material_cost, base_material_cost, labor_minutes, labor_cost, base_labor_cost, pricing_source, unit_sell, line_total, notes, bundle_id, catalog_item_id,
       variant_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     line.id,
     line.projectId,
@@ -188,6 +200,10 @@ export function createTakeoffLine(input: Partial<TakeoffLineRecord> & { projectI
     line.sourceType,
     line.sourceRef,
     line.description,
+    line.proposalVisibility || 'customer_visible',
+    line.proposalDescriptionOverride,
+    line.parentEstimateLineId,
+    line.sourceLineType || 'catalog_item',
     line.sku,
     line.category,
     line.subcategory,
@@ -255,7 +271,9 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
 
   estimatorDb.prepare(`
     UPDATE takeoff_lines_v1 SET
-      room_id = ?, source_type = ?, source_ref = ?, description = ?, sku = ?, category = ?, subcategory = ?, base_type = ?,
+      room_id = ?, source_type = ?, source_ref = ?, description = ?,
+      proposal_visibility = ?, proposal_description_override = ?, parent_estimate_line_id = ?, source_line_type = ?,
+      sku = ?, category = ?, subcategory = ?, base_type = ?,
       qty = ?, unit = ?, material_cost = ?, base_material_cost = ?, labor_minutes = ?, labor_cost = ?, base_labor_cost = ?, pricing_source = ?, unit_sell = ?, line_total = ?, notes = ?,
       bundle_id = ?, catalog_item_id = ?, variant_id = ?, updated_at = ?
     WHERE id = ?
@@ -264,6 +282,10 @@ export function updateTakeoffLine(lineId: string, input: Partial<TakeoffLineReco
     next.sourceType,
     next.sourceRef,
     next.description,
+    next.proposalVisibility || 'customer_visible',
+    next.proposalDescriptionOverride,
+    next.parentEstimateLineId,
+    next.sourceLineType || 'catalog_item',
     next.sku,
     next.category,
     next.subcategory,
