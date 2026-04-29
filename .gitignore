@@ -14,5 +14,17 @@ estimator.db-wal
 node_modules
 
 # Generated reports (regenerate, do not commit)
-reports/catalog-audit/*.csv
-reports/catalog-transform-proposal/*.csv
+reports/catalog-audit/
+reports/catalog-transform-proposal/
+
+# Local bid / intake artifacts (keep out of git)
+*.pdf
+*.docx
+*.xlsx
+*.zip
+div10_starter_pack_extracted/
+PR_BODY.md
+
+# Cursor / agent local state
+.agents/
+skills-lock.json
