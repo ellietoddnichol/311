@@ -245,8 +245,6 @@ export function initEstimatorSchema() {
     estimatorDb.exec("ALTER TABLE settings_v1 ADD COLUMN proposal_acceptance_label TEXT NOT NULL DEFAULT 'Accepted By'");
   }
 
-  const takeoffColumns = estimatorDb.prepare("PRAGMA table_info(takeoff_lines_v1)").all() as Array<{ name: string }>;
-
   const projectColumns = estimatorDb.prepare("PRAGMA table_info(projects_v1)").all() as Array<{ name: string }>;
   const hasPricingMode = projectColumns.some((column) => column.name === 'pricing_mode');
   if (!hasPricingMode) {

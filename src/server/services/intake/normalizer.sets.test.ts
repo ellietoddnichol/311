@@ -11,6 +11,7 @@ test('normalizePdfChunks expands clear grab bar set language into child items', 
         chunkId: 'c1',
         pageNumber: 1,
         text: '6 sets 6806 grab bars – 18, 36, 42\n',
+        blockTypes: ['line'],
       },
     ],
   });
