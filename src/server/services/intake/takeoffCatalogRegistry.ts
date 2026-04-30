@@ -1,5 +1,6 @@
 import type { CatalogItem } from '../../../types.ts';
 import { estimatorDb } from '../../db/connection.ts';
+import { isPgDriver } from '../../db/driver.ts';
 
 export const TAKEOFF_TOKEN_ALIAS_MAP: Record<string, string[]> = {
   gb: ['grab', 'bar', 'grab bar'],
@@ -296,6 +297,10 @@ function findExistingItemId(seedItem: CatalogItem): string | null {
 }
 
 export function ensureTakeoffCatalogSeeded(): void {
+  // This seed registry is a local-dev convenience for SQLite.
+  // Never write catalog rows in Postgres/Supabase environments.
+  if (isPgDriver()) return;
+
   const upsert = estimatorDb.prepare(`
     INSERT INTO catalog_items (
       id, sku, category, subcategory, family, description, manufacturer, model, uom,

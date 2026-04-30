@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { estimatorDb } from '../db/connection.ts';
 import { TakeoffLineRecord, TakeoffPricingSource } from '../../shared/types/estimator.ts';
+import { getCatalogItemsTableName } from '../db/catalogTable.ts';
 
 const DEFAULT_LABOR_RATE_PER_HOUR = Number(process.env.DEFAULT_LABOR_RATE_PER_HOUR || 85);
 
@@ -105,8 +106,9 @@ function resolveCatalogDefaults(input: Partial<TakeoffLineRecord>): {
   materialCost?: number;
   laborMinutes?: number;
 } {
+  const table = getCatalogItemsTableName();
   if (input.catalogItemId) {
-    const row = estimatorDb.prepare('SELECT base_material_cost, base_labor_minutes FROM catalog_items WHERE id = ? LIMIT 1').get(input.catalogItemId) as
+    const row = estimatorDb.prepare(`SELECT base_material_cost, base_labor_minutes FROM ${table} WHERE id = ? LIMIT 1`).get(input.catalogItemId) as
       | { base_material_cost: number; base_labor_minutes: number }
       | undefined;
     if (row) {
@@ -118,7 +120,7 @@ function resolveCatalogDefaults(input: Partial<TakeoffLineRecord>): {
   }
 
   if (input.sku) {
-    const row = estimatorDb.prepare('SELECT base_material_cost, base_labor_minutes FROM catalog_items WHERE lower(sku) = lower(?) LIMIT 1').get(input.sku) as
+    const row = estimatorDb.prepare(`SELECT base_material_cost, base_labor_minutes FROM ${table} WHERE lower(sku) = lower(?) LIMIT 1`).get(input.sku) as
       | { base_material_cost: number; base_labor_minutes: number }
       | undefined;
     if (row) {
