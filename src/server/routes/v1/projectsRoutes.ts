@@ -13,12 +13,12 @@ import {
 
 export const projectsRouter = Router();
 
-projectsRouter.get('/', (_req, res) => {
-  res.json({ data: listProjects() });
+projectsRouter.get('/', async (_req, res) => {
+  res.json({ data: await listProjects() });
 });
 
-projectsRouter.get('/:projectId', (req, res) => {
-  const project = getProject(req.params.projectId);
+projectsRouter.get('/:projectId', async (req, res) => {
+  const project = await getProject(req.params.projectId);
   if (!project) {
     return res.status(404).json({ error: 'Project not found' });
   }
@@ -26,23 +26,23 @@ projectsRouter.get('/:projectId', (req, res) => {
   return res.json({ data: project });
 });
 
-projectsRouter.get('/:projectId/vendor-variance', (req, res) => {
-  const project = getProject(req.params.projectId);
+projectsRouter.get('/:projectId/vendor-variance', async (req, res) => {
+  const project = await getProject(req.params.projectId);
   if (!project) {
     return res.status(404).json({ error: 'Project not found' });
   }
-  const lines = listTakeoffLines(project.id);
+  const lines = await listTakeoffLines(project.id);
   const report = computeVendorSubtotalVarianceReport(lines);
   return res.json({ data: report });
 });
 
-projectsRouter.post('/', (req, res) => {
-  const project = createProject(req.body ?? {});
+projectsRouter.post('/', async (req, res) => {
+  const project = await createProject(req.body ?? {});
   return res.status(201).json({ data: project });
 });
 
-projectsRouter.put('/:projectId', (req, res) => {
-  const project = updateProject(req.params.projectId, req.body ?? {});
+projectsRouter.put('/:projectId', async (req, res) => {
+  const project = await updateProject(req.params.projectId, req.body ?? {});
   if (!project) {
     return res.status(404).json({ error: 'Project not found' });
   }
@@ -57,7 +57,7 @@ projectsRouter.delete('/:projectId', async (req, res) => {
     } catch (err) {
       console.error('GCS purge before project delete failed:', err);
     }
-    const deleted = deleteProject(req.params.projectId);
+    const deleted = await deleteProject(req.params.projectId);
     if (!deleted) {
       return res.status(404).json({ error: 'Project not found' });
     }
@@ -65,7 +65,7 @@ projectsRouter.delete('/:projectId', async (req, res) => {
     return res.json({ data: { deleted: true } });
   }
 
-  const archived = archiveProject(req.params.projectId);
+  const archived = await archiveProject(req.params.projectId);
   if (!archived) {
     return res.status(404).json({ error: 'Project not found' });
   }
@@ -73,17 +73,17 @@ projectsRouter.delete('/:projectId', async (req, res) => {
   return res.json({ data: { archived: true } });
 });
 
-projectsRouter.get('/:projectId/files', (req, res) => {
-  const project = getProject(req.params.projectId);
+projectsRouter.get('/:projectId/files', async (req, res) => {
+  const project = await getProject(req.params.projectId);
   if (!project) {
     return res.status(404).json({ error: 'Project not found' });
   }
 
-  return res.json({ data: listProjectFiles(req.params.projectId) });
+  return res.json({ data: await listProjectFiles(req.params.projectId) });
 });
 
 projectsRouter.post('/:projectId/files', async (req, res) => {
-  const project = getProject(req.params.projectId);
+  const project = await getProject(req.params.projectId);
   if (!project) {
     return res.status(404).json({ error: 'Project not found' });
   }
@@ -118,7 +118,7 @@ projectsRouter.post('/:projectId/files', async (req, res) => {
 });
 
 projectsRouter.get('/:projectId/files/:fileId/download', async (req, res) => {
-  const file = getProjectFile(req.params.projectId, req.params.fileId);
+  const file = await getProjectFile(req.params.projectId, req.params.fileId);
   if (!file) {
     return res.status(404).json({ error: 'File not found' });
   }

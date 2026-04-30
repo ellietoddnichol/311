@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { estimatorDb } from '../db/connection.ts';
+import { dbAll, dbGet, dbRun } from '../db/query.ts';
 import { ProjectFileRecord } from '../../shared/types/estimator.ts';
 import {
   buildProjectFileObjectName,
@@ -27,10 +27,11 @@ function mapProjectFileRow(row: any): ProjectFileRecord {
   };
 }
 
-export function listProjectFiles(projectId: string): ProjectFileRecord[] {
-  const rows = estimatorDb
-    .prepare('SELECT id, project_id, file_name, mime_type, size_bytes, created_at FROM project_files_v1 WHERE project_id = ? ORDER BY created_at DESC')
-    .all(projectId);
+export async function listProjectFiles(projectId: string): Promise<ProjectFileRecord[]> {
+  const rows = await dbAll(
+    'SELECT id, project_id, file_name, mime_type, size_bytes, created_at FROM project_files_v1 WHERE project_id = ? ORDER BY created_at DESC',
+    [projectId]
+  );
   return rows.map(mapProjectFileRow);
 }
 
@@ -70,12 +71,10 @@ export async function createProjectFile(input: {
       contentType: input.mimeType,
     });
 
-    estimatorDb
-      .prepare(
-        `INSERT INTO project_files_v1 (id, project_id, file_name, mime_type, size_bytes, data_base64, created_at, gcs_bucket, gcs_object_name)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
+    await dbRun(
+      `INSERT INTO project_files_v1 (id, project_id, file_name, mime_type, size_bytes, data_base64, created_at, gcs_bucket, gcs_object_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
         record.id,
         record.projectId,
         record.fileName,
@@ -84,15 +83,14 @@ export async function createProjectFile(input: {
         '',
         record.createdAt,
         bucketName,
-        objectName
-      );
+        objectName,
+      ]
+    );
   } else {
-    estimatorDb
-      .prepare(
-        `INSERT INTO project_files_v1 (id, project_id, file_name, mime_type, size_bytes, data_base64, created_at, gcs_bucket, gcs_object_name)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
+    await dbRun(
+      `INSERT INTO project_files_v1 (id, project_id, file_name, mime_type, size_bytes, data_base64, created_at, gcs_bucket, gcs_object_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
         record.id,
         record.projectId,
         record.fileName,
@@ -101,21 +99,21 @@ export async function createProjectFile(input: {
         input.dataBase64,
         record.createdAt,
         null,
-        null
-      );
+        null,
+      ]
+    );
   }
 
   return record;
 }
 
-export function getProjectFile(projectId: string, fileId: string): ProjectFileStoredRow | null {
-  const row = estimatorDb
-    .prepare(
-      `SELECT id, project_id, file_name, mime_type, size_bytes, data_base64, created_at, gcs_bucket, gcs_object_name
+export async function getProjectFile(projectId: string, fileId: string): Promise<ProjectFileStoredRow | null> {
+  const row = (await dbGet(
+    `SELECT id, project_id, file_name, mime_type, size_bytes, data_base64, created_at, gcs_bucket, gcs_object_name
        FROM project_files_v1
-       WHERE project_id = ? AND id = ?`
-    )
-    .get(projectId, fileId) as any;
+       WHERE project_id = ? AND id = ?`,
+    [projectId, fileId]
+  )) as any;
 
   if (!row) return null;
 
@@ -128,7 +126,7 @@ export function getProjectFile(projectId: string, fileId: string): ProjectFileSt
 }
 
 export async function readProjectFileBuffer(projectId: string, fileId: string): Promise<Buffer | null> {
-  const row = getProjectFile(projectId, fileId);
+  const row = await getProjectFile(projectId, fileId);
   if (!row) return null;
 
   if (row.gcsBucket && row.gcsObjectName) {
@@ -143,22 +141,22 @@ export async function readProjectFileBuffer(projectId: string, fileId: string): 
 }
 
 export async function deleteProjectFile(projectId: string, fileId: string): Promise<boolean> {
-  const row = getProjectFile(projectId, fileId);
+  const row = await getProjectFile(projectId, fileId);
   if (!row) return false;
 
   if (row.gcsBucket && row.gcsObjectName) {
     await deleteProjectFileFromGcs(row.gcsBucket, row.gcsObjectName);
   }
 
-  const result = estimatorDb.prepare('DELETE FROM project_files_v1 WHERE project_id = ? AND id = ?').run(projectId, fileId);
+  const result = await dbRun('DELETE FROM project_files_v1 WHERE project_id = ? AND id = ?', [projectId, fileId]);
   return result.changes > 0;
 }
 
 /** Remove GCS objects for all files attached to a project (call before deleting the project row). */
 export async function purgeProjectFilesFromGcs(projectId: string): Promise<void> {
-  const rows = estimatorDb
-    .prepare('SELECT gcs_bucket, gcs_object_name FROM project_files_v1 WHERE project_id = ?')
-    .all(projectId) as Array<{ gcs_bucket: string | null; gcs_object_name: string | null }>;
+  const rows = (await dbAll('SELECT gcs_bucket, gcs_object_name FROM project_files_v1 WHERE project_id = ?', [
+    projectId,
+  ])) as Array<{ gcs_bucket: string | null; gcs_object_name: string | null }>;
 
   await Promise.all(
     rows

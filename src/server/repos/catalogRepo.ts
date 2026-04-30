@@ -1,4 +1,4 @@
-import { estimatorDb } from '../db/connection.ts';
+import { dbAll } from '../db/query.ts';
 import type { CatalogItem } from '../../types.ts';
 import { ensureTakeoffCatalogSeeded } from '../services/intake/takeoffCatalogRegistry.ts';
 import { getCatalogItemsTableName } from '../db/catalogTable.ts';
@@ -25,11 +25,9 @@ function mapCatalogRow(row: any): CatalogItem {
   };
 }
 
-export function listActiveCatalogItems(): CatalogItem[] {
+export async function listActiveCatalogItems(): Promise<CatalogItem[]> {
   ensureTakeoffCatalogSeeded();
   const table = getCatalogItemsTableName();
-  const rows = estimatorDb
-    .prepare(`SELECT * FROM ${table} WHERE active = 1 ORDER BY category, description`)
-    .all();
+  const rows = await dbAll(`SELECT * FROM ${table} WHERE active = 1 ORDER BY category, description`);
   return rows.map(mapCatalogRow);
 }

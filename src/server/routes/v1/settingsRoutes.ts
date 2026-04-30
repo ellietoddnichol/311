@@ -6,15 +6,15 @@ import { generateProposalDraftFromGemini } from '../../services/geminiProposalDr
 
 export const settingsRouter = Router();
 
-settingsRouter.get('/', (_req, res) => {
-  return res.json({ data: getSettings() });
+settingsRouter.get('/', async (_req, res) => {
+  return res.json({ data: await getSettings() });
 });
 
-settingsRouter.put('/', (req, res) => {
-  const current = getSettings();
-  const next = updateSettings(req.body ?? {});
+settingsRouter.put('/', async (req, res) => {
+  const current = await getSettings();
+  const next = await updateSettings(req.body ?? {});
   if (current.defaultLaborRatePerHour !== next.defaultLaborRatePerHour) {
-    recalculateAllLinePricing();
+    await recalculateAllLinePricing();
   }
   return res.json({ data: next });
 });
@@ -30,13 +30,13 @@ settingsRouter.post('/proposal-draft', async (req, res) => {
   }
 });
 
-settingsRouter.get('/catalog-sync-status', (_req, res) => {
-  return res.json({ data: getCatalogSyncStatus() });
+settingsRouter.get('/catalog-sync-status', async (_req, res) => {
+  return res.json({ data: await getCatalogSyncStatus() });
 });
 
-settingsRouter.get('/catalog-sync-runs', (req, res) => {
+settingsRouter.get('/catalog-sync-runs', async (req, res) => {
   const limit = Math.max(1, Math.min(50, Number(req.query.limit || 10)));
-  return res.json({ data: listCatalogSyncRuns(limit) });
+  return res.json({ data: await listCatalogSyncRuns(limit) });
 });
 
 settingsRouter.post('/sync-catalog', async (_req, res) => {

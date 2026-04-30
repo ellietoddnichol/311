@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { estimatorDb } from '../db/connection.ts';
+import { dbAll, dbGet, dbRun } from '../db/query.ts';
 import { LineModifierRecord, ModifierRecord } from '../../shared/types/estimator.ts';
 import { getTakeoffLine, resolveUnitLaborCostFromMinutes, updateTakeoffLine } from './takeoffRepo.ts';
 
@@ -14,7 +14,7 @@ function mapModifier(row: any): ModifierRecord {
     percentLabor: row.percent_labor,
     percentMaterial: row.percent_material,
     active: !!row.active,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
@@ -28,38 +28,37 @@ function mapLineModifier(row: any): LineModifierRecord {
     addLaborMinutes: row.add_labor_minutes,
     percentMaterial: row.percent_material,
     percentLabor: row.percent_labor,
-    createdAt: row.created_at
+    createdAt: row.created_at,
   };
 }
 
-export function listModifiers(): ModifierRecord[] {
-  const rows = estimatorDb.prepare('SELECT * FROM modifiers_v1 WHERE active = 1 ORDER BY name').all();
+export async function listModifiers(): Promise<ModifierRecord[]> {
+  const rows = await dbAll('SELECT * FROM modifiers_v1 WHERE active = 1 ORDER BY name');
   return rows.map(mapModifier);
 }
 
-export function listLineModifiers(lineId: string): LineModifierRecord[] {
-  const rows = estimatorDb.prepare('SELECT * FROM line_modifiers_v1 WHERE line_id = ? ORDER BY created_at').all(lineId);
+export async function listLineModifiers(lineId: string): Promise<LineModifierRecord[]> {
+  const rows = await dbAll('SELECT * FROM line_modifiers_v1 WHERE line_id = ? ORDER BY created_at', [lineId]);
   return rows.map(mapLineModifier);
 }
 
-export function recalculateLineFromModifiers(lineId: string) {
-  const line = getTakeoffLine(lineId);
+export async function recalculateLineFromModifiers(lineId: string) {
+  const line = await getTakeoffLine(lineId);
   if (!line) return null;
 
-  const lineModifiers = listLineModifiers(lineId);
+  const lineModifiers = await listLineModifiers(lineId);
 
   let materialCost = line.baseMaterialCost;
-  const baseLaborCost = line.laborMinutes > 0
-    ? resolveUnitLaborCostFromMinutes(line.laborMinutes || 0)
-    : (line.baseLaborCost || 0);
+  const baseLaborCost =
+    line.laborMinutes > 0 ? resolveUnitLaborCostFromMinutes(line.laborMinutes || 0) : line.baseLaborCost || 0;
   let laborCost = baseLaborCost;
 
   lineModifiers.forEach((modifier) => {
-    materialCost += modifier.addMaterialCost + (line.baseMaterialCost * (modifier.percentMaterial / 100));
-    laborCost += resolveUnitLaborCostFromMinutes(modifier.addLaborMinutes || 0) + (baseLaborCost * (modifier.percentLabor / 100));
+    materialCost += modifier.addMaterialCost + line.baseMaterialCost * (modifier.percentMaterial / 100);
+    laborCost += resolveUnitLaborCostFromMinutes(modifier.addLaborMinutes || 0) + baseLaborCost * (modifier.percentLabor / 100);
   });
 
-  return updateTakeoffLine(lineId, {
+  return await updateTakeoffLine(lineId, {
     materialCost: Number(materialCost.toFixed(2)),
     laborCost: Number(laborCost.toFixed(2)),
     baseMaterialCost: line.baseMaterialCost,
@@ -67,21 +66,33 @@ export function recalculateLineFromModifiers(lineId: string) {
   });
 }
 
-export function recalculateProjectLinePricing(projectId: string) {
-  const rows = estimatorDb.prepare('SELECT id FROM takeoff_lines_v1 WHERE project_id = ? ORDER BY created_at').all(projectId) as Array<{ id: string }>;
-  return rows.map((row) => recalculateLineFromModifiers(row.id)).filter(Boolean);
+export async function recalculateProjectLinePricing(projectId: string) {
+  const rows = (await dbAll('SELECT id FROM takeoff_lines_v1 WHERE project_id = ? ORDER BY created_at', [
+    projectId,
+  ])) as Array<{ id: string }>;
+  const out = [];
+  for (const row of rows) {
+    const u = await recalculateLineFromModifiers(row.id);
+    if (u) out.push(u);
+  }
+  return out;
 }
 
-export function recalculateAllLinePricing() {
-  const rows = estimatorDb.prepare('SELECT id FROM takeoff_lines_v1 ORDER BY created_at').all() as Array<{ id: string }>;
-  return rows.map((row) => recalculateLineFromModifiers(row.id)).filter(Boolean);
+export async function recalculateAllLinePricing(): Promise<void> {
+  const rows = (await dbAll('SELECT id FROM takeoff_lines_v1 ORDER BY created_at')) as Array<{ id: string }>;
+  for (const row of rows) {
+    await recalculateLineFromModifiers(row.id);
+  }
 }
 
-export function applyModifierToLine(lineId: string, modifierId: string): { line: any; modifier: LineModifierRecord } | null {
-  const line = getTakeoffLine(lineId);
+export async function applyModifierToLine(
+  lineId: string,
+  modifierId: string
+): Promise<{ line: any; modifier: LineModifierRecord } | null> {
+  const line = await getTakeoffLine(lineId);
   if (!line) return null;
 
-  const modifierRow = estimatorDb.prepare('SELECT * FROM modifiers_v1 WHERE id = ? AND active = 1').get(modifierId);
+  const modifierRow = await dbGet('SELECT * FROM modifiers_v1 WHERE id = ? AND active = 1', [modifierId]);
   if (!modifierRow) return null;
 
   const modifier = mapModifier(modifierRow);
@@ -95,39 +106,45 @@ export function applyModifierToLine(lineId: string, modifierId: string): { line:
     addLaborMinutes: modifier.addLaborMinutes,
     percentMaterial: modifier.percentMaterial,
     percentLabor: modifier.percentLabor,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
   };
 
-  estimatorDb.prepare(`
+  await dbRun(
+    `
     INSERT INTO line_modifiers_v1 (
       id, line_id, modifier_id, name, add_material_cost, add_labor_minutes, percent_material, percent_labor, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    savedLineModifier.id,
-    savedLineModifier.lineId,
-    savedLineModifier.modifierId,
-    savedLineModifier.name,
-    savedLineModifier.addMaterialCost,
-    savedLineModifier.addLaborMinutes,
-    savedLineModifier.percentMaterial,
-    savedLineModifier.percentLabor,
-    savedLineModifier.createdAt
+  `,
+    [
+      savedLineModifier.id,
+      savedLineModifier.lineId,
+      savedLineModifier.modifierId,
+      savedLineModifier.name,
+      savedLineModifier.addMaterialCost,
+      savedLineModifier.addLaborMinutes,
+      savedLineModifier.percentMaterial,
+      savedLineModifier.percentLabor,
+      savedLineModifier.createdAt,
+    ]
   );
 
-  const updatedLine = recalculateLineFromModifiers(lineId);
+  const updatedLine = await recalculateLineFromModifiers(lineId);
 
   return { line: updatedLine, modifier: savedLineModifier };
 }
 
-export function removeLineModifier(lineId: string, lineModifierId: string): { line: any; removed: boolean } | null {
-  const line = getTakeoffLine(lineId);
+export async function removeLineModifier(
+  lineId: string,
+  lineModifierId: string
+): Promise<{ line: any; removed: boolean } | null> {
+  const line = await getTakeoffLine(lineId);
   if (!line) return null;
 
-  const result = estimatorDb.prepare('DELETE FROM line_modifiers_v1 WHERE id = ? AND line_id = ?').run(lineModifierId, lineId);
+  const result = await dbRun('DELETE FROM line_modifiers_v1 WHERE id = ? AND line_id = ?', [lineModifierId, lineId]);
   if (result.changes === 0) {
     return null;
   }
 
-  const updatedLine = recalculateLineFromModifiers(lineId);
+  const updatedLine = await recalculateLineFromModifiers(lineId);
   return { line: updatedLine, removed: true };
 }
