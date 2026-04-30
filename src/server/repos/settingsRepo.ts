@@ -1,4 +1,4 @@
-import { dbAll, dbGet, dbRun } from '../db/query.ts';
+import { estimatorDb } from '../db/connection.ts';
 import { CatalogSyncStatusRecord, SettingsRecord } from '../../shared/types/estimator.ts';
 import { sanitizeProposalSettings } from '../../shared/utils/proposalDefaults.ts';
 
@@ -20,57 +20,54 @@ function mapSettingsRow(row: any): SettingsRecord {
     proposalExclusions: row.proposal_exclusions,
     proposalClarifications: row.proposal_clarifications,
     proposalAcceptanceLabel: row.proposal_acceptance_label,
-    updatedAt: row.updated_at,
+    updatedAt: row.updated_at
   }) as SettingsRecord;
 }
 
-export async function getSettings(): Promise<SettingsRecord> {
-  const row = await dbGet('SELECT * FROM settings_v1 WHERE id = ?', ['global']);
+export function getSettings(): SettingsRecord {
+  const row = estimatorDb.prepare('SELECT * FROM settings_v1 WHERE id = ?').get('global');
   return mapSettingsRow(row);
 }
 
-export async function updateSettings(input: Partial<SettingsRecord>): Promise<SettingsRecord> {
-  const current = await getSettings();
+export function updateSettings(input: Partial<SettingsRecord>): SettingsRecord {
+  const current = getSettings();
   const next: SettingsRecord = {
     ...current,
     ...input,
     id: 'global',
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
 
-  await dbRun(
-    `
+  estimatorDb.prepare(`
     UPDATE settings_v1 SET
       company_name = ?, company_address = ?, company_phone = ?, company_email = ?, logo_url = ?, default_labor_rate_per_hour = ?,
       default_overhead_percent = ?, default_profit_percent = ?, default_tax_percent = ?, default_labor_burden_percent = ?,
       proposal_intro = ?, proposal_terms = ?, proposal_exclusions = ?, proposal_clarifications = ?, proposal_acceptance_label = ?, updated_at = ?
     WHERE id = 'global'
-  `,
-    [
-      next.companyName,
-      next.companyAddress,
-      next.companyPhone,
-      next.companyEmail,
-      next.logoUrl,
-      next.defaultLaborRatePerHour,
-      next.defaultOverheadPercent,
-      next.defaultProfitPercent,
-      next.defaultTaxPercent,
-      next.defaultLaborBurdenPercent,
-      next.proposalIntro,
-      next.proposalTerms,
-      next.proposalExclusions,
-      next.proposalClarifications,
-      next.proposalAcceptanceLabel,
-      next.updatedAt,
-    ]
+  `).run(
+    next.companyName,
+    next.companyAddress,
+    next.companyPhone,
+    next.companyEmail,
+    next.logoUrl,
+    next.defaultLaborRatePerHour,
+    next.defaultOverheadPercent,
+    next.defaultProfitPercent,
+    next.defaultTaxPercent,
+    next.defaultLaborBurdenPercent,
+    next.proposalIntro,
+    next.proposalTerms,
+    next.proposalExclusions,
+    next.proposalClarifications,
+    next.proposalAcceptanceLabel,
+    next.updatedAt
   );
 
   return next;
 }
 
-export async function getCatalogSyncStatus(): Promise<CatalogSyncStatusRecord> {
-  const row = (await dbGet('SELECT * FROM catalog_sync_status_v1 WHERE id = ?', ['catalog'])) as any;
+export function getCatalogSyncStatus(): CatalogSyncStatusRecord {
+  const row = estimatorDb.prepare('SELECT * FROM catalog_sync_status_v1 WHERE id = ?').get('catalog') as any;
 
   return {
     id: row.id,
@@ -86,28 +83,23 @@ export async function getCatalogSyncStatus(): Promise<CatalogSyncStatusRecord> {
   };
 }
 
-export async function listCatalogSyncRuns(limit = 10): Promise<
-  Array<{
-    id: string;
-    attemptedAt: string;
-    status: 'success' | 'failed';
-    message: string | null;
-    itemsSynced: number;
-    modifiersSynced: number;
-    bundlesSynced: number;
-    bundleItemsSynced: number;
-    warnings: string[];
-  }>
-> {
-  const rows = (await dbAll(
-    `
+export function listCatalogSyncRuns(limit = 10): Array<{
+  id: string;
+  attemptedAt: string;
+  status: 'success' | 'failed';
+  message: string | null;
+  itemsSynced: number;
+  modifiersSynced: number;
+  bundlesSynced: number;
+  bundleItemsSynced: number;
+  warnings: string[];
+}> {
+  const rows = estimatorDb.prepare(`
     SELECT *
     FROM catalog_sync_runs_v1
     ORDER BY attempted_at DESC
     LIMIT ?
-  `,
-    [limit]
-  )) as any[];
+  `).all(limit) as any[];
 
   return rows.map((row) => ({
     id: row.id,

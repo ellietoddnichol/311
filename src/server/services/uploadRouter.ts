@@ -1,5 +1,4 @@
 import { listActiveCatalogItems } from '../repos/catalogRepo.ts';
-import type { CatalogItem } from '../../types.ts';
 import type {
   IntakeParseRequest,
   IntakeParseResult,
@@ -156,11 +155,11 @@ function toLegacyIntakeResult(input: {
   request: IntakeParseRequest;
   upload: UploadParseResult;
   extractedMetadata: Partial<IntakeProjectMetadata>;
-  catalog: CatalogItem[];
 }): IntakeParseResult {
+  const catalog = listActiveCatalogItems();
   const items = input.upload.validation.correctedItems || input.upload.extractedItems;
   const metadata = buildMetadata({ extractedMetadata: input.extractedMetadata, items, fileName: input.request.fileName });
-  const reviewLines = toReviewLines(toLegacyNormalizedLines(items), input.catalog, input.request.matchCatalog !== false);
+  const reviewLines = toReviewLines(toLegacyNormalizedLines(items), catalog, input.request.matchCatalog !== false);
   const warnings = Array.from(new Set([...input.upload.parseWarnings, ...input.upload.validation.warnings]));
   const sourceKind = deriveSourceKind(input.upload.fileType, items);
   const proposalAssist = buildProposalAssist({
@@ -204,7 +203,7 @@ async function parseWithHybridUploadRouter(input: IntakeParseRequest): Promise<{
 
   if ((fileType === 'excel' || fileType === 'csv') && input.dataBase64) {
     const excel = parseExcelUpload({ fileName: input.fileName, mimeType: input.mimeType, dataBase64: input.dataBase64 });
-    const catalog = await listActiveCatalogItems();
+    const catalog = listActiveCatalogItems();
     const items = enrichItemsWithCatalogMatches(
       normalizeSpreadsheetRows({ fileType: excel.fileType, fileName: input.fileName, rows: excel.extractedRows, metadata: excel.metadata }),
       catalog
@@ -280,6 +279,5 @@ export async function parseUploadedWithRouter(input: IntakeParseRequest): Promis
   if (upload.fileType === 'unknown' || (upload.extractedItems.length === 0 && explicitType === 'document')) {
     return parseIntakeRequest(input);
   }
-  const catalog = await listActiveCatalogItems();
-  return toLegacyIntakeResult({ request: input, upload, extractedMetadata: metadata, catalog });
+  return toLegacyIntakeResult({ request: input, upload, extractedMetadata: metadata });
 }

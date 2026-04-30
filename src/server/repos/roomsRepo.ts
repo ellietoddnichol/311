@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { dbAll, dbGet, dbRun } from '../db/query.ts';
+import { estimatorDb } from '../db/connection.ts';
 import { RoomRecord } from '../../shared/types/estimator.ts';
 
 function mapRoomRow(row: any): RoomRecord {
@@ -10,26 +10,23 @@ function mapRoomRow(row: any): RoomRecord {
     sortOrder: row.sort_order,
     notes: row.notes,
     createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    updatedAt: row.updated_at
   };
 }
 
-export async function listRooms(projectId: string): Promise<RoomRecord[]> {
-  const rows = await dbAll('SELECT * FROM rooms_v1 WHERE project_id = ? ORDER BY sort_order, created_at', [projectId]);
+export function listRooms(projectId: string): RoomRecord[] {
+  const rows = estimatorDb.prepare('SELECT * FROM rooms_v1 WHERE project_id = ? ORDER BY sort_order, created_at').all(projectId);
   return rows.map(mapRoomRow);
 }
 
-export async function getRoom(roomId: string): Promise<RoomRecord | null> {
-  const row = await dbGet('SELECT * FROM rooms_v1 WHERE id = ?', [roomId]);
+export function getRoom(roomId: string): RoomRecord | null {
+  const row = estimatorDb.prepare('SELECT * FROM rooms_v1 WHERE id = ?').get(roomId);
   return row ? mapRoomRow(row) : null;
 }
 
-export async function createRoom(input: Partial<RoomRecord> & { projectId: string; roomName: string }): Promise<RoomRecord> {
+export function createRoom(input: Partial<RoomRecord> & { projectId: string; roomName: string }): RoomRecord {
   const now = new Date().toISOString();
-  const nextSort = (await dbGet(
-    'SELECT COALESCE(MAX(sort_order), -1) + 1 AS nextSort FROM rooms_v1 WHERE project_id = ?',
-    [input.projectId]
-  )) as { nextSort: number };
+  const nextSort = estimatorDb.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS nextSort FROM rooms_v1 WHERE project_id = ?').get(input.projectId) as { nextSort: number };
 
   const room: RoomRecord = {
     id: input.id ?? randomUUID(),
@@ -38,54 +35,47 @@ export async function createRoom(input: Partial<RoomRecord> & { projectId: strin
     sortOrder: input.sortOrder ?? nextSort.nextSort,
     notes: input.notes ?? null,
     createdAt: now,
-    updatedAt: now,
+    updatedAt: now
   };
 
-  await dbRun(
-    `
+  estimatorDb.prepare(`
     INSERT INTO rooms_v1 (id, project_id, room_name, sort_order, notes, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `,
-    [room.id, room.projectId, room.roomName, room.sortOrder, room.notes, room.createdAt, room.updatedAt]
-  );
+  `).run(room.id, room.projectId, room.roomName, room.sortOrder, room.notes, room.createdAt, room.updatedAt);
 
   return room;
 }
 
-export async function updateRoom(roomId: string, input: Partial<RoomRecord>): Promise<RoomRecord | null> {
-  const existing = await getRoom(roomId);
+export function updateRoom(roomId: string, input: Partial<RoomRecord>): RoomRecord | null {
+  const existing = getRoom(roomId);
   if (!existing) return null;
 
   const next: RoomRecord = {
     ...existing,
     ...input,
     id: roomId,
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
 
-  await dbRun('UPDATE rooms_v1 SET room_name = ?, sort_order = ?, notes = ?, updated_at = ? WHERE id = ?', [
-    next.roomName,
-    next.sortOrder,
-    next.notes,
-    next.updatedAt,
-    roomId,
-  ]);
+  estimatorDb.prepare(`
+    UPDATE rooms_v1 SET room_name = ?, sort_order = ?, notes = ?, updated_at = ? WHERE id = ?
+  `).run(next.roomName, next.sortOrder, next.notes, next.updatedAt, roomId);
 
   return next;
 }
 
-export async function deleteRoom(roomId: string): Promise<boolean> {
-  const result = await dbRun('DELETE FROM rooms_v1 WHERE id = ?', [roomId]);
+export function deleteRoom(roomId: string): boolean {
+  const result = estimatorDb.prepare('DELETE FROM rooms_v1 WHERE id = ?').run(roomId);
   return result.changes > 0;
 }
 
-export async function duplicateRoom(roomId: string): Promise<RoomRecord | null> {
-  const source = await getRoom(roomId);
+export function duplicateRoom(roomId: string): RoomRecord | null {
+  const source = getRoom(roomId);
   if (!source) return null;
 
   return createRoom({
     projectId: source.projectId,
     roomName: `${source.roomName} Copy`,
-    notes: source.notes,
+    notes: source.notes
   });
 }

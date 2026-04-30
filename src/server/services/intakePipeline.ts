@@ -960,7 +960,7 @@ export async function parseIntakeRequest(input: IntakeParseRequest): Promise<Int
   const mimeType = asText(input.mimeType) || 'application/octet-stream';
   const sourceType = classifyIntakeSourceType(fileName, mimeType, input.sourceType);
   const matchCatalog = input.matchCatalog !== false;
-  const catalog = matchCatalog ? await listActiveCatalogItems() : [];
+  const catalog = matchCatalog ? listActiveCatalogItems() : [];
   const warnings: string[] = [];
 
   if (sourceType === 'spreadsheet') {
